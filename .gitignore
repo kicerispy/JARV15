@@ -14,3 +14,15 @@ jarvis_youtube_verify_context.png
 jarvis_youtube_thumbnail.png
 *.before_*.py
 patch_*.py
+jarvis_memory.db
+profile.json
+conversation_history.json
+input.wav
+jarvis_screen.png
+jarvis_vision_crop.png
+test.png
+dist/
+build/
+voice_model/
+Jarvis.zip
+*.spec
