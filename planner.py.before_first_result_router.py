@@ -1,4 +1,4 @@
-﻿"""
+"""
 JARVIS task planner - converts user requests into tool calls.
 """
 import json
@@ -57,7 +57,7 @@ def _planner_prompt() -> str:
         for name, desc in AVAILABLE_TOOLS.items()
     )
     return f"""
-You are JARVIS's task planner â€” an expert software engineer and systems architect.
+You are JARVIS's task planner — an expert software engineer and systems architect.
 
 Your job: convert a user request into a list of tool calls.
 
@@ -151,7 +151,7 @@ Output:
 
 IMPORTANT: When the user asks you to CREATE, WRITE, or BUILD something (code, scripts, games, documents), you MUST generate the complete, working content yourself and use the write_file tool. Do NOT say you can't do it - just generate the code and write it.
 
-CRITICAL: Requests to tell a story, joke, or share creative content are CONVERSATIONAL â€” return an empty steps list. JARVIS generates creative content directly, it does not search the web for stories. Examples that should return empty steps:
+CRITICAL: Requests to tell a story, joke, or share creative content are CONVERSATIONAL — return an empty steps list. JARVIS generates creative content directly, it does not search the web for stories. Examples that should return empty steps:
 - "Tell me a story about X"
 - "Write a joke"
 - "Create a poem"
@@ -246,171 +246,6 @@ def create_plan(
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
 
-    # ========================================================
-    # DETERMINISTIC FIRST-RESULT ROUTER
-    # ========================================================
-    #
-    # When a previous search established a website and query,
-    # commands such as:
-    #
-    #   Click the first result
-    #
-    # should NOT be left to the language model.
-    #
-    # Google:
-    #   click the first organic Google result for QUERY
-    #
-    # YouTube:
-    #   click the first organic YouTube result for QUERY
-    #
-    # This creates a normal planner result so the rest of the
-    # existing execution pipeline remains unchanged.
-    # ========================================================
-
-    normalized_command = (
-        user_command
-        .strip()
-        .lower()
-        .rstrip(".,!?")
-    )
-
-    normalized_command = " ".join(
-        normalized_command.split()
-    )
-
-    first_result_phrases = {
-        "click the first result",
-        "click first result",
-        "click on the first result",
-        "click on first result",
-
-        "open the first result",
-        "open first result",
-
-        "play the first result",
-        "play first result",
-
-        "click the first video",
-        "click first video",
-        "click on the first video",
-        "click on first video",
-
-        "open the first video",
-        "open first video",
-
-        "play the first video",
-        "play first video",
-
-        "click the first link",
-        "click first link",
-        "click on the first link",
-        "click on first link",
-
-        "open the first link",
-        "open first link",
-
-        "click the first one",
-        "click first one",
-        "click on the first one",
-        "click on first one",
-
-        "open the first one",
-        "open first one",
-    }
-
-    if (
-        normalized_command in first_result_phrases
-        and active_context
-    ):
-        active_site = str(
-            active_context.get("site", "") or ""
-        ).strip().lower()
-
-        active_query = str(
-            active_context.get("last_query", "") or ""
-        ).strip()
-
-        if (
-            active_site in {
-                "google",
-                "youtube",
-            }
-            and active_query
-        ):
-            if active_site == "google":
-                resolved_command = (
-                    "click the first organic Google result for "
-                    + active_query
-                )
-
-                print(
-                    "JARVIS planner:"
-                )
-
-                print(
-                    f"  Original: {user_command}"
-                )
-
-                print(
-                    f"  Context site: Google"
-                )
-
-                print(
-                    f"  Context query: {active_query}"
-                )
-
-                print(
-                    f"  Resolved: {resolved_command}"
-                )
-
-                return {
-                    "goal": "click first Google result",
-                    "steps": [
-                        {
-                            "tool": "click_screen",
-                            "argument": resolved_command,
-                        }
-                    ],
-                    "resolved_command": resolved_command,
-                }
-
-            if active_site == "youtube":
-                resolved_command = (
-                    "click the first organic YouTube result for "
-                    + active_query
-                )
-
-                print(
-                    "JARVIS planner:"
-                )
-
-                print(
-                    f"  Original: {user_command}"
-                )
-
-                print(
-                    f"  Context site: YouTube"
-                )
-
-                print(
-                    f"  Context query: {active_query}"
-                )
-
-                print(
-                    f"  Resolved: {resolved_command}"
-                )
-
-                return {
-                    "goal": "click first YouTube result",
-                    "steps": [
-                        {
-                            "tool": "click_screen",
-                            "argument": resolved_command,
-                        }
-                    ],
-                    "resolved_command": resolved_command,
-                }
-
     context_str = ""
     if active_context:
         context_str = f"""
@@ -452,4 +287,3 @@ Last tool: {active_context.get('last_tool', 'none')}
         return {"goal": "", "steps": []}
 
     return validate_plan(data)
-

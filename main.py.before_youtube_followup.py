@@ -20,7 +20,6 @@ from commands import (
     is_shutdown_command,
     normalize_command,
     should_resolve_context,
-    wants_first_result,
 )
 from config import PROFILE_PATH
 from context_aware import JarvisContext
@@ -328,55 +327,6 @@ def process_command(
     logger.info(
         f"USER: {user_input}"
     )
-
-    # ========================================================
-    # CONTEXTUAL YOUTUBE FOLLOW-UP
-    # ========================================================
-    #
-    # When JARVIS is already working with a YouTube search,
-    # short follow-ups such as:
-    #
-    #   click the first result
-    #   open the first video
-    #   play the first result
-    #   click the first link
-    #   choose the top result
-    #
-    # should reuse the existing YouTube search query instead
-    # of being interpreted as a brand-new search for words such
-    # as "first result".
-    #
-    # We reuse the existing ActiveContext rather than creating
-    # another memory system.
-    # ========================================================
-
-    active_site = (
-        state.active_context.site or ""
-    ).strip().lower()
-
-    active_query = (
-        state.active_context.last_query or ""
-    ).strip()
-
-    if (
-        active_site == "youtube"
-        and
-        active_query
-        and
-        wants_first_result(user_input)
-    ):
-
-        original_followup = user_input
-
-        user_input = (
-            "click the first organic YouTube result for "
-            f"{active_query}"
-        )
-
-        logger.info(
-            "JARVIS: Resolved YouTube follow-up "
-            f"'{original_followup}' -> '{user_input}'"
-        )
 
     logger.info(
         "PERF: command processing started."

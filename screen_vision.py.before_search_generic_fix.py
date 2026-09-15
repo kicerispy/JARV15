@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import time
 import ctypes
@@ -481,6 +481,7 @@ def is_youtube_target(
     keywords = [
         "youtube",
         "first video",
+        "first result",
         "video result",
         "first youtube",
         "organic result",
@@ -6386,28 +6387,6 @@ def get_center(
         bottom - top
     )
 
-    # ------------------------------------------------------
-    # Google/search-result click point
-    # ------------------------------------------------------
-    # Search-result boxes often cover the entire result row.
-    # The title/link is normally near the upper portion of
-    # that row, so clicking the mathematical center can miss.
-    # Keep YouTube verified-thumbnail handling untouched;
-    # this helper is only being changed for generic clicks.
-    target_text = str(target or "").lower()
-
-    if (
-        "organic google result" in target_text
-        or "google result" in target_text
-        or "search result" in target_text
-    ):
-        x = left + int(width * 0.50)
-        y = top + max(
-            8,
-            int(height * 0.20)
-        )
-        return x, y
-
     x = (
         left
         +
@@ -6420,10 +6399,10 @@ def get_center(
         bottom
     ) // 2
 
-
-# ==========================================================
     return x, y
 
+
+# ==========================================================
 # Move Mouse To Target
 # ==========================================================
 

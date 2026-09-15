@@ -1282,28 +1282,8 @@ def deterministic_route(user_request):
         ).strip()
 
         if target:
-            # Generic first-result follow-ups go to planner.py
-            # so active Google/YouTube search context can resolve them.
-            _generic_first_result_targets = {
-                "first result",
-                "the first result",
-                "on the first result",
-                "first video",
-                "the first video",
-                "on the first video",
-                "first link",
-                "the first link",
-                "on the first link",
-                "first one",
-                "the first one",
-                "on the first one",
-            }
 
-            if target.lower().strip() in _generic_first_result_targets:
-                return None
-
-
-            return {
+                        return {
                 "steps": [
                     {
                         "tool": "click_screen",
@@ -1978,3 +1958,4 @@ def get_fast_command(user_request):
     except Exception as e:
         print(f"JARVIS: Fast command lookup error: {e}")
         return None
+

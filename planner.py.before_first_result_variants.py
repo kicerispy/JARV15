@@ -1,4 +1,4 @@
-﻿"""
+"""
 JARVIS task planner - converts user requests into tool calls.
 """
 import json
@@ -57,7 +57,7 @@ def _planner_prompt() -> str:
         for name, desc in AVAILABLE_TOOLS.items()
     )
     return f"""
-You are JARVIS's task planner â€” an expert software engineer and systems architect.
+You are JARVIS's task planner — an expert software engineer and systems architect.
 
 Your job: convert a user request into a list of tool calls.
 
@@ -151,7 +151,7 @@ Output:
 
 IMPORTANT: When the user asks you to CREATE, WRITE, or BUILD something (code, scripts, games, documents), you MUST generate the complete, working content yourself and use the write_file tool. Do NOT say you can't do it - just generate the code and write it.
 
-CRITICAL: Requests to tell a story, joke, or share creative content are CONVERSATIONAL â€” return an empty steps list. JARVIS generates creative content directly, it does not search the web for stories. Examples that should return empty steps:
+CRITICAL: Requests to tell a story, joke, or share creative content are CONVERSATIONAL — return an empty steps list. JARVIS generates creative content directly, it does not search the web for stories. Examples that should return empty steps:
 - "Tell me a story about X"
 - "Write a joke"
 - "Create a poem"
@@ -281,41 +281,16 @@ def create_plan(
     first_result_phrases = {
         "click the first result",
         "click first result",
-        "click on the first result",
-        "click on first result",
-
         "open the first result",
         "open first result",
-
         "play the first result",
         "play first result",
-
         "click the first video",
         "click first video",
-        "click on the first video",
-        "click on first video",
-
         "open the first video",
         "open first video",
-
         "play the first video",
         "play first video",
-
-        "click the first link",
-        "click first link",
-        "click on the first link",
-        "click on first link",
-
-        "open the first link",
-        "open first link",
-
-        "click the first one",
-        "click first one",
-        "click on the first one",
-        "click on first one",
-
-        "open the first one",
-        "open first one",
     }
 
     if (
@@ -452,4 +427,3 @@ Last tool: {active_context.get('last_tool', 'none')}
         return {"goal": "", "steps": []}
 
     return validate_plan(data)
-

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import time
 import ctypes
@@ -481,6 +481,7 @@ def is_youtube_target(
     keywords = [
         "youtube",
         "first video",
+        "first result",
         "video result",
         "first youtube",
         "organic result",
@@ -6386,28 +6387,6 @@ def get_center(
         bottom - top
     )
 
-    # ------------------------------------------------------
-    # Google/search-result click point
-    # ------------------------------------------------------
-    # Search-result boxes often cover the entire result row.
-    # The title/link is normally near the upper portion of
-    # that row, so clicking the mathematical center can miss.
-    # Keep YouTube verified-thumbnail handling untouched;
-    # this helper is only being changed for generic clicks.
-    target_text = str(target or "").lower()
-
-    if (
-        "organic google result" in target_text
-        or "google result" in target_text
-        or "search result" in target_text
-    ):
-        x = left + int(width * 0.50)
-        y = top + max(
-            8,
-            int(height * 0.20)
-        )
-        return x, y
-
     x = (
         left
         +
@@ -6420,10 +6399,10 @@ def get_center(
         bottom
     ) // 2
 
-
-# ==========================================================
     return x, y
 
+
+# ==========================================================
 # Move Mouse To Target
 # ==========================================================
 
@@ -6804,194 +6783,6 @@ def click_screen_target(
                 "message":
                     f"Could not focus address bar: {e}"
             }
-
-    # --------------------------------------------------------
-    # Search bar / search field:
-    #
-    # If the previous command focused the browser omnibox
-    # with Ctrl+L, Escape first so the webpage regains focus
-    # before the vision model searches for the page's search
-    # field.
-    # --------------------------------------------------------
-
-    search_bar_terms = [
-        "search bar",
-        "search box",
-        "search field",
-        "search input",
-        "site search"
-    ]
-
-    if any(
-        term in target_text
-        for term in search_bar_terms
-    ):
-        try:
-            logging.info(
-                "Returning webpage focus before visual search-bar lookup"
-            )
-
-            pyautogui.press(
-                "esc"
-            )
-
-            time.sleep(
-                0.15
-            )
-
-        except Exception as e:
-            logging.warning(
-                f"Could not clear browser focus before search lookup: {e}"
-            )
-
-    # --------------------------------------------------------
-    # YouTube search bar.
-    #
-    # YouTube supports '/' as the keyboard shortcut to focus
-    # the search box. This is more reliable than vision for
-    # this fixed browser control.
-    # --------------------------------------------------------
-
-    youtube_search_terms = [
-        "youtube search bar",
-        "youtube search box",
-        "youtube search field"
-    ]
-
-    if any(
-        term in target_text
-        for term in youtube_search_terms
-    ):
-        try:
-            logging.info(
-                "Focusing YouTube search bar with Escape + /"
-            )
-
-            pyautogui.press(
-                "esc"
-            )
-
-            time.sleep(
-                0.10
-            )
-
-            pyautogui.press(
-                "/"
-            )
-
-            return {
-                "found":
-                    True,
-
-                "confidence":
-                    1.0,
-
-                "success":
-                    True,
-
-                "description":
-                    "YouTube search bar"
-            }
-
-        except Exception as e:
-            logging.error(
-                f"YouTube search shortcut failed: {e}"
-            )
-
-            return {
-                "found":
-                    False,
-
-                "success":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "message":
-                    f"Could not focus YouTube search bar: {e}"
-            }
-
-    # --------------------------------------------------------
-    # YouTube search control deterministic routing
-    #
-    # Commands such as:
-    #   Click the search bar
-    #   Click this search bar
-    #   Click the search box
-    #
-    # cannot reliably distinguish the page search box from
-    # other search-like UI using the small local vision model.
-    #
-    # When Chrome is on YouTube, '/' focuses YouTube's search
-    # control directly. Use that before generic vision.
-    # --------------------------------------------------------
-
-    youtube_search_generic_terms = [
-        "search bar",
-        "search box",
-        "search field",
-        "search input"
-    ]
-
-    if any(
-        term in target_text
-        for term in youtube_search_generic_terms
-    ):
-        try:
-            # Inspect the current page through the URL/title if
-            # available from the active browser window.
-            import pygetwindow as gw
-
-            active_window = gw.getActiveWindow()
-
-            window_title = ""
-
-            if active_window is not None:
-                window_title = str(
-                    active_window.title or ""
-                ).lower()
-
-            is_youtube_window = (
-                "youtube" in window_title
-                or "youtube.com" in window_title
-            )
-
-            if is_youtube_window:
-                logging.info(
-                    "YouTube search control deterministic routing"
-                )
-
-                pyautogui.press(
-                    "esc"
-                )
-
-                time.sleep(
-                    0.10
-                )
-
-                pyautogui.press(
-                    "/"
-                )
-
-                return {
-                    "found":
-                        True,
-
-                    "confidence":
-                        1.0,
-
-                    "success":
-                        True,
-
-                    "description":
-                        "YouTube search bar"
-                }
-
-        except Exception as e:
-            logging.warning(
-                f"YouTube search shortcut routing failed: {e}"
-            )
 
     result = find_screen_target(
         target

@@ -1,4 +1,4 @@
-﻿from ollama import chat
+from ollama import chat
 import json
 import re
 
@@ -250,103 +250,35 @@ def looks_like_conversation(text):
 
 def extract_search_query(text, site):
 
-    cleaned = str(
-        text or ""
-    ).strip()
-
-    site_name = str(
-        site or ""
-    ).strip()
-
-    if not cleaned or not site_name:
-        return None
-
-    # ------------------------------------------------------
-    # Remove common conversational prefixes that Whisper
-    # may preserve in natural speech.
-    # ------------------------------------------------------
-
-    cleaned = re.sub(
-        r"^(?:please|can\s+you|could\s+you|would\s+you|"
-        r"hey|hey\s+jarvis|jarvis|heed)\s+",
-        "",
-        cleaned,
-        flags=re.IGNORECASE
-    ).strip()
-
-    # ------------------------------------------------------
-    # Search phrase variations.
-    #
-    # Examples:
-    #
-    # search YouTube for Wi-Fi skeleton
-    # search YouTube Wi-Fi skeleton
-    # search for Wi-Fi skeleton on YouTube
-    # search Wi-Fi skeleton on YouTube
-    # search on YouTube for Wi-Fi skeleton
-    # look up Wi-Fi skeleton on YouTube
-    # find Wi-Fi skeleton on YouTube
-    # find Wi-Fi skeleton in YouTube
-    # ------------------------------------------------------
+    cleaned = text.strip()
 
     patterns = [
 
-        # search YouTube for X
-        rf"\bsearch\s+{re.escape(site_name)}\s+for\s+(.+)",
+        # "search YouTube for Iron Man"
+        rf"\bsearch\s+{site}\s+for\s+(.+)",
 
-        # search YouTube X
-        rf"\bsearch\s+{re.escape(site_name)}\s+(.+)",
+        # "search YouTube Iron Man"
+        rf"\bsearch\s+{site}\s+(.+)",
 
-        # searching YouTube for X
-        rf"\bsearching\s+{re.escape(site_name)}\s+for\s+(.+)",
+        # "searching YouTube for Iron Man"
+        rf"\bsearching\s+{site}\s+for\s+(.+)",
 
-        # searching YouTube X
-        rf"\bsearching\s+{re.escape(site_name)}\s+(.+)",
+        # "searching YouTube Iron Man"
+        rf"\bsearching\s+{site}\s+(.+)",
 
-        # search on YouTube for X
-        rf"\bsearch\s+on\s+{re.escape(site_name)}\s+for\s+(.+)",
+        # "search on YouTube for Iron Man"
+        rf"\bsearch\s+on\s+{site}\s+for\s+(.+)",
 
-        # searching on YouTube for X
-        rf"\bsearching\s+on\s+{re.escape(site_name)}\s+for\s+(.+)",
+        # "searching on YouTube for Iron Man"
+        rf"\bsearching\s+on\s+{site}\s+for\s+(.+)",
 
-        # search for X on YouTube
-        rf"\bsearch\s+for\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
+        # "find Iron Man on YouTube"
+        rf"\bfind\s+(.+?)\s+on\s+{site}",
 
-        # searching for X on YouTube
-        rf"\bsearching\s+for\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # search X on YouTube
-        rf"\bsearch\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # look up X on YouTube
-        rf"\blook\s+up\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # lookup X on YouTube
-        rf"\blookup\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # find X on YouTube
-        rf"\bfind\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # find X in YouTube
-        rf"\bfind\s+(.+?)\s+in\s+{re.escape(site_name)}\b",
-
-        # look for X on YouTube
-        rf"\blook\s+for\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # locate X on YouTube
-        rf"\blocate\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # go to YouTube and search for X
-        rf"\bgo\s+to\s+{re.escape(site_name)}\s+and\s+search\s+for\s+(.+)",
-
-        # on YouTube search for X
-        rf"\bon\s+{re.escape(site_name)}\s+search\s+for\s+(.+)",
-
-        # search X using YouTube
-        rf"\bsearch\s+(.+?)\s+(?:using|via)\s+{re.escape(site_name)}\b",
+        # "find Iron Man in YouTube"
+        rf"\bfind\s+(.+?)\s+in\s+{site}",
     ]
 
-    query = None
 
     for pattern in patterns:
 
@@ -361,78 +293,26 @@ def extract_search_query(text, site):
             query = (
                 match.group(1)
                 .strip()
+                .rstrip("?.!")
             )
 
-            break
+            if query:
 
-    if not query:
-        return None
+                query = re.sub(
+                    r"^(?:please|can you|could you)\s+",
+                    "",
+                    query,
+                    flags=re.IGNORECASE
+                ).strip()
 
-    # ------------------------------------------------------
-    # Remove trailing command language that belongs to the
-    # click/open/play instruction rather than the search.
-    # ------------------------------------------------------
+                return query
 
-    trailing_action_patterns = [
+    return None
 
-        r"\s+(?:and|then|,\s*)+\s+"
-        r"(?:click|open|play|select)\s+"
-        r"(?:on\s+)?(?:the\s+)?"
-        r"(?:first|top|number\s+one|#?1)\b.*$",
 
-        r"\s+(?:and|then)\s+"
-        r"(?:click|open|play|select)\s+"
-        r"(?:the\s+)?(?:first|top)\s+"
-        r"(?:result|video|link|one)\b.*$",
-
-        r"\s+(?:and|then)\s+"
-        r"(?:click|open|play)\s+"
-        r"(?:it|that|one)\b.*$",
-    ]
-
-    for pattern in trailing_action_patterns:
-
-        query = re.sub(
-            pattern,
-            "",
-            query,
-            flags=re.IGNORECASE
-        ).strip()
-
-    # ------------------------------------------------------
-    # Remove a dangling conjunction left by Whisper.
-    #
-    # Example:
-    # "search YouTube for Wi-Fi skeleton and"
-    # ------------------------------------------------------
-
-    query = re.sub(
-        r"\s+(?:and|then)\s*$",
-        "",
-        query,
-        flags=re.IGNORECASE
-    ).strip()
-
-    # ------------------------------------------------------
-    # Remove conversational filler from the beginning.
-    # ------------------------------------------------------
-
-    query = re.sub(
-        r"^(?:please|can\s+you|could\s+you|would\s+you)\s+",
-        "",
-        query,
-        flags=re.IGNORECASE
-    ).strip()
-
-    query = (
-        query
-        .strip()
-        .rstrip("?.!,")
-        .strip()
-    )
-
-    return query or None
-
+# ==================================================
+# Detect "open first result/video"
+# ==================================================
 
 def wants_first_result(text):
 
@@ -442,48 +322,25 @@ def wants_first_result(text):
 
     patterns = [
 
-        # Open/click/play first result
         r"\bopen\s+(?:the\s+)?first\s+result\b",
-        r"\bopen\s+(?:the\s+)?first\s+video\b",
-        r"\bopen\s+(?:the\s+)?first\s+link\b",
-        r"\bopen\s+(?:the\s+)?first\s+one\b",
 
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+result\b",
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+video\b",
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+link\b",
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+one\b",
+        r"\bopen\s+(?:the\s+)?first\s+video\b",
+
+        r"\bclick\s+(?:the\s+)?first\s+result\b",
+
+        r"\bclick\s+(?:the\s+)?first\s+video\b",
 
         r"\bplay\s+(?:the\s+)?first\s+result\b",
+
         r"\bplay\s+(?:the\s+)?first\s+video\b",
-        r"\bplay\s+(?:the\s+)?first\s+link\b",
-        r"\bplay\s+(?:the\s+)?first\s+one\b",
 
-        # Top result / top video / top link
-        r"\bopen\s+(?:the\s+)?top\s+result\b",
-        r"\bopen\s+(?:the\s+)?top\s+video\b",
-        r"\bopen\s+(?:the\s+)?top\s+link\b",
+        r"\bopen\s+result\s+number\s+one\b",
 
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?top\s+result\b",
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?top\s+video\b",
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?top\s+link\b",
+        r"\bclick\s+result\s+number\s+one\b",
 
-        r"\bplay\s+(?:the\s+)?top\s+result\b",
-        r"\bplay\s+(?:the\s+)?top\s+video\b",
+        r"\bopen\s+number\s+one\b",
 
-        # Number one
-        r"\bopen\s+(?:result|video|link)\s+number\s+one\b",
-        r"\bclick\s+(?:on\s+)?(?:result|video|link)\s+number\s+one\b",
-        r"\bplay\s+(?:result|video|link)\s+number\s+one\b",
-
-        # First item / first one
-        r"\bopen\s+(?:the\s+)?first\s+(?:item|one)\b",
-        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+(?:item|one)\b",
-        r"\bplay\s+(?:the\s+)?first\s+(?:item|one)\b",
-
-        # Natural spoken variants
-        r"\bgo\s+with\s+(?:the\s+)?first\s+(?:result|video|link|one)\b",
-        r"\bselect\s+(?:the\s+)?first\s+(?:result|video|link|one)\b",
-        r"\bchoose\s+(?:the\s+)?first\s+(?:result|video|link|one)\b",
+        r"\bclick\s+number\s+one\b",
     ]
 
     return any(
@@ -494,6 +351,10 @@ def wants_first_result(text):
         for pattern in patterns
     )
 
+
+# ==================================================
+# Split combined search + first-result request
+# ==================================================
 
 def split_search_and_first_result(
     user_request,
@@ -873,72 +734,6 @@ def deterministic_route(user_request):
 
 
     # ==================================================
-    # GENERIC GOOGLE SEARCH ROUTE
-    # ==================================================
-    #
-    # Examples:
-    #
-    #   search for Wi-Fi skeleton
-    #   search for Python tutorials
-    #   find information about quantum computing
-    #   look up Tesla
-    #
-    # When no specific site is named, route the request to
-    # Google through the deterministic search_website tool.
-    #
-    # Specific site handlers above this block remain higher
-    # priority, so:
-    #
-    #   search YouTube for X
-    #
-    # still uses the YouTube route.
-    # ==================================================
-
-    generic_search_match = re.match(
-        r"^(?:please\s+)?(?:search\s+for|search|find|look\s+up|lookup)\s+(.+?)\s*[?.!]*$",
-        user_request.strip(),
-        re.IGNORECASE
-    )
-
-    if generic_search_match:
-        query = (
-            generic_search_match.group(1)
-            .strip()
-            .rstrip("?.!")
-        )
-
-        # Do not steal explicitly targeted website searches.
-        explicit_site_words = (
-            "youtube",
-            "google",
-            "amazon",
-            "reddit"
-        )
-
-        query_lower = query.lower()
-
-        if (
-            query
-            and not any(
-                site_word in query_lower
-                for site_word in explicit_site_words
-            )
-        ):
-            print(
-                f"JARVIS: Generic Google search detected: {query}"
-            )
-
-            return {
-                "steps": [
-                    {
-                        "tool": "search_website",
-                        "argument": f"google|{query}"
-                    }
-                ]
-            }
-
-
-    # ==================================================
     # Weather
     # ==================================================
 
@@ -1282,26 +1077,6 @@ def deterministic_route(user_request):
         ).strip()
 
         if target:
-            # Generic first-result follow-ups go to planner.py
-            # so active Google/YouTube search context can resolve them.
-            _generic_first_result_targets = {
-                "first result",
-                "the first result",
-                "on the first result",
-                "first video",
-                "the first video",
-                "on the first video",
-                "first link",
-                "the first link",
-                "on the first link",
-                "first one",
-                "the first one",
-                "on the first one",
-            }
-
-            if target.lower().strip() in _generic_first_result_targets:
-                return None
-
 
             return {
                 "steps": [

@@ -1,61 +1,10 @@
-﻿# Python
+﻿jarvis_cuda/
 __pycache__/
-*.py[cod]
-*.pyo
-
-# Virtual environments
-jarvis_cuda/
+*.pyc
+input.wav
+*.wav
+*.mp3
+*.log
+.pytest_cache/
 .venv/
 venv/
-env/
-
-# Build/package output
-build/
-dist/
-*.egg-info/
-
-# IDE / development tools
-.kilo/
-.vscode/
-.idea/
-
-# Runtime/generated files
-input.wav
-jarvis_history.json
-conversation_history.json
-jarvis_memory.db
-jarvis_screen.png
-jarvis_vision_crop.png
-jarvis_youtube_candidate.png
-jarvis_youtube_verify_context.png
-
-# Voice/model files
-voice_model/
-
-# Wake-word training/model artifacts
-Jarvis/model.pt
-Jarvis/models/
-Jarvis/negative/
-Jarvis/positive/
-Jarvis/test_takes/
-
-# Keep lightweight wake-word configuration/export metadata
-# Jarvis/config.json
-# Jarvis/model.json
-# Jarvis/export/*.json
-# Jarvis/export/*.md
-
-# Temporary archives
-Jarvis.zip
-
-# Temporary backups
-screen_vision_before_*.py
-main.py.backup_*
-screen_vision_backup.txt
-
-# Git
-.git/
-
-# OS
-Thumbs.db
-Desktop.ini

@@ -1,4 +1,4 @@
-"""
+﻿"""
 JARVIS - Main entry point.
 
 Includes lightweight performance timing so we can identify
@@ -20,7 +20,6 @@ from commands import (
     is_shutdown_command,
     normalize_command,
     should_resolve_context,
-    wants_first_result,
 )
 from config import PROFILE_PATH
 from context_aware import JarvisContext
@@ -170,7 +169,7 @@ def build_system_prompt(
     if not tone_parts:
 
         tone_parts.append(
-            "You are JARVIS — composed, efficient, and precise."
+            "You are JARVIS â€” composed, efficient, and precise."
         )
 
     tone_note = " ".join(
@@ -328,55 +327,6 @@ def process_command(
     logger.info(
         f"USER: {user_input}"
     )
-
-    # ========================================================
-    # CONTEXTUAL YOUTUBE FOLLOW-UP
-    # ========================================================
-    #
-    # When JARVIS is already working with a YouTube search,
-    # short follow-ups such as:
-    #
-    #   click the first result
-    #   open the first video
-    #   play the first result
-    #   click the first link
-    #   choose the top result
-    #
-    # should reuse the existing YouTube search query instead
-    # of being interpreted as a brand-new search for words such
-    # as "first result".
-    #
-    # We reuse the existing ActiveContext rather than creating
-    # another memory system.
-    # ========================================================
-
-    active_site = (
-        state.active_context.site or ""
-    ).strip().lower()
-
-    active_query = (
-        state.active_context.last_query or ""
-    ).strip()
-
-    if (
-        active_site == "youtube"
-        and
-        active_query
-        and
-        wants_first_result(user_input)
-    ):
-
-        original_followup = user_input
-
-        user_input = (
-            "click the first organic YouTube result for "
-            f"{active_query}"
-        )
-
-        logger.info(
-            "JARVIS: Resolved YouTube follow-up "
-            f"'{original_followup}' -> '{user_input}'"
-        )
 
     logger.info(
         "PERF: command processing started."
@@ -651,15 +601,18 @@ def process_command(
     )
 
     if fast_command:
+        # New deterministic router returns a plan dictionary:
+        # {
+        #     "steps": [
+        #         {"tool": "...", "argument": "..."},
+        #         ...
+        #     ]
+        # }
+        #
+        # Keep compatibility with the older single-tool
+        # (tool_name, argument) tuple format as well.
 
-        # ==================================================
-        # MULTI-STEP FAST COMMAND
-        # ==================================================
-
-        if isinstance(
-            fast_command,
-            dict
-        ):
+        if isinstance(fast_command, dict):
 
             fast_steps = fast_command.get(
                 "steps",
@@ -672,65 +625,99 @@ def process_command(
                     "JARVIS: Fast multi-step command detected."
                 )
 
-                # The deterministic router has already done
-                # the planning. Pass the complete plan to the
-                # normal executor as ONE task.
-                #
-                # This allows execute_plan() to recognize that
-                # the task is multi-step and avoid speaking
-                # every intermediate tool result.
+                final_result = ""
 
-                fast_plan = {
-                    "goal": user_input,
-                    "resolved_command": user_input,
-                    "steps": fast_steps,
-                }
+                for index, step in enumerate(
+                    fast_steps,
+                    start=1
+                ):
 
-                execution_start = perf_now()
+                    if not isinstance(
+                        step,
+                        dict
+                    ):
+                        continue
 
-                result = execute_plan(
-                    fast_plan,
-                    state.active_context,
-                    state.task_state,
-                    speak_callback,
-                )
+                    tool_name = step.get(
+                        "tool",
+                        ""
+                    )
 
-                logger.info(
-                    f"PERF: fast multi-step execution: "
-                    f"{perf_now() - execution_start:.3f}s"
-                )
+                    argument = step.get(
+                        "argument",
+                        ""
+                    )
+
+                    if (
+                        not tool_name
+                        or tool_name == "none"
+                    ):
+                        continue
+
+                    logger.info(
+                        f"JARVIS: Fast step "
+                        f"{index}/{len(fast_steps)}: "
+                        f"{tool_name}"
+                        + (
+                            f" ({argument})"
+                            if argument
+                            else ""
+                        )
+                    )
+
+                    final_result = execute_fast_command(
+                        tool_name,
+                        argument,
+                        user_input,
+                        state,
+                        speak_callback,
+                    )
+
+                    # Stop the deterministic plan if a step
+                    # clearly reports failure or cancellation.
+                    if isinstance(
+                        final_result,
+                        str
+                    ):
+
+                        lowered_result = (
+                            final_result.lower()
+                        )
+
+                        if (
+                            "failed" in lowered_result
+                            or "error" in lowered_result
+                            or "cancel" in lowered_result
+                        ):
+
+                            logger.info(
+                                "JARVIS: Fast command stopped "
+                                "after unsuccessful step."
+                            )
+
+                            break
 
                 logger.info(
                     f"PERF: total command processing: "
                     f"{perf_now() - command_start:.3f}s"
                 )
 
-                return result
-
-            logger.warning(
-                "JARVIS: Fast command returned an empty plan."
-            )
+                return final_result
 
             logger.info(
-                f"PERF: total command processing: "
-                f"{perf_now() - command_start:.3f}s"
+                "JARVIS: Fast command returned an empty plan."
             )
-
-            return "done"
-
-        # ==================================================
-        # OLD SINGLE-STEP FAST COMMAND FORMAT
-        # ==================================================
 
         elif (
             isinstance(
                 fast_command,
                 tuple
             )
-            and len(
-                fast_command
-            ) == 2
+            and len(fast_command) == 2
         ):
+
+            # Backward compatibility with the old
+            # (tool_name, argument) format.
 
             tool_name, argument = fast_command
 
@@ -759,21 +746,12 @@ def process_command(
 
             return result
 
-        # ==================================================
-        # UNKNOWN FAST COMMAND FORMAT
-        # ==================================================
-
-        logger.warning(
-            "JARVIS: Fast command returned "
-            "an unsupported format."
-        )
-
         logger.info(
             f"PERF: total command processing: "
             f"{perf_now() - command_start:.3f}s"
         )
 
-        return "done"
+        return result
 
     # ==================================================
     # MEMORY ANALYSIS

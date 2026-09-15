@@ -1,4 +1,4 @@
-﻿from ollama import chat
+from ollama import chat
 import json
 import re
 
@@ -873,72 +873,6 @@ def deterministic_route(user_request):
 
 
     # ==================================================
-    # GENERIC GOOGLE SEARCH ROUTE
-    # ==================================================
-    #
-    # Examples:
-    #
-    #   search for Wi-Fi skeleton
-    #   search for Python tutorials
-    #   find information about quantum computing
-    #   look up Tesla
-    #
-    # When no specific site is named, route the request to
-    # Google through the deterministic search_website tool.
-    #
-    # Specific site handlers above this block remain higher
-    # priority, so:
-    #
-    #   search YouTube for X
-    #
-    # still uses the YouTube route.
-    # ==================================================
-
-    generic_search_match = re.match(
-        r"^(?:please\s+)?(?:search\s+for|search|find|look\s+up|lookup)\s+(.+?)\s*[?.!]*$",
-        user_request.strip(),
-        re.IGNORECASE
-    )
-
-    if generic_search_match:
-        query = (
-            generic_search_match.group(1)
-            .strip()
-            .rstrip("?.!")
-        )
-
-        # Do not steal explicitly targeted website searches.
-        explicit_site_words = (
-            "youtube",
-            "google",
-            "amazon",
-            "reddit"
-        )
-
-        query_lower = query.lower()
-
-        if (
-            query
-            and not any(
-                site_word in query_lower
-                for site_word in explicit_site_words
-            )
-        ):
-            print(
-                f"JARVIS: Generic Google search detected: {query}"
-            )
-
-            return {
-                "steps": [
-                    {
-                        "tool": "search_website",
-                        "argument": f"google|{query}"
-                    }
-                ]
-            }
-
-
-    # ==================================================
     # Weather
     # ==================================================
 
@@ -1282,26 +1216,6 @@ def deterministic_route(user_request):
         ).strip()
 
         if target:
-            # Generic first-result follow-ups go to planner.py
-            # so active Google/YouTube search context can resolve them.
-            _generic_first_result_targets = {
-                "first result",
-                "the first result",
-                "on the first result",
-                "first video",
-                "the first video",
-                "on the first video",
-                "first link",
-                "the first link",
-                "on the first link",
-                "first one",
-                "the first one",
-                "on the first one",
-            }
-
-            if target.lower().strip() in _generic_first_result_targets:
-                return None
-
 
             return {
                 "steps": [

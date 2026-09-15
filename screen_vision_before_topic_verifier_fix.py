@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import time
 import ctypes
@@ -481,6 +481,7 @@ def is_youtube_target(
     keywords = [
         "youtube",
         "first video",
+        "first result",
         "video result",
         "first youtube",
         "organic result",
@@ -1430,273 +1431,6 @@ def clean_location(
 # Generic Screen Target Locator
 # ==========================================================
 
-
-# ==========================================================
-# Generic Vision Candidate Validation
-# ==========================================================
-
-def validate_generic_vision_candidate(
-    target,
-    result
-):
-    """
-    Deterministically reject geometrically implausible
-    generic vision results.
-
-    Vision confidence alone is not sufficient to authorize
-    a mouse action.
-    """
-
-    if not isinstance(result, dict):
-        return {
-            "valid": False,
-            "reason": "result is not a dictionary"
-        }
-
-    if not result.get("found", False):
-        return {
-            "valid": False,
-            "reason": "vision reported target not found"
-        }
-
-    try:
-        left = int(result.get("left", 0))
-        top = int(result.get("top", 0))
-        right = int(result.get("right", 0))
-        bottom = int(result.get("bottom", 0))
-    except Exception:
-        return {
-            "valid": False,
-            "reason": "invalid bounding box values"
-        }
-
-    try:
-        width, height = pyautogui.size()
-    except Exception:
-        return {
-            "valid": False,
-            "reason": "could not determine screen size"
-        }
-
-    box_width = right - left
-    box_height = bottom - top
-
-    if box_width <= 0 or box_height <= 0:
-        return {
-            "valid": False,
-            "reason": "invalid bounding box dimensions"
-        }
-
-    if width <= 0 or height <= 0:
-        return {
-            "valid": False,
-            "reason": "invalid screen dimensions"
-        }
-
-    target_text = str(target).lower().strip()
-
-    width_ratio = box_width / float(width)
-    height_ratio = box_height / float(height)
-    top_ratio = top / float(height)
-    bottom_ratio = bottom / float(height)
-
-    center_x = (left + right) / 2.0
-    center_x_ratio = center_x / float(width)
-
-    # ------------------------------------------------------
-    # Universal sanity checks
-    # ------------------------------------------------------
-
-    large_region_terms = [
-        "screen",
-        "window",
-        "page",
-        "desktop",
-        "browser window",
-        "content area",
-        "full screen"
-    ]
-
-    is_large_region_request = any(
-        term in target_text
-        for term in large_region_terms
-    )
-
-    if not is_large_region_request:
-        if width_ratio > 0.85 and height_ratio > 0.45:
-            return {
-                "valid": False,
-                "reason":
-                    f"candidate is implausibly large "
-                    f"({width_ratio:.2f}w x {height_ratio:.2f}h)"
-            }
-
-    # Very tall and narrow boxes are frequently false
-    # detections caused by coordinate hallucination.
-    if (
-        height_ratio > 0.65
-        and
-        width_ratio < 0.20
-    ):
-        return {
-            "valid": False,
-            "reason":
-                "candidate is an implausibly tall narrow region"
-        }
-
-    if box_width < 5 or box_height < 5:
-        return {
-            "valid": False,
-            "reason": "candidate is too small"
-        }
-
-    # ------------------------------------------------------
-    # Address bar / URL bar / omnibox
-    # ------------------------------------------------------
-
-    if (
-        "address bar" in target_text
-        or
-        "url bar" in target_text
-        or
-        "omnibox" in target_text
-        or
-        "browser address bar" in target_text
-    ):
-        # Browser address bars should be near the very top.
-        if top_ratio > 0.20:
-            return {
-                "valid": False,
-                "reason":
-                    f"address bar candidate is too low "
-                    f"(top={top_ratio:.2f})"
-            }
-
-        # It should generally be substantially wider than
-        # it is tall.
-        if width_ratio < 0.25:
-            return {
-                "valid": False,
-                "reason":
-                    f"address bar candidate is too narrow "
-                    f"(width={width_ratio:.2f})"
-            }
-
-        if height_ratio > 0.15:
-            return {
-                "valid": False,
-                "reason":
-                    f"address bar candidate is too tall "
-                    f"(height={height_ratio:.2f})"
-            }
-
-    # ------------------------------------------------------
-    # Chrome / browser menu
-    # ------------------------------------------------------
-
-    if (
-        "chrome menu" in target_text
-        or
-        "browser menu" in target_text
-        or
-        "three dot menu" in target_text
-        or
-        "three-dot menu" in target_text
-        or
-        "menu button" in target_text
-    ):
-        if top_ratio > 0.20:
-            return {
-                "valid": False,
-                "reason":
-                    f"browser menu candidate is too low "
-                    f"(top={top_ratio:.2f})"
-            }
-
-        if center_x_ratio < 0.75:
-            return {
-                "valid": False,
-                "reason":
-                    f"browser menu candidate is not far enough right "
-                    f"(center_x={center_x_ratio:.2f})"
-            }
-
-        if width_ratio > 0.15 or height_ratio > 0.15:
-            return {
-                "valid": False,
-                "reason":
-                    "browser menu candidate is too large"
-            }
-
-    # ------------------------------------------------------
-    # Search controls
-    # ------------------------------------------------------
-
-    if (
-        "search box" in target_text
-        or
-        "search bar" in target_text
-        or
-        "search field" in target_text
-    ):
-        if width_ratio < 0.15:
-            return {
-                "valid": False,
-                "reason":
-                    "search box candidate is too narrow"
-            }
-
-    # ------------------------------------------------------
-    # Top-bar controls
-    # ------------------------------------------------------
-
-    top_bar_terms = [
-        "toolbar",
-        "tab bar",
-        "title bar",
-        "navigation bar",
-        "nav bar",
-        "browser toolbar"
-    ]
-
-    if any(
-        term in target_text
-        for term in top_bar_terms
-    ):
-        if top_ratio > 0.25:
-            return {
-                "valid": False,
-                "reason":
-                    "top-bar target candidate is too low"
-            }
-
-    # ------------------------------------------------------
-    # Bottom-bar controls
-    # ------------------------------------------------------
-
-    bottom_bar_terms = [
-        "taskbar",
-        "dock",
-        "status bar"
-    ]
-
-    if any(
-        term in target_text
-        for term in bottom_bar_terms
-    ):
-        if bottom_ratio < 0.75:
-            return {
-                "valid": False,
-                "reason":
-                    "bottom-bar target candidate is too high"
-            }
-
-    return {
-        "valid": True,
-        "reason": "geometry passed"
-    }
-
-
 def _find_screen_target_generic(
     target
 ):
@@ -1730,422 +1464,139 @@ def _find_screen_target_generic(
         "sent_height"
     ]
 
-    # --------------------------------------------------------
-    # Generic vision recovery.
-    #
-    # Attempt 1 uses the normal locator prompt exactly as
-    # before.
-    #
-    # Only when an attempt fails do we retry with a stronger
-    # interpretation prompt.
-    #
-    # This keeps successful commands at the original latency
-    # while allowing imperfect vision responses to recover.
-    # --------------------------------------------------------
+    prompt = build_locator_prompt(
+        target,
+        vision_width,
+        vision_height
+    )
 
-    retry_prompts = [
-        build_locator_prompt(
-            target,
-            vision_width,
-            vision_height
-        ),
+    start = time.perf_counter()
 
-        f"""
-You are JARVIS desktop UI target detection.
+    response = vision_chat(
 
-Find the requested target:
+        VISION_MODEL,
 
-{target}
+        [
+            {
+                "role":
+                    "system",
 
-Return the bounding box of the ACTUAL VISIBLE UI
-ELEMENT the user is asking for.
+                "content":
+                    prompt
+            },
 
-Important:
-- Do not guess.
-- Do not return browser chrome unless that is the target.
-- Do not return unrelated text.
-- Prefer the complete clickable element.
-- The target may be represented by nearby visible text,
-  an icon, button, link, thumbnail, or control.
-- If the target is described conversationally, identify
-  the most likely visible UI element matching that request.
+            {
+                "role":
+                    "user",
 
-Return JSON only:
+                "content":
+                    f"Find: {target}",
 
-{{
-    "found": true,
-    "confidence": 0.0,
-    "box_2d": [top, left, bottom, right],
-    "description": "brief description"
-}}
-
-If the target cannot be found with confidence, return:
-
-{{
-    "found": false,
-    "confidence": 0.0,
-    "box_2d": [0, 0, 0, 0],
-    "description": "target not confidently visible"
-}}
-""",
-
-        f"""
-You are the final JARVIS visual recovery pass.
-
-Locate this exact requested UI target:
-
-{target}
-
-Look across the visible screen carefully.
-
-Prioritize:
-1. A visible clickable element matching the request.
-2. Text directly associated with that element.
-3. The complete clickable region rather than a tiny text
-   fragment.
-4. The most obvious matching element if several are visible.
-
-Do NOT invent a target.
-
-Do NOT return:
-- random text
-- unrelated controls
-- browser chrome
-- an address bar
-- a sidebar item
-- a channel/avatar unless specifically requested
-- a partial element when a complete element is visible
-
-Return JSON only:
-
-{{
-    "found": true,
-    "confidence": 0.0,
-    "box_2d": [top, left, bottom, right],
-    "description": "brief description"
-}}
-
-If no confident match exists:
-
-{{
-    "found": false,
-    "confidence": 0.0,
-    "box_2d": [0, 0, 0, 0],
-    "description": "target not found"
-}}
-"""
-    ]
-
-    last_failure = {
-        "found":
-            False,
-
-        "confidence":
-            0.0,
-
-        "description":
-            "vision target not found"
-    }
-
-    for attempt_index, prompt in enumerate(
-        retry_prompts,
-        start=1
-    ):
-
-        attempt_start = time.perf_counter()
-
-        if attempt_index > 1:
-            logging.info(
-                "JARVIS: Vision recovery attempt "
-                f"{attempt_index}/"
-                f"{len(retry_prompts)} "
-                f"for target={target!r}"
-            )
-
-        response = vision_chat(
-
-            VISION_MODEL,
-
-            [
-                {
-                    "role":
-                        "system",
-
-                    "content":
-                        prompt
-                },
-
-                {
-                    "role":
-                        "user",
-
-                    "content":
-                        f"Find: {target}",
-
-                    "images": [
-                        vision_file
-                    ]
-                }
-            ],
-
-            json_mode=True,
-
-            num_predict=
-            VISION_NUM_PREDICT
-        )
-
-        elapsed = (
-            time.perf_counter()
-            -
-            attempt_start
-        )
-
-        logging.info(
-            f"Vision model time "
-            f"(attempt {attempt_index}): "
-            f"{elapsed:.3f}s"
-        )
-
-        if not response:
-
-            last_failure = {
-                "found":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "description":
-                    "vision returned no response"
+                "images": [
+                    vision_file
+                ]
             }
+        ],
 
-            continue
+        json_mode=True,
 
-        raw = get_response_text(
-            response
-        )
+        num_predict=
+        VISION_NUM_PREDICT
+    )
 
-        if not raw:
+    elapsed = (
+        time.perf_counter()
+        -
+        start
+    )
 
-            last_failure = {
-                "found":
-                    False,
+    logging.info(
+        f"Vision model time: "
+        f"{elapsed:.3f}s"
+    )
 
-                "confidence":
-                    0.0,
+    if not response:
 
-                "description":
-                    "empty vision response"
-            }
-
-            continue
-
-        logging.info(
-            f"Vision raw response "
-            f"(attempt {attempt_index}): "
-            f"{raw}"
-        )
-
-        result = extract_json(
-            raw
-        )
-
-        if not result:
-
-            last_failure = {
-                "found":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "description":
-                    "invalid vision JSON"
-            }
-
-            continue
-
-        # --------------------------------------------------------
-        # Normalize model bounding-box output.
-        #
-        # Vision models may return:
-        #     box_2d = [top, left, bottom, right]
-        #
-        # clean_location() expects:
-        #     left, top, right, bottom
-        #
-        # Convert box_2d into the internal coordinate keys before
-        # clean_location() clamps and validates the candidate.
-        # --------------------------------------------------------
-
-        box_2d = result.get(
-            "box_2d"
-        )
-
-        if isinstance(box_2d, (list, tuple)) and len(box_2d) >= 4:
-            try:
-                result["top"] = int(
-                box_2d[1]
-                )
-
-                result["left"] = int(
-                    box_2d[0]
-                )
-
-                result["bottom"] = int(
-                    box_2d[3]
-                )
-
-                result["right"] = int(
-                    box_2d[2]
-                )
-
-                result["box_2d_normalized"] = True
-
-                # Generic detector output uses:
-                # [left, top, right, bottom]
-                #
-                # Remove the raw box_2d after converting it so
-                # extract_box_from_result() cannot reinterpret
-                # it using the legacy normalized convention.
-                result.pop(
-                    "box_2d",
-                    None
-                )
-
-            except (TypeError, ValueError):
-                result["found"] = False
-                result["box_2d_normalized"] = False
-
-        crop_result = clean_location(
-            result,
-            vision_width,
-            vision_height
-        )
-
-        # Convert the model's vision-image coordinates
-        # into physical full-screen coordinates BEFORE
-        # performing deterministic geometry validation.
-
-        screen_box = crop_to_screen_box(
-            crop_result,
-            vision_info
-        )
-
-        if not screen_box:
-            last_failure = {
-                "found":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "description":
-                    "coordinate conversion failed"
-            }
-
-            continue
-
-        validation_result = {
+        return {
             "found":
-                crop_result.get(
-                    "found",
-                    False
-                ),
+                False,
 
             "confidence":
-                crop_result.get(
-                    "confidence",
-                    0.0
-                ),
+                0.0,
 
-            "left":
-                screen_box["left"],
-
-            "top":
-                screen_box["top"],
-
-            "right":
-                screen_box["right"],
-
-            "bottom":
-                screen_box["bottom"]
+            "description":
+                "vision returned no response"
         }
 
-        logging.info(
-            "GENERIC VISION GEOMETRY DEBUG: "
-            f"crop_result="
-            f"left={crop_result.get('left')} "
-            f"top={crop_result.get('top')} "
-            f"right={crop_result.get('right')} "
-            f"bottom={crop_result.get('bottom')} "
-            f"found={crop_result.get('found')} "
-            f"confidence={crop_result.get('confidence')}"
-        )
+    raw = get_response_text(
+        response
+    )
 
-        logging.info(
-            "GENERIC VISION SCREEN BOX DEBUG: "
-            f"left={screen_box.get('left')} "
-            f"top={screen_box.get('top')} "
-            f"right={screen_box.get('right')} "
-            f"bottom={screen_box.get('bottom')} "
-            f"width={screen_box.get('right', 0) - screen_box.get('left', 0)} "
-            f"height={screen_box.get('bottom', 0) - screen_box.get('top', 0)}"
-        )
+    if not raw:
 
-        validation = validate_generic_vision_candidate(
-            target,
-            validation_result
-        )
+        return {
+            "found":
+                False,
 
-        if not validation["valid"]:
-            logging.warning(
-                "Vision candidate rejected: "
-                f"{validation['reason']}"
-            )
+            "confidence":
+                0.0,
 
-            last_failure = {
-                "found":
-                    False,
+            "description":
+                "empty vision response"
+        }
 
-                "confidence":
-                    0.0,
+    logging.info(
+        f"Vision raw response: "
+        f"{raw}"
+    )
 
-                "description":
-                    "vision candidate rejected: "
-                    f"{validation['reason']}",
+    result = extract_json(
+        raw
+    )
 
-                "validation_reason":
-                    validation["reason"]
-            }
+    if not result:
 
-            continue
+        return {
+            "found":
+                False,
 
+            "confidence":
+                0.0,
 
+            "description":
+                "invalid vision JSON"
+        }
 
-        if not crop_result.get(
-            "found",
-            False
-        ):
+    crop_result = clean_location(
+        result,
+        vision_width,
+        vision_height
+    )
 
-            last_failure = crop_result
+    if not crop_result.get(
+        "found",
+        False
+    ):
 
-            continue
+        return crop_result
 
-        # Successful recovery.
-        if attempt_index > 1:
-            logging.info(
-                "JARVIS: Vision recovery succeeded "
-                f"on attempt {attempt_index} "
-                f"for target={target!r}"
-            )
+    screen_box = crop_to_screen_box(
+        crop_result,
+        vision_info
+    )
 
-        break
+    if not screen_box:
 
-    else:
+        return {
+            "found":
+                False,
 
-        return last_failure
+            "confidence":
+                0.0,
 
+            "description":
+                "coordinate conversion failed"
+        }
 
     screen_width = vision_info[
         "screen_width"
@@ -2473,95 +1924,37 @@ def youtube_candidate_match_score(
         YOUTUBE_CONTEXT_WEIGHT
     )
 
-    exact_title_match = (
-        title_similarity["exact_phrase"]
-    )
-
-    exact_channel_match = (
-        channel_similarity["exact_phrase"]
-    )
-
-    exact_context_match = (
-        context_similarity["exact_phrase"]
-    )
-
-    strong_title_match = (
+    strong_field_match = (
         title_score >=
         YOUTUBE_MIN_FIELD_MATCH
-    )
 
-    strong_channel_match = (
+        or
+
         channel_score >=
         YOUTUBE_MIN_FIELD_MATCH
-    )
 
-    strong_context_match = (
+        or
+
         context_score >=
         YOUTUBE_MIN_FIELD_MATCH
     )
 
-    # YouTube Topic channels are an especially strong signal
-    # when the user's query is effectively the artist/channel
-    # name rather than the literal video title.
-    normalized_channel = (
-        str(channel or "")
-        .strip()
-        .lower()
-    )
-
-    is_topic_channel = (
-        normalized_channel.endswith("- topic")
+    exact_field_match = (
+        title_similarity["exact_phrase"]
         or
-        normalized_channel.endswith(" topic")
+        channel_similarity["exact_phrase"]
+        or
+        context_similarity["exact_phrase"]
     )
 
-    strong_topic_channel_match = (
-        is_topic_channel
-        and
-        channel_score >= 0.65
+    matched = (
+        exact_field_match
+        or
+        strong_field_match
+        or
+        weighted_score >=
+        YOUTUBE_MIN_RELEVANCE_SCORE
     )
-
-    # ------------------------------------------------------
-    # Relevance hierarchy
-    #
-    # 1. Exact title/context match
-    # 2. Strong title match
-    # 3. Strong Topic-channel match
-    # 4. Strong channel + supporting evidence
-    # 5. Weighted score
-    # ------------------------------------------------------
-
-    if exact_title_match:
-        matched = True
-
-    elif exact_context_match:
-        matched = True
-
-    elif strong_title_match:
-        matched = True
-
-    elif strong_topic_channel_match:
-        matched = True
-
-    elif (
-        strong_channel_match
-        and
-        strong_context_match
-    ):
-        matched = True
-
-    elif (
-        strong_channel_match
-        and
-        title_score >= 0.20
-    ):
-        matched = True
-
-    elif weighted_score >= YOUTUBE_MIN_RELEVANCE_SCORE:
-        matched = True
-
-    else:
-        matched = False
 
     return {
         "matched":
@@ -2580,13 +1973,13 @@ def youtube_candidate_match_score(
             context_score,
 
         "title_exact":
-            exact_title_match,
+            title_similarity["exact_phrase"],
 
         "channel_exact":
-            exact_channel_match,
+            channel_similarity["exact_phrase"],
 
         "context_exact":
-            exact_context_match
+            context_similarity["exact_phrase"]
     }
 
 
@@ -2665,257 +2058,161 @@ Image dimensions:
 width={width}
 height={height}
 
-============================================================
-PRIMARY OBJECTIVE
-============================================================
+Scan the MAIN YouTube search-results column
+from TOP TO BOTTOM.
 
-Find REAL INDIVIDUAL VIDEO RESULTS in the MAIN YouTube
-search-results column.
+Do not stop after the first result.
 
-Scan from TOP TO BOTTOM.
+Find multiple visible result rows.
 
 Return up to {YOUTUBE_CANDIDATE_LIMIT} candidates.
 
-Return candidates in their visual TOP-TO-BOTTOM order.
+Each candidate MUST represent exactly ONE
+individual YouTube search-result row.
 
-============================================================
-WHAT COUNTS AS A VALID CANDIDATE
-============================================================
+ONE BOX = ONE ROW.
 
-Each candidate MUST represent exactly ONE complete
-YouTube VIDEO RESULT ROW.
+A normal result row usually contains:
 
-A normal video-result row usually contains:
+- one thumbnail on the LEFT
+- one video title on the RIGHT
+- a channel name
+- metadata
+- possibly a duration badge
 
-1. A video thumbnail
-2. A video title
-3. A channel name
-4. Video metadata
-5. Optionally a duration badge
+For every candidate, extract the ACTUAL visible:
 
-The thumbnail, title, channel, and metadata must belong
-to the SAME visual result row.
+1. title
+2. channel
+3. context_text
 
-ONE BOX = ONE COMPLETE VIDEO RESULT ROW.
+"title" is the actual visible video title.
 
-The bounding box should cover the complete result row,
-not just one text element.
+"channel" is the visible channel or creator name.
 
-============================================================
-DO NOT RETURN THESE
-============================================================
+"context_text" is other visible text directly associated
+with this row which helps identify the result.
 
-NEVER return:
+Do not invent any text.
 
-- standalone channel cards
-- standalone Topic cards
-- Topic pages
-- channel headers
-- channel avatars by themselves
-- isolated channel names
-- isolated Topic names
-- search suggestions
-- playlists
-- Shorts
-- shopping cards
-- product cards
-- navigation
-- sidebars
-- browser controls
-- browser tabs
-- address bar
-- YouTube search box
-- category chips
-- recommendation chips
-- tiny text-only boxes
-- partial fragments of result rows
+IMPORTANT RELEVANCE RULE:
 
-CRITICAL:
-
-A box containing only:
-
-"wifiskelton - Topic"
-
-is NOT a video result.
-
-A box containing only:
-
-"wifiskeleton - Topic"
-
-is NOT a video result.
-
-A small Topic/channel card without a complete thumbnail
-AND a complete video title MUST NOT be returned.
-
-============================================================
-TOPIC CHANNEL RULE
-============================================================
-
-A channel ending in "- Topic" may absolutely be the
-channel of a legitimate NORMAL VIDEO RESULT.
+The requested query does NOT have to appear in the
+video title.
 
 For example:
 
-Video title:
-Nope your too late i already died
-
-Channel:
-wifiskelton - Topic
-
-Context:
-Provided by YouTube by IIP-DDS ...
-
-This is a valid possible VIDEO RESULT when the visible
-thumbnail and title/channel metadata belong to the same
-complete result row.
-
-The following is NOT valid:
-
-wifiskelton - Topic
-
-by itself in a small card.
-
-The distinction is COMPLETE VIDEO ROW versus
-STANDALONE CHANNEL/TOPIC CARD.
-
-============================================================
-QUERY RELEVANCE
-============================================================
-
-The user's search query does NOT have to literally appear
-in the video title.
-
-For example:
-
-Requested:
+requested search:
 Wi-Fi Skeleton
 
-Possible video title:
+video title:
 Nope your too late i already died
 
-Possible channel:
+channel:
 wifiskelton - Topic
 
-That can be a relevant result.
+context:
+Provided by YouTube by IIP-DDS ...
 
-Use channel and directly associated context as additional
-identity evidence.
+That may be a relevant result.
 
-Do NOT reject a result merely because the exact query text
-does not appear in the title.
+DO NOT return:
 
-============================================================
-BOX GEOMETRY
-============================================================
+- browser controls
+- address bar
+- browser tabs
+- YouTube search box
+- navigation
+- sidebars
+- channels as standalone results
+- Topic pages as standalone results
+- playlists
+- Shorts
+- shopping/product cards
 
-Prefer the COMPLETE VIDEO ROW.
+A music video whose channel happens to end in
+"- Topic" may still be a NORMAL VIDEO RESULT.
 
-The bounding box should generally include:
+Advertisements MAY be returned.
 
-- most or all of the thumbnail
-- the title
-- the channel
-- relevant metadata
-
-Do NOT return a tiny box around:
-
-- only the channel
-- only the Topic label
-- only the title
-- only an avatar
-- only a small piece of metadata
-
-If you cannot see a complete video row, do not invent one.
-
-============================================================
-DUPLICATES
-============================================================
-
-Do not return the same visible result row more than once.
-
-If two detections refer to the same visual video row,
-return only one candidate.
-
-============================================================
-ADVERTISING
-============================================================
-
-Advertisements MAY be returned as candidates.
-
-Downstream safety logic will reject them.
-
-If visible advertising evidence exists, set:
-
-"is_ad": true
-
-and provide the visible evidence in:
-
-"ad_evidence"
-
-Examples:
+If visible advertising evidence exists, such as:
 
 Sponsored
 Ad
 Advertisement
 Promoted
-Promoted by
-Paid promotion
-Paid partnership
-Learn more
-Shop now
-Buy now
-Install
-Download
-Visit advertiser
 
-Do not hide advertisements from the detector.
+then:
 
-============================================================
-SHORTS / PLAYLISTS
-============================================================
+"is_ad": true
 
-Set:
+and:
+
+"ad_evidence": "exact visible text"
+
+Never invent ad evidence.
+
+If no visible ad label:
+
+"is_ad": false
+
+"ad_evidence": ""
+
+If visibly a Short:
 
 "is_short": true
 
-for a Shorts result.
+Otherwise:
 
-Do not return standalone playlist cards.
+"is_short": false
 
-A normal video from a channel whose name ends in
-"- Topic" is NOT automatically a Topic page.
+"matches_query" is only your visual relevance estimate.
+It is NOT the final authority.
 
-============================================================
-OUTPUT FORMAT
-============================================================
+Coordinates:
 
-Return ONLY candidates that are visually recognizable
-as COMPLETE INDIVIDUAL VIDEO RESULT ROWS.
+box_2d MUST be:
 
-Use this structure:
+[top, left, bottom, right]
+
+Coordinates are normalized from 0 to 1000.
+
+Each box must tightly surround exactly ONE result row.
+
+Do NOT combine multiple rows.
+
+Return candidates in strict top-to-bottom order.
+
+Return ONLY JSON:
 
 {{
-    "box_2d": [top, left, bottom, right],
-    "title": "actual visible video title",
-    "channel": "actual visible channel name",
-    "context_text": "other visible text directly associated with the same row",
-    "confidence": 0.0,
-    "is_ad": false,
-    "is_short": false,
-    "matches_query": true,
-    "ad_evidence": ""
+    "candidates": [
+        {{
+            "box_2d": [top, left, bottom, right],
+            "title": "actual visible video title",
+            "channel": "actual visible channel",
+            "context_text": "other visible row-associated text",
+            "confidence": 0.90,
+            "is_ad": false,
+            "is_short": false,
+            "matches_query": true,
+            "ad_evidence": ""
+        }}
+    ]
 }}
 
-Do not invent text.
+If none are visible:
 
-Do not merge multiple rows.
-
-Do not return standalone channel/topic cards.
-
-Do not return duplicate rows.
-
-Only return complete visible video-result rows.
+{{
+    "candidates": []
+}}
 """
+
+
+# ==========================================================
+# Build YouTube Verification Image
+# ==========================================================
+
 def _build_youtube_verification_image(
     image,
     box,
@@ -3114,124 +2411,517 @@ def _build_youtube_candidate_thumbnail_image(
 # ==========================================================
 
 def locate_youtube_thumbnail(
-    candidate_file,
-    candidate_image_info,
+    image,
+    candidate_box,
     candidate_index
 ):
 
-    if not candidate_file:
-        return None
-
-    candidate_width = int(
-        candidate_image_info.get(
-            "width",
-            0
+    candidate_image_info = (
+        _build_youtube_candidate_thumbnail_image(
+            image,
+            candidate_box
         )
     )
 
-    candidate_height = int(
-        candidate_image_info.get(
-            "height",
-            0
+    if not candidate_image_info:
+
+        return None
+
+    candidate_file = (
+        candidate_image_info["file"]
+    )
+
+    candidate_width = (
+        candidate_image_info["width"]
+    )
+
+    candidate_height = (
+        candidate_image_info["height"]
+    )
+
+    prompt = f"""
+You are JARVIS thumbnail locator.
+
+The supplied image contains EXACTLY ONE
+verified YouTube search-result row.
+
+Your job is to locate ONLY the VIDEO THUMBNAIL
+inside this row.
+
+The thumbnail is normally on the LEFT side.
+
+Do NOT locate:
+
+- title text
+- channel text
+- metadata
+- buttons
+- comments
+- the entire row
+- browser UI
+
+Return ONLY JSON:
+
+{{
+    "found": true,
+    "confidence": 0.95,
+    "box_2d": [top, left, bottom, right],
+    "description": "YouTube video thumbnail"
+}}
+
+Coordinates must be normalized from 0 to 1000.
+
+Coordinates are:
+
+[top, left, bottom, right]
+
+The box must tightly surround ONLY the thumbnail.
+
+The thumbnail must be substantially smaller than
+the entire row.
+
+Do NOT return the entire candidate row.
+
+Image dimensions:
+width={candidate_width}
+height={candidate_height}
+
+Return ONLY JSON.
+"""
+
+    start = time.perf_counter()
+
+    response = vision_chat(
+
+        YOUTUBE_THUMBNAIL_MODEL,
+
+        [
+            {
+                "role":
+                    "system",
+
+                "content":
+                    prompt
+            },
+
+            {
+                "role":
+                    "user",
+
+                "content":
+                    (
+                        "Locate ONLY the video "
+                        "thumbnail inside this "
+                        "single verified row."
+                    ),
+
+                "images": [
+                    candidate_file
+                ]
+            }
+        ],
+
+        json_mode=True,
+
+        num_predict=
+        YOUTUBE_THUMBNAIL_NUM_PREDICT
+    )
+
+    elapsed = (
+        time.perf_counter()
+        -
+        start
+    )
+
+    logging.info(
+        f"YouTube thumbnail detection "
+        f"time candidate {candidate_index}: "
+        f"{elapsed:.3f}s"
+    )
+
+    if not response:
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "no response."
         )
+
+        return None
+
+    raw = get_response_text(
+        response
+    )
+
+    logging.info(
+        f"YouTube thumbnail detector raw "
+        f"candidate {candidate_index}: "
+        f"{raw}"
+    )
+
+    data = extract_json(
+        raw
+    )
+
+    if not isinstance(
+        data,
+        dict
+    ):
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "invalid JSON."
+        )
+
+        return None
+
+    try:
+
+        confidence = float(
+            data.get(
+                "confidence",
+                0.0
+            )
+        )
+
+    except Exception:
+
+        confidence = 0.0
+
+    found = bool(
+        data.get(
+            "found",
+            False
+        )
+    )
+
+    if not found:
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "thumbnail not found."
+        )
+
+        return None
+
+    if confidence < YOUTUBE_THUMBNAIL_MIN_CONFIDENCE:
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "LOW CONFIDENCE "
+            f"{confidence:.2f}"
+        )
+
+        return None
+
+    thumbnail_box = normalize_box_2d(
+        data.get(
+            "box_2d"
+        ),
+        candidate_width,
+        candidate_height
+    )
+
+    if not thumbnail_box:
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "invalid thumbnail box."
+        )
+
+        return None
+
+    thumbnail_width = (
+        thumbnail_box["right"]
+        -
+        thumbnail_box["left"]
+    )
+
+    thumbnail_height = (
+        thumbnail_box["bottom"]
+        -
+        thumbnail_box["top"]
+    )
+
+    # ------------------------------------------------------
+    # Thumbnail geometry repair
+    #
+    # Qwen sometimes returns a very wide but abnormally
+    # short box for the thumbnail. A normal YouTube
+    # thumbnail is approximately 16:9.
+    #
+    # Only repair obviously malformed geometry.
+    # ------------------------------------------------------
+
+    if thumbnail_width > 0 and thumbnail_height > 0:
+
+        aspect_ratio = (
+            thumbnail_width
+            /
+            float(thumbnail_height)
+        )
+
+        expected_height = int(
+            round(
+                thumbnail_width
+                *
+                9.0
+                /
+                16.0
+            )
+        )
+
+        height_is_obviously_too_small = (
+            thumbnail_height
+            <
+            max(
+                60,
+                int(
+                    candidate_height
+                    *
+                    0.30
+                )
+            )
+        )
+
+        aspect_is_obviously_too_wide = (
+            aspect_ratio
+            >
+            2.35
+        )
+
+        if (
+            height_is_obviously_too_small
+            or
+            aspect_is_obviously_too_wide
+        ):
+
+            repaired_height = max(
+                thumbnail_height,
+                expected_height
+            )
+
+            # Keep the repair safely inside the candidate.
+            repaired_height = min(
+                repaired_height,
+                candidate_height
+                -
+                thumbnail_box["top"]
+            )
+
+            if repaired_height > thumbnail_height:
+
+                logging.info(
+                    f"YouTube thumbnail candidate "
+                    f"{candidate_index}: "
+                    "repairing malformed thumbnail "
+                    f"geometry "
+                    f"{thumbnail_width}x"
+                    f"{thumbnail_height} "
+                    "-> "
+                    f"{thumbnail_width}x"
+                    f"{repaired_height} "
+                    f"(aspect={aspect_ratio:.2f})"
+                )
+
+                thumbnail_box["bottom"] = (
+                    thumbnail_box["top"]
+                    +
+                    repaired_height
+                )
+
+                thumbnail_height = (
+                    thumbnail_box["bottom"]
+                    -
+                    thumbnail_box["top"]
+                )
+
+                # If the model placed the thumbnail too far
+                # into the metadata side of the row, gently
+                # move it toward the left edge. Do not do this
+                # unless the placement is clearly suspicious.
+                if (
+                    thumbnail_box["left"]
+                    >
+                    candidate_width
+                    *
+                    0.25
+                ):
+
+                    shift = int(
+                        round(
+                            thumbnail_box["left"]
+                            -
+                            candidate_width
+                            *
+                            0.08
+                        )
+                    )
+
+                    new_left = max(
+                        0,
+                        thumbnail_box["left"]
+                        -
+                        shift
+                    )
+
+                    new_right = (
+                        new_left
+                        +
+                        thumbnail_width
+                    )
+
+                    if (
+                        new_right
+                        <=
+                        candidate_width
+                    ):
+
+                        logging.info(
+                            f"YouTube thumbnail candidate "
+                            f"{candidate_index}: "
+                            f"adjusting suspicious left "
+                            f"placement "
+                            f"{thumbnail_box['left']} "
+                            "-> "
+                            f"{new_left}"
+                        )
+
+                        thumbnail_box["left"] = (
+                            new_left
+                        )
+
+                        thumbnail_box["right"] = (
+                            new_right
+                        )
+
+    logging.info(
+        f"YouTube thumbnail candidate "
+        f"{candidate_index}: "
+        "final relative thumbnail geometry "
+        f"{thumbnail_box['left']},"
+        f"{thumbnail_box['top']},"
+        f"{thumbnail_box['right']},"
+        f"{thumbnail_box['bottom']} "
+        f"size={thumbnail_width}x"
+        f"{thumbnail_height}"
     )
 
     if (
-        candidate_width <= 0
-        or
-        candidate_height <= 0
+        thumbnail_width
+        <
+        YOUTUBE_MIN_THUMBNAIL_WIDTH
     ):
-        return None
-
-    # --------------------------------------------------
-    # SAFE VERIFIED-ROW CLICK REGION
-    #
-    # The row has already passed:
-    #   1. query relevance
-    #   2. ad rejection
-    #   3. structural verification
-    #
-    # Do not rely on thumbnail aspect ratio or a second
-    # vision model to locate the thumbnail. YouTube Music
-    # / Topic rows can use different visual thumbnail
-    # formatting.
-    #
-    # The thumbnail/media area is on the left side of the
-    # verified result. Keep a conservative region there.
-    # --------------------------------------------------
-
-    safe_left = int(
-        round(
-            candidate_width
-            *
-            0.03
-        )
-    )
-
-    safe_right = int(
-        round(
-            candidate_width
-            *
-            0.38
-        )
-    )
-
-    safe_top = int(
-        round(
-            candidate_height
-            *
-            0.25
-        )
-    )
-
-    safe_bottom = int(
-        round(
-            candidate_height
-            *
-            0.75
-        )
-    )
-
-    safe_width = (
-        safe_right
-        -
-        safe_left
-    )
-
-    safe_height = (
-        safe_bottom
-        -
-        safe_top
-    )
-
-    if safe_width <= 0 or safe_height <= 0:
 
         logging.info(
-            f"YouTube safe thumbnail region "
-            f"candidate {candidate_index}: "
-            "invalid geometry."
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail too narrow: "
+            f"{thumbnail_width}px"
         )
 
         return None
-
-    # --------------------------------------------------
-    # Final candidate-relative bounds check.
-    # --------------------------------------------------
 
     if (
-        safe_left < 0
-        or
-        safe_top < 0
-        or
-        safe_right > candidate_width
-        or
-        safe_bottom > candidate_height
+        thumbnail_height
+        <
+        YOUTUBE_MIN_THUMBNAIL_HEIGHT
     ):
 
         logging.info(
-            f"YouTube safe thumbnail region "
-            f"candidate {candidate_index}: "
-            "escaped candidate bounds."
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail too short: "
+            f"{thumbnail_height}px"
+        )
+
+        return None
+
+    if (
+        thumbnail_width
+        >
+        YOUTUBE_MAX_THUMBNAIL_WIDTH
+    ):
+
+        logging.info(
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail too wide: "
+            f"{thumbnail_width}px"
+        )
+
+        return None
+
+    if (
+        thumbnail_height
+        >
+        YOUTUBE_MAX_THUMBNAIL_HEIGHT
+    ):
+
+        logging.info(
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail too tall: "
+            f"{thumbnail_height}px"
+        )
+
+        return None
+
+    if (
+        thumbnail_width
+        >
+        candidate_width
+        *
+        YOUTUBE_MAX_THUMBNAIL_ROW_WIDTH_RATIO
+    ):
+
+        logging.info(
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail occupies too much "
+            "of candidate width."
+        )
+
+        return None
+
+    if (
+        thumbnail_height
+        >
+        candidate_height
+        *
+        YOUTUBE_MAX_THUMBNAIL_ROW_HEIGHT_RATIO
+    ):
+
+        logging.info(
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail occupies too much "
+            "of candidate height."
+        )
+
+        return None
+
+    thumbnail_center_x = (
+        thumbnail_box["left"]
+        +
+        thumbnail_width / 2.0
+    )
+
+    if (
+        thumbnail_center_x
+        >
+        candidate_width * 0.60
+    ):
+
+        logging.info(
+            f"YouTube thumbnail candidate "
+            f"{candidate_index}: "
+            "thumbnail is not on expected "
+            "left side."
         )
 
         return None
@@ -3241,41 +2931,32 @@ def locate_youtube_thumbnail(
         "left":
             candidate_image_info["left"]
             +
-            safe_left,
+            thumbnail_box["left"],
 
         "top":
             candidate_image_info["top"]
             +
-            safe_top,
+            thumbnail_box["top"],
 
         "right":
             candidate_image_info["left"]
             +
-            safe_right,
+            thumbnail_box["right"],
 
         "bottom":
             candidate_image_info["top"]
             +
-            safe_bottom
+            thumbnail_box["bottom"]
     }
-
-    confidence = 0.90
-
-    logging.info(
-        f"YouTube safe thumbnail region "
-        f"candidate {candidate_index}: "
-        f"relative="
-        f"{safe_left},"
-        f"{safe_top},"
-        f"{safe_right},"
-        f"{safe_bottom} "
-        f"size={safe_width}x"
-        f"{safe_height}"
-    )
 
     logging.info(
         f"YouTube thumbnail located "
         f"candidate {candidate_index}: "
+        f"candidate_relative="
+        f"{thumbnail_box['left']},"
+        f"{thumbnail_box['top']},"
+        f"{thumbnail_box['right']},"
+        f"{thumbnail_box['bottom']} "
         f"full_vision="
         f"{full_image_box['left']},"
         f"{full_image_box['top']},"
@@ -3458,196 +3139,58 @@ def get_youtube_thumbnail_click_point(
     candidate_index
 ):
 
-    # --------------------------------------------------
-    # VERIFIED YOUTUBE ROW CLICK
-    #
-    # The candidate has already passed:
-    #   - deterministic relevance
-    #   - detector-side ad rejection
-    #   - structural video verification
-    #
-    # Thumbnail detection has proven unreliable across
-    # YouTube Music / Topic layouts, so do not trust a
-    # model-generated or synthetic thumbnail rectangle.
-    #
-    # Instead, use the verified result row and choose a
-    # conservative point in its left-side media region.
-    # --------------------------------------------------
-
-    if not candidate_box:
-        return None
-
-    try:
-
-        candidate_left = int(
-            candidate_box["left"]
-        )
-
-        candidate_top = int(
-            candidate_box["top"]
-        )
-
-        candidate_right = int(
-            candidate_box["right"]
-        )
-
-        candidate_bottom = int(
-            candidate_box["bottom"]
-        )
-
-    except (
-        KeyError,
-        TypeError,
-        ValueError
+    if not validate_youtube_thumbnail_inside_candidate(
+        thumbnail_box,
+        candidate_box,
+        candidate_index
     ):
 
         return None
 
-    candidate_width = (
-        candidate_right
-        -
-        candidate_left
+    left = int(
+        thumbnail_box["left"]
     )
 
-    candidate_height = (
-        candidate_bottom
-        -
-        candidate_top
+    top = int(
+        thumbnail_box["top"]
     )
 
-    if (
-        candidate_width <= 0
-        or
-        candidate_height <= 0
-    ):
+    right = int(
+        thumbnail_box["right"]
+    )
 
-        logging.info(
-            f"YouTube verified row "
-            f"candidate {candidate_index}: "
-            "invalid candidate geometry."
-        )
+    bottom = int(
+        thumbnail_box["bottom"]
+    )
+
+    width = (
+        right
+        -
+        left
+    )
+
+    height = (
+        bottom
+        -
+        top
+    )
+
+    if width <= 0 or height <= 0:
 
         return None
 
-    # --------------------------------------------------
-    # Conservative left-side media point.
-    #
-    # Keep well away from:
-    #   - title
-    #   - channel
-    #   - action buttons
-    #   - right-side metadata
-    #
-    # Use the vertical center because the candidate row
-    # itself has already been detected as the result.
-    # --------------------------------------------------
-
-    x = (
-        candidate_left
-        +
-        int(
-            candidate_width
-            *
-            0.16
-        )
+    x = left + (
+        width // 2
     )
 
-    y = (
-        candidate_top
-        +
-        int(
-            candidate_height
-            *
-            0.50
-        )
-    )
-
-    # --------------------------------------------------
-    # Final strict bounds margin.
-    # --------------------------------------------------
-
-    safe_left = (
-        candidate_left
-        +
-        max(
-            5,
-            int(
-                candidate_width
-                *
-                0.05
-            )
-        )
-    )
-
-    safe_right = (
-        candidate_left
-        +
-        int(
-            candidate_width
-            *
-            0.40
-        )
-    )
-
-    safe_top = (
-        candidate_top
-        +
-        max(
-            5,
-            int(
-                candidate_height
-                *
-                0.10
-            )
-        )
-    )
-
-    safe_bottom = (
-        candidate_bottom
-        -
-        max(
-            5,
-            int(
-                candidate_height
-                *
-                0.10
-            )
-        )
-    )
-
-    if (
-        safe_right <= safe_left
-        or
-        safe_bottom <= safe_top
-    ):
-
-        return None
-
-    x = max(
-        safe_left,
-        min(
-            x,
-            safe_right
-        )
-    )
-
-    y = max(
-        safe_top,
-        min(
-            y,
-            safe_bottom
-        )
+    y = top + (
+        height // 2
     )
 
     logging.info(
-        f"YouTube verified row safe click "
+        f"YouTube verified thumbnail center "
         f"candidate {candidate_index}: "
-        f"{x},{y} "
-        f"row="
-        f"{candidate_left},"
-        f"{candidate_top},"
-        f"{candidate_right},"
-        f"{candidate_bottom}"
+        f"{x},{y}"
     )
 
     return x, y
@@ -4309,26 +3852,15 @@ def verify_youtube_candidate(
     candidate_relevance_score=0.0,
 ):
     """
-    Verify structural safety of one already-detected YouTube
-    search-result candidate.
+    Structural/evidence-only YouTube verifier.
 
-    Detector owns:
+    The detector is authoritative for:
         title
         channel
         context
         semantic relevance
-        candidate row identity
 
-    Verifier owns:
-        video-vs-non-video safety
-        advertisement safety
-        sponsored safety
-        Shorts safety
-        playlist safety
-
-    Standalone-page flags are intentionally NOT used as
-    rejection criteria here because this verifier receives a
-    crop of an already-selected search-result row.
+    The verifier is authoritative ONLY for structural safety.
     """
 
     candidate_title = str(
@@ -4344,14 +3876,15 @@ def verify_youtube_candidate(
     ).strip()
 
     prompt = f"""
-You are JARVIS's FINAL YouTube SEARCH-RESULT SAFETY VERIFIER.
+You are JARVIS's FINAL YouTube SAFETY VERIFIER.
 
-You are verifying ONE SPECIFIC candidate region.
+You are verifying ONE SPECIFIC candidate.
 
-The candidate was already selected by a YouTube search-result
-detector.
+Candidate #{candidate_index} is outlined in RED.
 
-Candidate #{candidate_index}.
+IMPORTANT:
+
+The candidate detector has already identified this candidate.
 
 The detector metadata below is authoritative:
 
@@ -4367,46 +3900,48 @@ Detector channel:
 Detector context:
 {candidate_context}
 
-Detector semantic relevance:
+Detector relevance:
 matched={candidate_matches_query}
 score={candidate_relevance_score:.3f}
 
-IMPORTANT:
+DO NOT replace the detector metadata.
 
-This image is a crop of ONE ALREADY-SELECTED SEARCH RESULT ROW.
+DO NOT identify another candidate.
 
-Do NOT search for another result.
+DO NOT borrow information from neighboring rows.
 
-Do NOT compare this candidate against neighboring results.
+DO NOT return a title.
 
-Do NOT replace its title.
+DO NOT return a channel.
 
-Do NOT replace its channel.
+DO NOT return context_text.
 
-Do NOT replace its context.
+DO NOT re-score semantic relevance.
 
-Do NOT re-evaluate semantic relevance.
-
-Do NOT reject a candidate merely because its channel name ends
-in "- Topic".
+Your ONLY job is structural safety verification.
 
 ==================================================
-VIDEO SAFETY
+VALID NORMAL VIDEO
 ==================================================
+
+A normal YouTube search-result row normally contains:
+
+- video thumbnail
+- video title
+- channel or creator
+- metadata
 
 Set:
 
 "is_video": true
 
-when this cropped object is a normal YouTube video search-result
-row containing a thumbnail, title, channel/creator, and metadata.
+when the RED-BOXED candidate is a normal video result.
 
 Set:
 
 "is_video": false
 
-only when the cropped object clearly is not a normal video
-search-result row.
+when it is not a normal video-result row.
 
 ==================================================
 ADVERTISEMENT SAFETY
@@ -4416,7 +3951,8 @@ Set:
 
 "is_ad": true
 
-ONLY when visible advertising evidence exists in THIS candidate.
+ONLY when visible advertising evidence exists INSIDE
+the RED-BOXED candidate.
 
 Examples:
 
@@ -4425,99 +3961,99 @@ Ad
 Advertisement
 Promoted
 
-Otherwise:
+When visible advertising evidence exists:
+
+"is_ad": true
+"is_sponsored": true
+"ad_evidence": "exact visible text"
+
+When no advertising evidence exists:
 
 "is_ad": false
-
-Set:
-
-"is_sponsored": true
-
-ONLY when explicit sponsored evidence is visible.
-
-Otherwise:
-
 "is_sponsored": false
+"ad_evidence": ""
 
-Do NOT infer an advertisement because:
+Do NOT classify something as an advertisement merely because:
 
-- the candidate is near the top
-- the candidate is visually prominent
-- the company is recognizable
+- it is near the top
+- it is prominent
+- it is from a company
 - it appears before another result
 
 ==================================================
-SHORTS SAFETY
+SHORTS
 ==================================================
 
 Set:
 
 "is_short": true
 
-ONLY when the candidate is visibly a YouTube Short.
+ONLY when the RED-BOXED candidate is visibly a YouTube Short.
 
 Otherwise:
 
 "is_short": false
 
 ==================================================
-PLAYLIST SAFETY
+PLAYLIST
 ==================================================
 
 Set:
 
 "is_playlist": true
 
-ONLY when the candidate itself is visibly a playlist.
+ONLY when the RED-BOXED candidate itself is a playlist.
 
 Otherwise:
 
 "is_playlist": false
 
 ==================================================
-TOPIC CHANNEL RULE
+STANDALONE PAGES
 ==================================================
 
-A legitimate YouTube video can belong to a channel ending in:
+"is_standalone_channel_page": true
+
+ONLY for a standalone channel page.
+
+"is_standalone_topic_page": true
+
+ONLY for a standalone Topic page.
+
+"is_standalone_video_page": true
+
+ONLY when the RED-BOXED object is already a standalone
+video page rather than a search-result row.
+
+For a normal search-result row all three should normally be false.
+
+==================================================
+TOPIC CHANNELS
+==================================================
+
+A legitimate music video or Art Track may belong to a
+channel whose name ends in:
 
 "- Topic"
 
-Example:
+That is NOT a rejection reason.
 
-channel:
-{candidate_channel}
-
-That does NOT make the result a Topic page.
-
-Do NOT classify this search-result row as a standalone Topic page
-merely because the channel name contains "- Topic".
-
-The detector has already selected a search-result row.
-
-Therefore:
-
-"is_standalone_channel_page": false
-"is_standalone_topic_page": false
-"is_standalone_video_page": false
-
-for this verification task.
-
-"is_topic" may be true or false, but it is informational only
-and MUST NOT cause rejection.
+Only a standalone Topic PAGE should be rejected.
 
 ==================================================
-SEMANTIC RELEVANCE
+RELEVANCE
 ==================================================
 
-Do NOT calculate relevance.
+DO NOT determine semantic relevance yourself.
 
-The detector owns relevance.
+The detector already determined semantic relevance.
 
-Use:
+Use this detector result as authoritative:
 
-matched={candidate_matches_query}
+matches_query={candidate_matches_query}
 
-as the authoritative semantic result.
+Never invent another title, channel, or context to justify
+a relevance decision.
 
 ==================================================
 OUTPUT
@@ -4525,7 +4061,7 @@ OUTPUT
 
 Return ONLY JSON.
 
-Use EXACTLY:
+EXACT SCHEMA:
 
 {{
   "is_video": true,
@@ -4542,7 +4078,7 @@ Use EXACTLY:
   "reason": "brief structural reason"
 }}
 
-Do NOT return:
+DO NOT RETURN:
 
 "title"
 "channel"
@@ -4565,8 +4101,9 @@ Those belong to the detector.
             {
                 "role": "user",
                 "content": (
-                    "Verify ONLY this already-selected "
-                    f"YouTube search-result candidate #{candidate_index}."
+                    "Verify ONLY the RED-BOXED candidate "
+                    f"#{candidate_index}. "
+                    "Ignore all neighboring rows."
                 ),
                 "images": [
                     image_path
@@ -4589,8 +4126,11 @@ Those belong to the detector.
         f"{elapsed:.3f}s"
     )
 
-    if not response:
+    # ------------------------------------------------------
+    # No response
+    # ------------------------------------------------------
 
+    if not response:
         return {
             "valid": False,
             "is_video": False,
@@ -4606,9 +4146,12 @@ Those belong to the detector.
                 candidate_matches_query
             ),
             "confidence": 0.0,
+
+            # Detector identity remains authoritative.
             "title": candidate_title,
             "channel": candidate_channel,
             "context_text": candidate_context,
+
             "ad_evidence": "",
             "relevance_score": float(
                 candidate_relevance_score
@@ -4634,7 +4177,6 @@ Those belong to the detector.
         data,
         dict
     ):
-
         return {
             "valid": False,
             "is_video": False,
@@ -4650,9 +4192,11 @@ Those belong to the detector.
                 candidate_matches_query
             ),
             "confidence": 0.0,
+
             "title": candidate_title,
             "channel": candidate_channel,
             "context_text": candidate_context,
+
             "ad_evidence": "",
             "relevance_score": float(
                 candidate_relevance_score
@@ -4664,22 +4208,24 @@ Those belong to the detector.
         value,
         default=False,
     ):
-
         if isinstance(value, bool):
             return value
 
         if isinstance(value, str):
+            normalized = (
+                value
+                .strip()
+                .lower()
+            )
 
-            value = value.strip().lower()
-
-            if value in {
+            if normalized in {
                 "true",
                 "yes",
                 "1",
             }:
                 return True
 
-            if value in {
+            if normalized in {
                 "false",
                 "no",
                 "0",
@@ -4729,6 +4275,27 @@ Those belong to the detector.
         False,
     )
 
+    is_standalone_channel_page = as_bool(
+        data.get(
+            "is_standalone_channel_page"
+        ),
+        False,
+    )
+
+    is_standalone_topic_page = as_bool(
+        data.get(
+            "is_standalone_topic_page"
+        ),
+        False,
+    )
+
+    is_standalone_video_page = as_bool(
+        data.get(
+            "is_standalone_video_page"
+        ),
+        False,
+    )
+
     is_topic = as_bool(
         data.get(
             "is_topic"
@@ -4736,6 +4303,7 @@ Those belong to the detector.
         False,
     )
 
+    # Sponsored always counts as an advertisement.
     if is_sponsored:
         is_ad = True
 
@@ -4772,7 +4340,7 @@ Those belong to the detector.
     ).strip()
 
     # ------------------------------------------------------
-    # Ignore unsupported advertisement claims.
+    # Never trust an unsupported ad claim.
     # ------------------------------------------------------
 
     if (
@@ -4782,25 +4350,17 @@ Those belong to the detector.
         and
         not ad_evidence
     ):
-
         logging.info(
             f"YouTube candidate {candidate_index}: "
             "verifier claimed advertisement without "
-            "visible evidence; clearing claim."
+            "visible evidence; clearing unsupported claim."
         )
 
         is_ad = False
 
     # ------------------------------------------------------
-    # Standalone-page flags are forced false.
-    #
-    # This verifier is examining a crop of an already-selected
-    # search-result row, not an arbitrary full browser page.
+    # Structural safety only.
     # ------------------------------------------------------
-
-    is_standalone_channel_page = False
-    is_standalone_topic_page = False
-    is_standalone_video_page = False
 
     structural_ok = (
         is_video
@@ -4810,7 +4370,17 @@ Those belong to the detector.
         not is_short
         and
         not is_playlist
+        and
+        not is_standalone_channel_page
+        and
+        not is_standalone_topic_page
+        and
+        not is_standalone_video_page
     )
+
+    # ------------------------------------------------------
+    # Detector owns semantic relevance.
+    # ------------------------------------------------------
 
     matches_query = bool(
         candidate_matches_query
@@ -4841,16 +4411,15 @@ Those belong to the detector.
         "is_playlist": is_playlist,
 
         "is_standalone_channel_page":
-            False,
+            is_standalone_channel_page,
 
         "is_standalone_topic_page":
-            False,
+            is_standalone_topic_page,
 
         "is_standalone_video_page":
-            False,
+            is_standalone_video_page,
 
-        "is_topic":
-            is_topic,
+        "is_topic": is_topic,
 
         "matches_query":
             matches_query,
@@ -4858,7 +4427,10 @@ Those belong to the detector.
         "confidence":
             confidence,
 
+        # --------------------------------------------------
         # Detector identity is authoritative.
+        # --------------------------------------------------
+
         "title":
             candidate_title,
 
@@ -5062,45 +4634,17 @@ def find_first_verified_youtube_result(
                 False
         }
 
-    # ------------------------------------------------------
-    # The vision model may return either:
-    #
-    # 1. {"candidates": [...]}
-    #
-    # OR
-    #
-    # 2. a single candidate object directly:
-    #    {"box_2d": [...], "title": "...", ...}
-    #
-    # Handle both forms explicitly.
-    # ------------------------------------------------------
+    candidates = data.get(
+        "candidates",
+        []
+    )
 
-    if (
-        isinstance(
-            data,
-            dict
-        )
-        and
-        "box_2d" in data
+    if not isinstance(
+        candidates,
+        list
     ):
 
-        candidates = [
-            data
-        ]
-
-    else:
-
-        candidates = data.get(
-            "candidates",
-            []
-        )
-
-        if not isinstance(
-            candidates,
-            list
-        ):
-
-            candidates = []
+        candidates = []
 
     normalized = []
 
@@ -5122,149 +4666,32 @@ def find_first_verified_youtube_result(
 
             continue
 
-        # --------------------------------------------------
-        # YouTube candidate box normalization.
-        #
-        # The documented format is:
-        #   [top, left, bottom, right]
-        #   normalized 0..1000
-        #
-        # However, the model has occasionally returned pixel
-        # coordinates such as:
-        #
-        #   [499, 470, 1046, 560]
-        #
-        # on a 1280x759 detector image.
-        #
-        # We only switch to pixel interpretation when at least
-        # one value exceeds 1000 AND the complete rectangle still
-        # fits inside the detector image. Otherwise we preserve
-        # the existing normalized interpretation.
-        # --------------------------------------------------
-
-        raw_box = candidate.get(
-            "box_2d"
+        box = normalize_box_2d(
+            candidate.get(
+                "box_2d"
+            ),
+            width,
+            height
         )
 
-        box = None
+        if not box:
+
+            continue
 
         if (
-            isinstance(
-                raw_box,
-                (list, tuple)
-            )
-            and
-            len(raw_box) >= 4
+            box["right"]
+            <=
+            box["left"]
         ):
 
-            try:
+            continue
 
-                v0 = float(
-                    raw_box[0]
-                )
+        if (
+            box["bottom"]
+            <=
+            box["top"]
+        ):
 
-                v1 = float(
-                    raw_box[1]
-                )
-
-                v2 = float(
-                    raw_box[2]
-                )
-
-                v3 = float(
-                    raw_box[3]
-                )
-
-                looks_like_pixel_box = (
-                    max(
-                        abs(v0),
-                        abs(v1),
-                        abs(v2),
-                        abs(v3)
-                    )
-                    >
-                    1000.0
-                    and
-                    0.0 <= v0 <= float(width)
-                    and
-                    0.0 <= v1 <= float(height)
-                    and
-                    0.0 <= v2 <= float(width)
-                    and
-                    0.0 <= v3 <= float(height)
-                    and
-                    v2 > v0
-                    and
-                    v3 > v1
-                )
-
-                if looks_like_pixel_box:
-
-                    box = {
-
-                        "left":
-                            int(
-                                round(
-                                    v0
-                                )
-                            ),
-
-                        "top":
-                            int(
-                                round(
-                                    v1
-                                )
-                            ),
-
-                        "right":
-                            int(
-                                round(
-                                    v2
-                                )
-                            ),
-
-                        "bottom":
-                            int(
-                                round(
-                                    v3
-                                )
-                            )
-                    }
-
-                    logging.info(
-                        "YouTube candidate box "
-                        "interpreted as PIXEL "
-                        "[left,top,right,bottom]: "
-                        f"{v0},{v1},{v2},{v3}"
-                    )
-
-                else:
-
-                    box = normalize_box_2d(
-                        raw_box,
-                        width,
-                        height
-                    )
-
-                    if box:
-
-                        logging.info(
-                            "YouTube candidate box "
-                            "interpreted using "
-                            "existing normalized "
-                            "[top,left,bottom,right] "
-                            "convention: "
-                            f"{v0},{v1},{v2},{v3}"
-                        )
-
-            except (
-                TypeError,
-                ValueError
-            ):
-
-                box = None
-
-        if not box:
             continue
 
         title = str(
@@ -5315,81 +4742,6 @@ def find_first_verified_youtube_result(
                 False
             )
         )
-
-        # --------------------------------------------------
-        # Deterministic ad-language safety layer.
-        #
-        # The vision model is not authoritative by itself.
-        # Even when it incorrectly returns is_ad=False,
-        # explicitly promotional language must still cause
-        # the candidate to be rejected.
-        #
-        # These are intentionally strong indicators rather
-        # than generic commercial words such as "shop" or
-        # "product", which can legitimately appear in videos.
-        # --------------------------------------------------
-
-        combined_candidate_text = " ".join(
-            [
-                title,
-                channel,
-                context_text,
-                candidate_ad_evidence
-            ]
-        ).lower()
-
-        explicit_ad_patterns = [
-            r"\bsponsored\b",
-            r"\bsponsor(?:ed)?\s+by\b",
-            r"\badvertisement\b",
-            r"\badvertiser\b",
-            r"\bpromoted\b",
-            r"\bpaid\s+promotion\b",
-            r"\bpaid\s+partnership\b",
-            r"\bpromotional\b",
-            r"\bpromoted\s+content\b",
-            r"\bvisit\s+(?:the\s+)?advertiser\b",
-            r"\blearn\s+more\b",
-            r"\bshop\s+now\b",
-            r"\bbuy\s+now\b",
-            r"\binstall\s+now\b",
-            r"\bdownload\s+now\b",
-            r"\bsign\s+up\s+now\b",
-            r"\bget\s+started\b",
-            r"\border\s+now\b",
-            r"\btry\s+it\s+now\b",
-        ]
-
-        explicit_ad_matches = []
-
-        for pattern in explicit_ad_patterns:
-
-            if re.search(
-                pattern,
-                combined_candidate_text,
-                re.IGNORECASE
-            ):
-
-                explicit_ad_matches.append(
-                    pattern
-                )
-
-        detector_text_ad = bool(
-            explicit_ad_matches
-        )
-
-        if detector_text_ad:
-
-            logging.info(
-                f"YouTube candidate: "
-                f"REJECTED BY DETERMINISTIC AD "
-                f"LANGUAGE FILTER "
-                f"title={title!r} "
-                f"channel={channel!r} "
-                f"matches={explicit_ad_matches}"
-            )
-
-            continue
 
         box_width = (
             box["right"]
@@ -5792,42 +5144,13 @@ def find_first_verified_youtube_result(
         # evidence.
         # --------------------------------------------------
 
-        # --------------------------------------------------
-        # Final ad safety.
-        #
-        # The verifier can reject an ad, but it cannot
-        # override the deterministic ad filter above.
-        # --------------------------------------------------
-
-        verifier_is_ad = bool(
-            verification.get(
-                "is_ad",
-                False
-            )
-        )
-
-        verifier_ad_evidence = str(
-            verification.get(
-                "ad_evidence",
-                ""
-            )
-        ).strip()
-
-        if verifier_is_ad:
+        if verification[
+            "is_ad"
+        ]:
 
             logging.info(
                 f"YouTube candidate {index}: "
                 "REJECTED AS AD BY VERIFIER."
-            )
-
-            continue
-
-        if verifier_ad_evidence:
-
-            logging.info(
-                f"YouTube candidate {index}: "
-                "REJECTED: verifier supplied "
-                f"ad evidence={verifier_ad_evidence!r}"
             )
 
             continue
@@ -5965,18 +5288,67 @@ def find_first_verified_youtube_result(
         # --------------------------------------------------
         # Candidate is now verified.
         #
-        # The result has already passed:
-        #   - detector-side ad rejection
-        #   - deterministic relevance
-        #   - structural verification
-        #   - is_video validation
-        #
-        # Do not require a second thumbnail detector here.
-        # YouTube Music / Topic rows can use thumbnail layouts
-        # that the small vision model fails to localize.
-        #
-        # The click-point helper now derives a conservative point
-        # directly from the VERIFIED candidate row.
+        # BEFORE CLICKING:
+        # independently locate its thumbnail.
+        # --------------------------------------------------
+
+        thumbnail = locate_youtube_thumbnail(
+            image,
+            box,
+            index
+        )
+
+        if not thumbnail:
+
+            logging.info(
+                f"YouTube candidate {index}: "
+                "REJECTED: could not safely "
+                "locate thumbnail."
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # Ensure thumbnail is inside verified candidate.
+        # --------------------------------------------------
+
+        if not validate_youtube_thumbnail_inside_candidate(
+            thumbnail,
+            box,
+            index
+        ):
+
+            logging.info(
+                f"YouTube candidate {index}: "
+                "REJECTED: thumbnail is not safely "
+                "inside verified result row."
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # Convert thumbnail to screen coordinates.
+        # --------------------------------------------------
+
+        thumbnail_screen_box = (
+            crop_to_screen_box(
+                thumbnail,
+                vision_info
+            )
+        )
+
+        if not thumbnail_screen_box:
+
+            logging.info(
+                f"YouTube candidate {index}: "
+                "thumbnail screen coordinate "
+                "conversion failed."
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # Convert candidate to screen coordinates.
         # --------------------------------------------------
 
         screen_box = crop_to_screen_box(
@@ -5994,9 +5366,28 @@ def find_first_verified_youtube_result(
 
             continue
 
+        # --------------------------------------------------
+        # Ensure thumbnail remains physically inside the
+        # candidate after coordinate conversion.
+        # --------------------------------------------------
+
+        if not validate_youtube_thumbnail_inside_candidate(
+            thumbnail_screen_box,
+            screen_box,
+            index
+        ):
+
+            logging.info(
+                f"YouTube candidate {index}: "
+                "REJECTED: converted thumbnail "
+                "escaped candidate bounds."
+            )
+
+            continue
+
         click_point = (
             get_youtube_thumbnail_click_point(
-                None,
+                thumbnail_screen_box,
                 screen_box,
                 index
             )
@@ -6006,117 +5397,13 @@ def find_first_verified_youtube_result(
 
             logging.info(
                 f"YouTube candidate {index}: "
-                "REJECTED: no safe verified-row "
+                "REJECTED: no safe thumbnail "
                 "click point."
             )
 
             continue
 
         click_x, click_y = click_point
-
-        # --------------------------------------------------
-        # Final strict bounds validation.
-        # --------------------------------------------------
-
-        if not (
-            screen_box["left"]
-            <=
-            click_x
-            <=
-            screen_box["right"]
-            and
-            screen_box["top"]
-            <=
-            click_y
-            <=
-            screen_box["bottom"]
-        ):
-
-            logging.info(
-                f"YouTube candidate {index}: "
-                "REJECTED: click point escaped "
-                "verified row bounds."
-            )
-
-            continue
-
-        logging.info(
-            f"YouTube verified row click candidate "
-            f"{index}: "
-            f"{click_x},{click_y}"
-        )
-
-        # --------------------------------------------------
-        # Mouse calibration remains zero.
-        # --------------------------------------------------
-
-        click_x, click_y = (
-            convert_coordinates(
-                click_x,
-                click_y,
-                clicking=True,
-                target=target
-            )
-        )
-
-        #
-        # Search-result rows can vertically overlap slightly
-        # when the vision model's boxes are imperfect.
-        #
-        # A thumbnail center can therefore be mathematically
-        # inside the accepted row while still being too close
-        # to the row above it.
-        #
-        # Keep the final click point safely inside the lower
-        # interior of the VERIFIED candidate.
-        # --------------------------------------------------
-
-        candidate_top = int(
-            screen_box["top"]
-        )
-
-        candidate_bottom = int(
-            screen_box["bottom"]
-        )
-
-        candidate_height = (
-            candidate_bottom
-            -
-            candidate_top
-        )
-
-        if candidate_height > 0:
-
-            safe_click_y = (
-                candidate_top
-                +
-                int(
-                    candidate_height
-                    *
-                    0.45
-                )
-            )
-
-            original_click_y = click_y
-
-            click_y = max(
-                click_y,
-                safe_click_y
-            )
-
-            click_y = min(
-                click_y,
-                candidate_bottom - 10
-            )
-
-            logging.info(
-                f"YouTube final click safety "
-                f"candidate {index}: "
-                f"y={original_click_y} -> {click_y} "
-                f"candidate_vertical="
-                f"{candidate_top}-{candidate_bottom} "
-                f"safe_y={safe_click_y}"
-            )
 
         # --------------------------------------------------
         # Mouse calibration remains zero.
@@ -6175,30 +5462,45 @@ def find_first_verified_youtube_result(
                 True,
 
             "title":
-                detector_title,
+                (
+                    detector_title
+                    or
+                    verifier_title
+                ),
 
             "channel":
-                detector_channel,
+                (
+                    detector_channel
+                    or
+                    verifier_channel
+                ),
 
             "context_text":
-                detector_context,
+                (
+                    detector_context
+                    or
+                    verifier_context
+                ),
 
             "deterministic_match_score":
-                detector_match["score"],
+                max(
+                    detector_match["score"],
+                    verifier_score["score"]
+                ),
 
             "thumbnail":
                 {
                     "left":
-                        screen_box["left"],
+                        thumbnail_screen_box["left"],
 
                     "top":
-                        screen_box["top"],
+                        thumbnail_screen_box["top"],
 
                     "right":
-                        screen_box["right"],
+                        thumbnail_screen_box["right"],
 
                     "bottom":
-                        screen_box["bottom"]
+                        thumbnail_screen_box["bottom"]
                 },
 
             "click_x":
@@ -6386,28 +5688,6 @@ def get_center(
         bottom - top
     )
 
-    # ------------------------------------------------------
-    # Google/search-result click point
-    # ------------------------------------------------------
-    # Search-result boxes often cover the entire result row.
-    # The title/link is normally near the upper portion of
-    # that row, so clicking the mathematical center can miss.
-    # Keep YouTube verified-thumbnail handling untouched;
-    # this helper is only being changed for generic clicks.
-    target_text = str(target or "").lower()
-
-    if (
-        "organic google result" in target_text
-        or "google result" in target_text
-        or "search result" in target_text
-    ):
-        x = left + int(width * 0.50)
-        y = top + max(
-            8,
-            int(height * 0.20)
-        )
-        return x, y
-
     x = (
         left
         +
@@ -6420,10 +5700,10 @@ def get_center(
         bottom
     ) // 2
 
-
-# ==========================================================
     return x, y
 
+
+# ==========================================================
 # Move Mouse To Target
 # ==========================================================
 
@@ -6530,468 +5810,9 @@ def move_mouse_to_target(
 # Click Target
 # ==========================================================
 
-
-# ==========================================================
-# JARVIS FAST LOCAL YOUTUBE SAFETY HELPERS
-# ==========================================================
-
-def youtube_region_signature(
-    screen_box,
-    size=24
-):
-    """
-    Cheap local screenshot fingerprint.
-
-    No Ollama.
-    No vision model.
-    """
-
-    try:
-
-        screenshot = pyautogui.screenshot()
-
-        left = max(
-            0,
-            int(screen_box.get("left", 0))
-        )
-
-        top = max(
-            0,
-            int(screen_box.get("top", 0))
-        )
-
-        right = min(
-            screenshot.width,
-            int(screen_box.get("right", 0))
-        )
-
-        bottom = min(
-            screenshot.height,
-            int(screen_box.get("bottom", 0))
-        )
-
-        if (
-            right <= left
-            or
-            bottom <= top
-        ):
-
-            return None
-
-        crop = screenshot.crop(
-            (
-                left,
-                top,
-                right,
-                bottom
-            )
-        )
-
-        crop = crop.convert(
-            "L"
-        )
-
-        crop = crop.resize(
-            (
-                size,
-                size
-            )
-        )
-
-        return tuple(
-            int(pixel // 8)
-            for pixel in crop.getdata()
-        )
-
-    except Exception as exc:
-
-        logging.warning(
-            "YouTube region signature failed: %s",
-            exc
-        )
-
-        return None
-
-
-def youtube_region_difference(
-    first,
-    second
-):
-    if not first or not second:
-
-        return 1.0
-
-    if len(first) != len(second):
-
-        return 1.0
-
-    changed = 0
-
-    total = len(first)
-
-    for a, b in zip(
-        first,
-        second
-    ):
-
-        if abs(
-            a - b
-        ) > 1:
-
-            changed += 1
-
-    return (
-        changed
-        /
-        max(
-            1,
-            total
-        )
-    )
-
-
-def youtube_fast_pre_click_check(
-    screen_box,
-    delay=0.05,
-    max_difference=0.035
-):
-    """
-    Fast local pre-click safety gate.
-
-    Takes two tiny screenshots of the verified YouTube
-    result region.
-
-    If the region is stable, the click is allowed.
-
-    If it is moving, the caller falls back to the existing
-    expensive full YouTube verification pipeline.
-    """
-
-    if not screen_box:
-
-        logging.warning(
-            "YouTube fast pre-click verification rejected: "
-            "missing screen region."
-        )
-
-        return False
-
-    first = youtube_region_signature(
-        screen_box
-    )
-
-    if not first:
-
-        logging.warning(
-            "YouTube fast pre-click verification rejected: "
-            "first capture failed."
-        )
-
-        return False
-
-    if delay > 0:
-
-        time.sleep(
-            delay
-        )
-
-    second = youtube_region_signature(
-        screen_box
-    )
-
-    if not second:
-
-        logging.warning(
-            "YouTube fast pre-click verification rejected: "
-            "second capture failed."
-        )
-
-        return False
-
-    difference = (
-        youtube_region_difference(
-            first,
-            second
-        )
-    )
-
-    logging.info(
-        "YouTube fast pre-click visual difference: %.3f",
-        difference
-    )
-
-    if difference > max_difference:
-
-        logging.warning(
-            "YouTube fast pre-click verification FAILED: "
-            "verified region changed."
-        )
-
-        return False
-
-    logging.info(
-        "YouTube fast pre-click verification PASSED."
-    )
-
-    return True
-
-
 def click_screen_target(
     target
 ):
-
-    # --------------------------------------------------------
-    # Browser address bar / omnibox.
-    #
-    # Use the browser keyboard shortcut instead of visual
-    # localization. Ctrl+L directly focuses the address bar.
-    # --------------------------------------------------------
-
-    target_text = str(
-        target
-    ).lower().strip()
-
-    address_bar_terms = [
-        "address bar",
-        "url bar",
-        "omnibox",
-        "browser address bar"
-    ]
-
-    if any(
-        term in target_text
-        for term in address_bar_terms
-    ):
-        try:
-            logging.info(
-                "Focusing browser address bar with Ctrl+L"
-            )
-
-            pyautogui.hotkey(
-                "ctrl",
-                "l"
-            )
-
-            return {
-                "found":
-                    True,
-
-                "confidence":
-                    1.0,
-
-                "success":
-                    True,
-
-                "description":
-                    "browser address bar"
-            }
-
-        except Exception as e:
-            logging.error(
-                f"Address bar shortcut failed: {e}"
-            )
-
-            return {
-                "found":
-                    False,
-
-                "success":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "message":
-                    f"Could not focus address bar: {e}"
-            }
-
-    # --------------------------------------------------------
-    # Search bar / search field:
-    #
-    # If the previous command focused the browser omnibox
-    # with Ctrl+L, Escape first so the webpage regains focus
-    # before the vision model searches for the page's search
-    # field.
-    # --------------------------------------------------------
-
-    search_bar_terms = [
-        "search bar",
-        "search box",
-        "search field",
-        "search input",
-        "site search"
-    ]
-
-    if any(
-        term in target_text
-        for term in search_bar_terms
-    ):
-        try:
-            logging.info(
-                "Returning webpage focus before visual search-bar lookup"
-            )
-
-            pyautogui.press(
-                "esc"
-            )
-
-            time.sleep(
-                0.15
-            )
-
-        except Exception as e:
-            logging.warning(
-                f"Could not clear browser focus before search lookup: {e}"
-            )
-
-    # --------------------------------------------------------
-    # YouTube search bar.
-    #
-    # YouTube supports '/' as the keyboard shortcut to focus
-    # the search box. This is more reliable than vision for
-    # this fixed browser control.
-    # --------------------------------------------------------
-
-    youtube_search_terms = [
-        "youtube search bar",
-        "youtube search box",
-        "youtube search field"
-    ]
-
-    if any(
-        term in target_text
-        for term in youtube_search_terms
-    ):
-        try:
-            logging.info(
-                "Focusing YouTube search bar with Escape + /"
-            )
-
-            pyautogui.press(
-                "esc"
-            )
-
-            time.sleep(
-                0.10
-            )
-
-            pyautogui.press(
-                "/"
-            )
-
-            return {
-                "found":
-                    True,
-
-                "confidence":
-                    1.0,
-
-                "success":
-                    True,
-
-                "description":
-                    "YouTube search bar"
-            }
-
-        except Exception as e:
-            logging.error(
-                f"YouTube search shortcut failed: {e}"
-            )
-
-            return {
-                "found":
-                    False,
-
-                "success":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "message":
-                    f"Could not focus YouTube search bar: {e}"
-            }
-
-    # --------------------------------------------------------
-    # YouTube search control deterministic routing
-    #
-    # Commands such as:
-    #   Click the search bar
-    #   Click this search bar
-    #   Click the search box
-    #
-    # cannot reliably distinguish the page search box from
-    # other search-like UI using the small local vision model.
-    #
-    # When Chrome is on YouTube, '/' focuses YouTube's search
-    # control directly. Use that before generic vision.
-    # --------------------------------------------------------
-
-    youtube_search_generic_terms = [
-        "search bar",
-        "search box",
-        "search field",
-        "search input"
-    ]
-
-    if any(
-        term in target_text
-        for term in youtube_search_generic_terms
-    ):
-        try:
-            # Inspect the current page through the URL/title if
-            # available from the active browser window.
-            import pygetwindow as gw
-
-            active_window = gw.getActiveWindow()
-
-            window_title = ""
-
-            if active_window is not None:
-                window_title = str(
-                    active_window.title or ""
-                ).lower()
-
-            is_youtube_window = (
-                "youtube" in window_title
-                or "youtube.com" in window_title
-            )
-
-            if is_youtube_window:
-                logging.info(
-                    "YouTube search control deterministic routing"
-                )
-
-                pyautogui.press(
-                    "esc"
-                )
-
-                time.sleep(
-                    0.10
-                )
-
-                pyautogui.press(
-                    "/"
-                )
-
-                return {
-                    "found":
-                        True,
-
-                    "confidence":
-                        1.0,
-
-                    "success":
-                        True,
-
-                    "description":
-                        "YouTube search bar"
-                }
-
-        except Exception as e:
-            logging.warning(
-                f"YouTube search shortcut routing failed: {e}"
-            )
 
     result = find_screen_target(
         target
@@ -7070,243 +5891,6 @@ def click_screen_target(
             )
         )
 
-
-    # --------------------------------------------------
-    # FAST PRE-CLICK YOUTUBE VERIFICATION
-    #
-    # The expensive YouTube detector/verifier has already
-    # confirmed this result.
-    #
-    # Instead of running Ollama a second time, perform a
-    # tiny local visual-stability check immediately before
-    # the physical click.
-    #
-    # If the region changed, fall back to the existing
-    # full YouTube verification pipeline.
-    # --------------------------------------------------
-
-    if is_youtube_target(
-        target
-    ):
-
-        logging.info(
-            "YouTube fast pre-click verification starting."
-        )
-
-        verified_region = result.get(
-            "thumbnail"
-        )
-
-        if not verified_region:
-
-            logging.warning(
-                "YouTube fast pre-click verification rejected: "
-                "missing verified result region."
-            )
-
-            return {
-                "success":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "message":
-                    "YouTube click rejected: "
-                    "missing verified result region."
-            }
-
-
-        # --------------------------------------------------
-        # FAST LOCAL CHECK
-        # --------------------------------------------------
-
-        stable = (
-            youtube_fast_pre_click_check(
-                verified_region
-            )
-        )
-
-
-        # --------------------------------------------------
-        # FAST PATH
-        # --------------------------------------------------
-
-        if stable:
-
-            fresh_click_x = result.get(
-                "click_x"
-            )
-
-            fresh_click_y = result.get(
-                "click_y"
-            )
-
-            if (
-                fresh_click_x is None
-                or
-                fresh_click_y is None
-            ):
-
-                logging.warning(
-                    "YouTube fast pre-click verification "
-                    "rejected: missing verified click point."
-                )
-
-                return {
-                    "success":
-                        False,
-
-                    "confidence":
-                        0.0,
-
-                    "message":
-                        "No verified YouTube click point available."
-                }
-
-
-            mouse_x, mouse_y = (
-                convert_coordinates(
-                    fresh_click_x,
-                    fresh_click_y,
-                    clicking=True,
-                    target=target
-                )
-            )
-
-            logging.info(
-                "YouTube fast pre-click verification "
-                "PASSED. Using verified click="
-                f"{mouse_x},{mouse_y}"
-            )
-
-
-        # --------------------------------------------------
-        # SLOW FALLBACK ONLY IF REGION CHANGED
-        # --------------------------------------------------
-
-        else:
-
-            logging.warning(
-                "YouTube result changed immediately "
-                "before click."
-            )
-
-            logging.warning(
-                "Running full YouTube re-verification."
-            )
-
-            fresh_result = (
-                find_first_verified_youtube_result(
-                    target
-                )
-            )
-
-            if not fresh_result.get(
-                "found",
-                False
-            ):
-
-                logging.warning(
-                    "YouTube full re-verification failed."
-                )
-
-                logging.warning(
-                    "CLICK ABORTED."
-                )
-
-                return {
-                    "success":
-                        False,
-
-                    "confidence":
-                        0.0,
-
-                    "message":
-                        "YouTube click aborted because "
-                        "the result could not be re-verified."
-                }
-
-
-            if not fresh_result.get(
-                "verified",
-                False
-            ):
-
-                logging.warning(
-                    "YouTube full re-verification "
-                    "rejected the result."
-                )
-
-                logging.warning(
-                    "CLICK ABORTED."
-                )
-
-                return {
-                    "success":
-                        False,
-
-                    "confidence":
-                        0.0,
-
-                    "message":
-                        "YouTube result failed final "
-                        "safety verification."
-                }
-
-
-            fresh_click_x = fresh_result.get(
-                "click_x"
-            )
-
-            fresh_click_y = fresh_result.get(
-                "click_y"
-            )
-
-            if (
-                fresh_click_x is None
-                or
-                fresh_click_y is None
-            ):
-
-                logging.warning(
-                    "YouTube full re-verification "
-                    "returned no safe click point."
-                )
-
-                logging.warning(
-                    "CLICK ABORTED."
-                )
-
-                return {
-                    "success":
-                        False,
-
-                    "confidence":
-                        0.0,
-
-                    "message":
-                        "No safe YouTube click point "
-                        "was available."
-                }
-
-
-            mouse_x, mouse_y = (
-                convert_coordinates(
-                    fresh_click_x,
-                    fresh_click_y,
-                    clicking=True,
-                    target=target
-                )
-            )
-
-            logging.info(
-                "YouTube full re-verification PASSED. "
-                "Fresh click="
-                f"{mouse_x},{mouse_y}"
-            )
-
-
     logging.info(
         f"Clicking: "
         f"{mouse_x},{mouse_y}"
@@ -7316,10 +5900,6 @@ def click_screen_target(
         mouse_x,
         mouse_y,
         duration=0.2
-    )
-
-    time.sleep(
-        0.10
     )
 
     pyautogui.click()

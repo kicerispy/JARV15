@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import time
 import ctypes
@@ -481,6 +481,7 @@ def is_youtube_target(
     keywords = [
         "youtube",
         "first video",
+        "first result",
         "video result",
         "first youtube",
         "organic result",
@@ -1430,273 +1431,6 @@ def clean_location(
 # Generic Screen Target Locator
 # ==========================================================
 
-
-# ==========================================================
-# Generic Vision Candidate Validation
-# ==========================================================
-
-def validate_generic_vision_candidate(
-    target,
-    result
-):
-    """
-    Deterministically reject geometrically implausible
-    generic vision results.
-
-    Vision confidence alone is not sufficient to authorize
-    a mouse action.
-    """
-
-    if not isinstance(result, dict):
-        return {
-            "valid": False,
-            "reason": "result is not a dictionary"
-        }
-
-    if not result.get("found", False):
-        return {
-            "valid": False,
-            "reason": "vision reported target not found"
-        }
-
-    try:
-        left = int(result.get("left", 0))
-        top = int(result.get("top", 0))
-        right = int(result.get("right", 0))
-        bottom = int(result.get("bottom", 0))
-    except Exception:
-        return {
-            "valid": False,
-            "reason": "invalid bounding box values"
-        }
-
-    try:
-        width, height = pyautogui.size()
-    except Exception:
-        return {
-            "valid": False,
-            "reason": "could not determine screen size"
-        }
-
-    box_width = right - left
-    box_height = bottom - top
-
-    if box_width <= 0 or box_height <= 0:
-        return {
-            "valid": False,
-            "reason": "invalid bounding box dimensions"
-        }
-
-    if width <= 0 or height <= 0:
-        return {
-            "valid": False,
-            "reason": "invalid screen dimensions"
-        }
-
-    target_text = str(target).lower().strip()
-
-    width_ratio = box_width / float(width)
-    height_ratio = box_height / float(height)
-    top_ratio = top / float(height)
-    bottom_ratio = bottom / float(height)
-
-    center_x = (left + right) / 2.0
-    center_x_ratio = center_x / float(width)
-
-    # ------------------------------------------------------
-    # Universal sanity checks
-    # ------------------------------------------------------
-
-    large_region_terms = [
-        "screen",
-        "window",
-        "page",
-        "desktop",
-        "browser window",
-        "content area",
-        "full screen"
-    ]
-
-    is_large_region_request = any(
-        term in target_text
-        for term in large_region_terms
-    )
-
-    if not is_large_region_request:
-        if width_ratio > 0.85 and height_ratio > 0.45:
-            return {
-                "valid": False,
-                "reason":
-                    f"candidate is implausibly large "
-                    f"({width_ratio:.2f}w x {height_ratio:.2f}h)"
-            }
-
-    # Very tall and narrow boxes are frequently false
-    # detections caused by coordinate hallucination.
-    if (
-        height_ratio > 0.65
-        and
-        width_ratio < 0.20
-    ):
-        return {
-            "valid": False,
-            "reason":
-                "candidate is an implausibly tall narrow region"
-        }
-
-    if box_width < 5 or box_height < 5:
-        return {
-            "valid": False,
-            "reason": "candidate is too small"
-        }
-
-    # ------------------------------------------------------
-    # Address bar / URL bar / omnibox
-    # ------------------------------------------------------
-
-    if (
-        "address bar" in target_text
-        or
-        "url bar" in target_text
-        or
-        "omnibox" in target_text
-        or
-        "browser address bar" in target_text
-    ):
-        # Browser address bars should be near the very top.
-        if top_ratio > 0.20:
-            return {
-                "valid": False,
-                "reason":
-                    f"address bar candidate is too low "
-                    f"(top={top_ratio:.2f})"
-            }
-
-        # It should generally be substantially wider than
-        # it is tall.
-        if width_ratio < 0.25:
-            return {
-                "valid": False,
-                "reason":
-                    f"address bar candidate is too narrow "
-                    f"(width={width_ratio:.2f})"
-            }
-
-        if height_ratio > 0.15:
-            return {
-                "valid": False,
-                "reason":
-                    f"address bar candidate is too tall "
-                    f"(height={height_ratio:.2f})"
-            }
-
-    # ------------------------------------------------------
-    # Chrome / browser menu
-    # ------------------------------------------------------
-
-    if (
-        "chrome menu" in target_text
-        or
-        "browser menu" in target_text
-        or
-        "three dot menu" in target_text
-        or
-        "three-dot menu" in target_text
-        or
-        "menu button" in target_text
-    ):
-        if top_ratio > 0.20:
-            return {
-                "valid": False,
-                "reason":
-                    f"browser menu candidate is too low "
-                    f"(top={top_ratio:.2f})"
-            }
-
-        if center_x_ratio < 0.75:
-            return {
-                "valid": False,
-                "reason":
-                    f"browser menu candidate is not far enough right "
-                    f"(center_x={center_x_ratio:.2f})"
-            }
-
-        if width_ratio > 0.15 or height_ratio > 0.15:
-            return {
-                "valid": False,
-                "reason":
-                    "browser menu candidate is too large"
-            }
-
-    # ------------------------------------------------------
-    # Search controls
-    # ------------------------------------------------------
-
-    if (
-        "search box" in target_text
-        or
-        "search bar" in target_text
-        or
-        "search field" in target_text
-    ):
-        if width_ratio < 0.15:
-            return {
-                "valid": False,
-                "reason":
-                    "search box candidate is too narrow"
-            }
-
-    # ------------------------------------------------------
-    # Top-bar controls
-    # ------------------------------------------------------
-
-    top_bar_terms = [
-        "toolbar",
-        "tab bar",
-        "title bar",
-        "navigation bar",
-        "nav bar",
-        "browser toolbar"
-    ]
-
-    if any(
-        term in target_text
-        for term in top_bar_terms
-    ):
-        if top_ratio > 0.25:
-            return {
-                "valid": False,
-                "reason":
-                    "top-bar target candidate is too low"
-            }
-
-    # ------------------------------------------------------
-    # Bottom-bar controls
-    # ------------------------------------------------------
-
-    bottom_bar_terms = [
-        "taskbar",
-        "dock",
-        "status bar"
-    ]
-
-    if any(
-        term in target_text
-        for term in bottom_bar_terms
-    ):
-        if bottom_ratio < 0.75:
-            return {
-                "valid": False,
-                "reason":
-                    "bottom-bar target candidate is too high"
-            }
-
-    return {
-        "valid": True,
-        "reason": "geometry passed"
-    }
-
-
 def _find_screen_target_generic(
     target
 ):
@@ -1965,163 +1699,11 @@ If no confident match exists:
 
             continue
 
-        # --------------------------------------------------------
-        # Normalize model bounding-box output.
-        #
-        # Vision models may return:
-        #     box_2d = [top, left, bottom, right]
-        #
-        # clean_location() expects:
-        #     left, top, right, bottom
-        #
-        # Convert box_2d into the internal coordinate keys before
-        # clean_location() clamps and validates the candidate.
-        # --------------------------------------------------------
-
-        box_2d = result.get(
-            "box_2d"
-        )
-
-        if isinstance(box_2d, (list, tuple)) and len(box_2d) >= 4:
-            try:
-                result["top"] = int(
-                box_2d[1]
-                )
-
-                result["left"] = int(
-                    box_2d[0]
-                )
-
-                result["bottom"] = int(
-                    box_2d[3]
-                )
-
-                result["right"] = int(
-                    box_2d[2]
-                )
-
-                result["box_2d_normalized"] = True
-
-                # Generic detector output uses:
-                # [left, top, right, bottom]
-                #
-                # Remove the raw box_2d after converting it so
-                # extract_box_from_result() cannot reinterpret
-                # it using the legacy normalized convention.
-                result.pop(
-                    "box_2d",
-                    None
-                )
-
-            except (TypeError, ValueError):
-                result["found"] = False
-                result["box_2d_normalized"] = False
-
         crop_result = clean_location(
             result,
             vision_width,
             vision_height
         )
-
-        # Convert the model's vision-image coordinates
-        # into physical full-screen coordinates BEFORE
-        # performing deterministic geometry validation.
-
-        screen_box = crop_to_screen_box(
-            crop_result,
-            vision_info
-        )
-
-        if not screen_box:
-            last_failure = {
-                "found":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "description":
-                    "coordinate conversion failed"
-            }
-
-            continue
-
-        validation_result = {
-            "found":
-                crop_result.get(
-                    "found",
-                    False
-                ),
-
-            "confidence":
-                crop_result.get(
-                    "confidence",
-                    0.0
-                ),
-
-            "left":
-                screen_box["left"],
-
-            "top":
-                screen_box["top"],
-
-            "right":
-                screen_box["right"],
-
-            "bottom":
-                screen_box["bottom"]
-        }
-
-        logging.info(
-            "GENERIC VISION GEOMETRY DEBUG: "
-            f"crop_result="
-            f"left={crop_result.get('left')} "
-            f"top={crop_result.get('top')} "
-            f"right={crop_result.get('right')} "
-            f"bottom={crop_result.get('bottom')} "
-            f"found={crop_result.get('found')} "
-            f"confidence={crop_result.get('confidence')}"
-        )
-
-        logging.info(
-            "GENERIC VISION SCREEN BOX DEBUG: "
-            f"left={screen_box.get('left')} "
-            f"top={screen_box.get('top')} "
-            f"right={screen_box.get('right')} "
-            f"bottom={screen_box.get('bottom')} "
-            f"width={screen_box.get('right', 0) - screen_box.get('left', 0)} "
-            f"height={screen_box.get('bottom', 0) - screen_box.get('top', 0)}"
-        )
-
-        validation = validate_generic_vision_candidate(
-            target,
-            validation_result
-        )
-
-        if not validation["valid"]:
-            logging.warning(
-                "Vision candidate rejected: "
-                f"{validation['reason']}"
-            )
-
-            last_failure = {
-                "found":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "description":
-                    "vision candidate rejected: "
-                    f"{validation['reason']}",
-
-                "validation_reason":
-                    validation["reason"]
-            }
-
-            continue
-
-
 
         if not crop_result.get(
             "found",
@@ -2146,6 +1728,23 @@ If no confident match exists:
 
         return last_failure
 
+    screen_box = crop_to_screen_box(
+        crop_result,
+        vision_info
+    )
+
+    if not screen_box:
+
+        return {
+            "found":
+                False,
+
+            "confidence":
+                0.0,
+
+            "description":
+                "coordinate conversion failed"
+        }
 
     screen_width = vision_info[
         "screen_width"
@@ -6386,28 +5985,6 @@ def get_center(
         bottom - top
     )
 
-    # ------------------------------------------------------
-    # Google/search-result click point
-    # ------------------------------------------------------
-    # Search-result boxes often cover the entire result row.
-    # The title/link is normally near the upper portion of
-    # that row, so clicking the mathematical center can miss.
-    # Keep YouTube verified-thumbnail handling untouched;
-    # this helper is only being changed for generic clicks.
-    target_text = str(target or "").lower()
-
-    if (
-        "organic google result" in target_text
-        or "google result" in target_text
-        or "search result" in target_text
-    ):
-        x = left + int(width * 0.50)
-        y = top + max(
-            8,
-            int(height * 0.20)
-        )
-        return x, y
-
     x = (
         left
         +
@@ -6420,10 +5997,10 @@ def get_center(
         bottom
     ) // 2
 
-
-# ==========================================================
     return x, y
 
+
+# ==========================================================
 # Move Mouse To Target
 # ==========================================================
 
@@ -6739,259 +6316,6 @@ def youtube_fast_pre_click_check(
 def click_screen_target(
     target
 ):
-
-    # --------------------------------------------------------
-    # Browser address bar / omnibox.
-    #
-    # Use the browser keyboard shortcut instead of visual
-    # localization. Ctrl+L directly focuses the address bar.
-    # --------------------------------------------------------
-
-    target_text = str(
-        target
-    ).lower().strip()
-
-    address_bar_terms = [
-        "address bar",
-        "url bar",
-        "omnibox",
-        "browser address bar"
-    ]
-
-    if any(
-        term in target_text
-        for term in address_bar_terms
-    ):
-        try:
-            logging.info(
-                "Focusing browser address bar with Ctrl+L"
-            )
-
-            pyautogui.hotkey(
-                "ctrl",
-                "l"
-            )
-
-            return {
-                "found":
-                    True,
-
-                "confidence":
-                    1.0,
-
-                "success":
-                    True,
-
-                "description":
-                    "browser address bar"
-            }
-
-        except Exception as e:
-            logging.error(
-                f"Address bar shortcut failed: {e}"
-            )
-
-            return {
-                "found":
-                    False,
-
-                "success":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "message":
-                    f"Could not focus address bar: {e}"
-            }
-
-    # --------------------------------------------------------
-    # Search bar / search field:
-    #
-    # If the previous command focused the browser omnibox
-    # with Ctrl+L, Escape first so the webpage regains focus
-    # before the vision model searches for the page's search
-    # field.
-    # --------------------------------------------------------
-
-    search_bar_terms = [
-        "search bar",
-        "search box",
-        "search field",
-        "search input",
-        "site search"
-    ]
-
-    if any(
-        term in target_text
-        for term in search_bar_terms
-    ):
-        try:
-            logging.info(
-                "Returning webpage focus before visual search-bar lookup"
-            )
-
-            pyautogui.press(
-                "esc"
-            )
-
-            time.sleep(
-                0.15
-            )
-
-        except Exception as e:
-            logging.warning(
-                f"Could not clear browser focus before search lookup: {e}"
-            )
-
-    # --------------------------------------------------------
-    # YouTube search bar.
-    #
-    # YouTube supports '/' as the keyboard shortcut to focus
-    # the search box. This is more reliable than vision for
-    # this fixed browser control.
-    # --------------------------------------------------------
-
-    youtube_search_terms = [
-        "youtube search bar",
-        "youtube search box",
-        "youtube search field"
-    ]
-
-    if any(
-        term in target_text
-        for term in youtube_search_terms
-    ):
-        try:
-            logging.info(
-                "Focusing YouTube search bar with Escape + /"
-            )
-
-            pyautogui.press(
-                "esc"
-            )
-
-            time.sleep(
-                0.10
-            )
-
-            pyautogui.press(
-                "/"
-            )
-
-            return {
-                "found":
-                    True,
-
-                "confidence":
-                    1.0,
-
-                "success":
-                    True,
-
-                "description":
-                    "YouTube search bar"
-            }
-
-        except Exception as e:
-            logging.error(
-                f"YouTube search shortcut failed: {e}"
-            )
-
-            return {
-                "found":
-                    False,
-
-                "success":
-                    False,
-
-                "confidence":
-                    0.0,
-
-                "message":
-                    f"Could not focus YouTube search bar: {e}"
-            }
-
-    # --------------------------------------------------------
-    # YouTube search control deterministic routing
-    #
-    # Commands such as:
-    #   Click the search bar
-    #   Click this search bar
-    #   Click the search box
-    #
-    # cannot reliably distinguish the page search box from
-    # other search-like UI using the small local vision model.
-    #
-    # When Chrome is on YouTube, '/' focuses YouTube's search
-    # control directly. Use that before generic vision.
-    # --------------------------------------------------------
-
-    youtube_search_generic_terms = [
-        "search bar",
-        "search box",
-        "search field",
-        "search input"
-    ]
-
-    if any(
-        term in target_text
-        for term in youtube_search_generic_terms
-    ):
-        try:
-            # Inspect the current page through the URL/title if
-            # available from the active browser window.
-            import pygetwindow as gw
-
-            active_window = gw.getActiveWindow()
-
-            window_title = ""
-
-            if active_window is not None:
-                window_title = str(
-                    active_window.title or ""
-                ).lower()
-
-            is_youtube_window = (
-                "youtube" in window_title
-                or "youtube.com" in window_title
-            )
-
-            if is_youtube_window:
-                logging.info(
-                    "YouTube search control deterministic routing"
-                )
-
-                pyautogui.press(
-                    "esc"
-                )
-
-                time.sleep(
-                    0.10
-                )
-
-                pyautogui.press(
-                    "/"
-                )
-
-                return {
-                    "found":
-                        True,
-
-                    "confidence":
-                        1.0,
-
-                    "success":
-                        True,
-
-                    "description":
-                        "YouTube search bar"
-                }
-
-        except Exception as e:
-            logging.warning(
-                f"YouTube search shortcut routing failed: {e}"
-            )
 
     result = find_screen_target(
         target
