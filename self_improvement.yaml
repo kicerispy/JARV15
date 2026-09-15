@@ -1,0 +1,164 @@
+audio:
+  sample_rate: 16000
+  chunk_size: 1024
+  mic_device: 1
+  output_device: 5
+  voice_model_path: C:\Users\Jordan/.heed/voices/en_US-libritts_r-medium.onnx
+  tts_length_scale: 1.3
+  tts_noise_scale: 0.45
+  tts_noise_w: 0.6
+  pitch_ratio: 0.94
+  interrupt_threshold: 220
+  interrupt_chunks: 5
+  interrupt_grace_seconds: 0.4
+  prebuffer_seconds: 0.35
+  start_timeout: 5.0
+  continuous_start_timeout: 2.5
+  max_recording_seconds: 10.0
+  silence_threshold: 500
+  silence_duration: 0.8
+  barge_in_minimum_capture: 1.25
+  barge_in_silence_duration: 1.0
+debug: false
+log_level: INFO
+memory:
+  database_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - jarvis_memory.db
+  vector_db_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - vector_memory
+  graph_db_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - knowledge_graph
+  conversation_history_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - conversation_history.json
+  profile_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - profile.json
+  max_history_messages: 12
+  max_memories_in_prompt: 30
+  max_history_file_size: 200
+  episodic_retention_days: 90
+  encryption_enabled: true
+  encryption_key_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - .jarvis_key
+models:
+  chat_model: gemma4:e2b
+  planner_model: gemma4:26b
+  vision_model: gemma4:26b
+  verify_model: gemma4:e2b
+  whisper_model: base
+  embedding_model: nomic-embed-text
+  ollama_host: http://localhost:11434
+monitoring:
+  enabled: true
+  system_health_interval: 30
+  cpu_threshold: 80.0
+  ram_threshold: 85.0
+  temp_threshold: 75.0
+  code_quality_on_save: true
+  code_quality_tools:
+  - ruff
+  - mypy
+  - pytest
+  git_status_interval: 60
+  calendar_lookahead_minutes: 15
+persona:
+  name: professional
+  formality: 0.9
+  verbosity: 0.4
+  humor: 0.1
+  jargon: 0.6
+  response_style: concise
+plugins:
+  enabled:
+  - github
+  - jira
+  - docker
+  - homeassistant
+  marketplace_url: https://skills.jarvis.local
+  auto_update: false
+  plugin_dirs:
+  - !!python/object/apply:pathlib.WindowsPath
+    - C:\
+    - Users
+    - Jordan
+    - Desktop
+    - Jarvis
+    - jarvis_core
+    - plugins
+security:
+  sandbox_enabled: true
+  sandbox_profile: firejail
+  capabilities_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - config
+  - capabilities.yaml
+  audit_log_enabled: true
+  plugin_signing_required: false
+self_improvement:
+  enabled: true
+  evaluation_interval_minutes: 0
+  suggestion_batch_size: 5
+  auto_apply_trait_changes: true
+  confidence_threshold: 0.7
+  max_metric_history: 500
+  feedback_enabled: true
+  feedback_keywords:
+  - good
+  - bad
+  - wrong
+  - thanks
+  - perfect
+  - terrible
+ui:
+  dashboard_port: 8080
+  dashboard_host: 127.0.0.1
+  theme: holographic
+  transparency: 0.9
+  always_on_top: true
+  websocket_path: /ws
+vision:
+  min_confidence: 0.7
+  mouse_offset_x: 300
+  mouse_offset_y: 0
+  click_bias_x: 25
+  click_bias_y: 0
+  screenshot_path: !!python/object/apply:pathlib.WindowsPath
+  - C:\
+  - Users
+  - Jordan
+  - Desktop
+  - Jarvis
+  - jarvis_screen.png

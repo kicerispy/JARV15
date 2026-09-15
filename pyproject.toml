@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis"
+version = "1.0.0"
+description = "JARVIS - A personal AI assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Jordan"},
+]
+
+[project.scripts]
+jarvis = "main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "mypy>=1.10.0",
+    "ruff>=0.4.0",
+]
+
+[tool.setuptools]
+packages = ["jarvis"]
+py-modules = [
+    "main", "config", "commands", "code_gen", "context_aware",
+    "context_resolver", "conversation", "conversation_handler",
+    "file_tools", "jarvis_status", "launcher", "logger", "memory",
+    "memory_ai", "mic_test", "mouse_calibration", "planner", "recovery",
+    "run_jarvis", "screen_vision", "speech", "state", "summarizer",
+    "tool_executor", "tools", "tts_mic_test", "voice", "wakeword",
+    "web_interface", "web_summary", "web_tools",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jarvis"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
