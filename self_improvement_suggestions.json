@@ -1,0 +1,14 @@
+[
+  {
+    "id": "sugg-20260914103405-0",
+    "category": "persona",
+    "change_type": "adjust",
+    "target": "persona.formality",
+    "current_value": 0.8,
+    "suggested_value": 0.7,
+    "confidence": 0.5,
+    "rationale": "Low confidence test",
+    "auto_applicable": true,
+    "timestamp": "2026-09-14T10:34:05.246513"
+  }
+]
