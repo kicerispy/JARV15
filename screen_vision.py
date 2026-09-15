@@ -8,6 +8,7 @@ import hashlib
 from difflib import SequenceMatcher
 
 import pyautogui
+from PIL import Image
 from ollama import chat
 
 
@@ -1697,6 +1698,230 @@ def validate_generic_vision_candidate(
     }
 
 
+
+# ==========================================================
+# Google Result Title Refinement
+# ==========================================================
+
+def refine_google_result_title(
+    vision_file,
+    crop_result,
+    target,
+):
+    try:
+        source = Image.open(
+            vision_file
+        ).convert(
+            "RGB"
+        )
+
+        left = max(
+            0,
+            int(crop_result.get("left", 0)),
+        )
+
+        top = max(
+            0,
+            int(crop_result.get("top", 0)),
+        )
+
+        right = min(
+            source.width,
+            int(crop_result.get("right", source.width)),
+        )
+
+        bottom = min(
+            source.height,
+            int(crop_result.get("bottom", source.height)),
+        )
+
+        if right <= left or bottom <= top:
+            return None
+
+        region = source.crop(
+            (left, top, right, bottom)
+        )
+
+        region.save(
+            VISION_CROP_FILE
+        )
+
+        prompt = f"""
+You are JARVIS Google search-result click localization.
+
+This image contains ONE already-selected Google search result row.
+
+Requested result:
+{target}
+
+Find ONLY the PRIMARY CLICKABLE SEARCH RESULT TITLE/LINK.
+
+Do NOT return the entire result row.
+Do NOT return the snippet.
+Do NOT return author or artist names inside the snippet.
+Do NOT return metadata.
+Do NOT return secondary links.
+
+Return a TIGHT bounding box around the visible primary clickable title/link.
+
+For example, if the row contains:
+Wifiskeleton
+Jeremiah Justin Simms
+Wikipedia
+
+the correct target is the Wifiskeleton title.
+
+Return ONLY JSON:
+{{
+  "found": true,
+  "confidence": 0.0,
+  "box_2d": [top, left, bottom, right],
+  "description": "primary clickable Google result title"
+}}
+"""
+
+        response = vision_chat(
+            VISION_MODEL,
+            [
+                {
+                    "role": "system",
+                    "content": prompt,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Locate ONLY the primary clickable title for: "
+                        f"{target}"
+                    ),
+                    "images": [
+                        VISION_CROP_FILE
+                    ],
+                },
+            ],
+            json_mode=True,
+            num_predict=64,
+        )
+
+        raw = get_response_text(
+            response
+        )
+
+        if not raw:
+            return None
+
+        logging.info(
+            "GOOGLE TITLE REFINEMENT RAW RESPONSE: %s",
+            raw,
+        )
+
+        data = extract_json(
+            raw
+        )
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            return None
+
+        box = data.get(
+            "box_2d"
+        )
+
+        if not isinstance(
+            box,
+            (list, tuple),
+        ) or len(box) < 4:
+            return None
+
+        try:
+            rel_top = float(box[0])
+            rel_left = float(box[1])
+            rel_bottom = float(box[2])
+            rel_right = float(box[3])
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return None
+
+        crop_width = max(
+            1,
+            right - left,
+        )
+
+        crop_height = max(
+            1,
+            bottom - top,
+        )
+
+        refined = {
+            "found": bool(
+                data.get(
+                    "found",
+                    True,
+                )
+            ),
+            "confidence": float(
+                data.get(
+                    "confidence",
+                    0.0,
+                )
+            ),
+            "left": int(
+                left +
+                (rel_left / 1000.0) *
+                crop_width
+            ),
+            "top": int(
+                top +
+                (rel_top / 1000.0) *
+                crop_height
+            ),
+            "right": int(
+                left +
+                (rel_right / 1000.0) *
+                crop_width
+            ),
+            "bottom": int(
+                top +
+                (rel_bottom / 1000.0) *
+                crop_height
+            ),
+            "description": data.get(
+                "description",
+                "primary clickable Google result title",
+            ),
+        }
+
+        if not refined["found"]:
+            return None
+
+        if refined["right"] <= refined["left"]:
+            return None
+
+        if refined["bottom"] <= refined["top"]:
+            return None
+
+        logging.info(
+            "GOOGLE TITLE REFINEMENT BOX: "
+            f"left={refined['left']} "
+            f"top={refined['top']} "
+            f"right={refined['right']} "
+            f"bottom={refined['bottom']} "
+            f"confidence={refined['confidence']}"
+        )
+
+        return refined
+
+    except Exception as e:
+        logging.warning(
+            "Google title refinement failed: %s",
+            e,
+        )
+        return None
+
+
 def _find_screen_target_generic(
     target
 ):
@@ -1769,6 +1994,34 @@ Important:
   an icon, button, link, thumbnail, or control.
 - If the target is described conversationally, identify
   the most likely visible UI element matching that request.
+
+
+GOOGLE SEARCH RESULT CLICK RULE:
+
+When the requested target contains:
+  organic google result
+  google result
+  search result
+
+the requested target means the CLICKABLE SEARCH RESULT TITLE/LINK.
+
+Do NOT return the entire result row.
+Do NOT return the snippet paragraph.
+Do NOT return author or artist names inside the snippet.
+Do NOT return secondary blue links inside the result.
+
+Return a tight bounding box around the visible primary result title/link itself.
+The box should contain the title text that opens the result when clicked.
+
+For example, for a Google result showing:
+  Wifiskeleton
+  Jeremiah Justin Simms
+  Wikipedia
+
+the desired box is the clickable Wifiskeleton title,
+NOT the Jeremiah Justin Simms text in the snippet.
+
+Keep the bounding box as tight as possible around the clickable title.
 
 Return JSON only:
 
@@ -2031,6 +2284,42 @@ If no confident match exists:
             crop_result,
             vision_info
         )
+
+        # --------------------------------------------------------
+        # Refine Google result row to the actual clickable title.
+        # --------------------------------------------------------
+
+        target_lower = str(
+            target or ""
+        ).lower()
+
+        if (
+            "organic google result" in target_lower
+            or "google result" in target_lower
+        ) and crop_result.get(
+            "found",
+            False
+        ):
+
+            refined_result = refine_google_result_title(
+                vision_file,
+                crop_result,
+                target
+            )
+
+            if refined_result:
+                refined_screen_box = crop_to_screen_box(
+                    refined_result,
+                    vision_info
+                )
+
+                if refined_screen_box:
+                    logging.info(
+                        "JARVIS: Using refined Google clickable-title box."
+                    )
+
+                    crop_result = refined_result
+                    screen_box = refined_screen_box
 
         if not screen_box:
             last_failure = {
@@ -6386,14 +6675,8 @@ def get_center(
         bottom - top
     )
 
-    # ------------------------------------------------------
-    # Google/search-result click point
-    # ------------------------------------------------------
-    # Search-result boxes often cover the entire result row.
-    # The title/link is normally near the upper portion of
-    # that row, so clicking the mathematical center can miss.
-    # Keep YouTube verified-thumbnail handling untouched;
-    # this helper is only being changed for generic clicks.
+    # Google/search-result targets are usually broad result-row boxes.
+    # Favor the upper portion where the clickable title/link normally sits.
     target_text = str(target or "").lower()
 
     if (
@@ -6403,8 +6686,8 @@ def get_center(
     ):
         x = left + int(width * 0.50)
         y = top + max(
-            8,
-            int(height * 0.20)
+            5,
+            int(height * 0.08)
         )
         return x, y
 
@@ -6420,9 +6703,8 @@ def get_center(
         bottom
     ) // 2
 
-
-# ==========================================================
     return x, y
+
 
 # Move Mouse To Target
 # ==========================================================
@@ -6734,6 +7016,30 @@ def youtube_fast_pre_click_check(
     )
 
     return True
+
+
+
+# ==========================================================
+# Google Click Verification
+# ==========================================================
+
+def google_click_screen_signature():
+    try:
+        image = pyautogui.screenshot()
+
+        image = image.resize(
+            (
+                max(1, image.width // 10),
+                max(1, image.height // 10),
+            )
+        )
+
+        return hashlib.sha256(
+            image.tobytes()
+        ).hexdigest()
+
+    except Exception:
+        return None
 
 
 def click_screen_target(
@@ -7307,6 +7613,30 @@ def click_screen_target(
             )
 
 
+    # --------------------------------------------------
+    # Google click verification.
+    #
+    # A Google organic result should navigate to a new page.
+    # Capture the visible screen before the click so we can
+    # detect a click that landed on non-navigating text.
+    # --------------------------------------------------
+
+    google_click_target = (
+        "organic google result" in target_text
+        or "google result" in target_text
+    )
+
+    google_before_signature = None
+
+    if google_click_target:
+        google_before_signature = (
+            google_click_screen_signature()
+        )
+
+        logging.info(
+            "JARVIS: Captured pre-click Google screen signature."
+        )
+
     logging.info(
         f"Clicking: "
         f"{mouse_x},{mouse_y}"
@@ -7325,8 +7655,53 @@ def click_screen_target(
     pyautogui.click()
 
     time.sleep(
-        0.5
+        0.75
     )
+
+    # --------------------------------------------------
+    # Post-click Google verification.
+    # --------------------------------------------------
+
+    if google_click_target:
+
+        google_after_signature = (
+            google_click_screen_signature()
+        )
+
+        if (
+            google_before_signature
+            and google_after_signature
+            and
+            google_before_signature
+            == google_after_signature
+        ):
+
+            logging.warning(
+                "JARVIS: Google click verification FAILED."
+            )
+
+            logging.warning(
+                "The screen did not change after clicking "
+                "the Google result title."
+            )
+
+            return {
+                "success": False,
+                "confidence": result.get(
+                    "confidence",
+                    0
+                ),
+                "message": (
+                    "Google result click was not verified. "
+                    "The screen did not change."
+                ),
+                "x": mouse_x,
+                "y": mouse_y,
+            }
+
+        logging.info(
+            "JARVIS: Google click verification PASSED."
+        )
 
     return {
         "success":
@@ -8892,3 +9267,4 @@ def start_jarvis():
 if __name__ == "__main__":
 
     start_jarvis()
+

@@ -1,4 +1,4 @@
-"""
+﻿"""
 JARVIS - Main entry point.
 
 Includes lightweight performance timing so we can identify
@@ -11,6 +11,8 @@ import time
 from typing import Optional
 
 from code_gen import handle_code_generation, is_code_request
+from agent_core import JarvisAgent
+
 from commands import (
     get_fast_command,
     is_cancel_command,
@@ -35,6 +37,12 @@ from memory import create_memory
 from planner import create_plan
 from state import JarvisState
 from tool_executor import execute_plan
+
+
+# ============================================================
+# AGENT CORE
+# ============================================================
+jarvis_agent = JarvisAgent()
 
 
 # ============================================================
@@ -170,7 +178,7 @@ def build_system_prompt(
     if not tone_parts:
 
         tone_parts.append(
-            "You are JARVIS — composed, efficient, and precise."
+            "You are JARVIS â€” composed, efficient, and precise."
         )
 
     tone_note = " ".join(
@@ -967,54 +975,38 @@ def process_command(
             )
 
     # ==================================================
-    # LLM PLANNER
+    # AGENT CORE PLANNING
     # ==================================================
 
     planner_start = perf_now()
 
     try:
 
-        plan = create_plan(
+        agent_task = jarvis_agent.create_task(
             planning_input,
-            active_context=(
-                state.active_context.to_dict()
-            ),
+            state.active_context.to_dict(),
+        )
+
+        jarvis_agent.plan_task(
+            agent_task,
             history_text=history_text,
         )
+
+        steps = agent_task.steps
 
     except Exception as e:
 
         logger.error(
-            f"Planner error: {e}"
+            f"Agent Core planning error: {e}"
         )
 
-        plan = {
-            "goal": "",
-            "steps": [],
-            "resolved_command": planning_input,
-        }
+        agent_task = None
+        steps = []
 
     logger.info(
-        f"PERF: planner: "
+        f"PERF: agent planning: "
         f"{perf_now() - planner_start:.3f}s"
     )
-
-    if not isinstance(
-        plan,
-        dict,
-    ):
-
-        plan = {
-            "goal": "",
-            "steps": [],
-            "resolved_command": planning_input,
-        }
-
-    steps = plan.get(
-        "steps",
-        [],
-    )
-
     # ==================================================
     # NORMAL CONVERSATION
     # ==================================================
@@ -1043,26 +1035,30 @@ def process_command(
         return result
 
     # ==================================================
-    # EXECUTE PLAN
+    # EXECUTE AGENT TASK
     # ==================================================
 
     execution_start = perf_now()
 
-    result = execute_plan(
-        plan,
-        state.active_context,
-        state.task_state,
-        speak_callback,
+    if agent_task is None:
+
+        result = "I couldn't create a task for that request."
+
+    else:
+
+        result = jarvis_agent.execute_task(
+            agent_task,
+            state.active_context,
+            state.task_state,
+            speak_callback,
+        )
+
+    logger.info(
+        f"PERF: agent execution: {perf_now() - execution_start:.3f}s"
     )
 
     logger.info(
-        f"PERF: plan execution: "
-        f"{perf_now() - execution_start:.3f}s"
-    )
-
-    logger.info(
-        f"PERF: total command processing: "
-        f"{perf_now() - command_start:.3f}s"
+        f"PERF: total command processing: {perf_now() - command_start:.3f}s"
     )
 
     return result
@@ -1550,3 +1546,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
