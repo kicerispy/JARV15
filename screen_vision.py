@@ -2411,641 +2411,124 @@ def _build_youtube_candidate_thumbnail_image(
 # ==========================================================
 
 def locate_youtube_thumbnail(
-    image,
-    candidate_box,
+    candidate_file,
+    candidate_image_info,
     candidate_index
 ):
 
-    candidate_image_info = (
-        _build_youtube_candidate_thumbnail_image(
-            image,
-            candidate_box
+    if not candidate_file:
+        return None
+
+    candidate_width = int(
+        candidate_image_info.get(
+            "width",
+            0
         )
     )
 
-    if not candidate_image_info:
-
-        return None
-
-    candidate_file = (
-        candidate_image_info["file"]
-    )
-
-    candidate_width = (
-        candidate_image_info["width"]
-    )
-
-    candidate_height = (
-        candidate_image_info["height"]
-    )
-
-    prompt = f"""
-You are JARVIS thumbnail locator.
-
-The supplied image contains EXACTLY ONE
-verified YouTube search-result row.
-
-Your job is to locate ONLY the VIDEO THUMBNAIL
-inside this row.
-
-The thumbnail is normally on the LEFT side.
-
-Do NOT locate:
-
-- title text
-- channel text
-- metadata
-- buttons
-- comments
-- the entire row
-- browser UI
-
-Return ONLY JSON:
-
-{{
-    "found": true,
-    "confidence": 0.95,
-    "box_2d": [top, left, bottom, right],
-    "description": "YouTube video thumbnail"
-}}
-
-Coordinates must be normalized from 0 to 1000.
-
-Coordinates are:
-
-[top, left, bottom, right]
-
-The box must tightly surround ONLY the thumbnail.
-
-The thumbnail must be substantially smaller than
-the entire row.
-
-Do NOT return the entire candidate row.
-
-Image dimensions:
-width={candidate_width}
-height={candidate_height}
-
-Return ONLY JSON.
-"""
-
-    start = time.perf_counter()
-
-    response = vision_chat(
-
-        YOUTUBE_THUMBNAIL_MODEL,
-
-        [
-            {
-                "role":
-                    "system",
-
-                "content":
-                    prompt
-            },
-
-            {
-                "role":
-                    "user",
-
-                "content":
-                    (
-                        "Locate ONLY the video "
-                        "thumbnail inside this "
-                        "single verified row."
-                    ),
-
-                "images": [
-                    candidate_file
-                ]
-            }
-        ],
-
-        json_mode=True,
-
-        num_predict=
-        YOUTUBE_THUMBNAIL_NUM_PREDICT
-    )
-
-    elapsed = (
-        time.perf_counter()
-        -
-        start
-    )
-
-    logging.info(
-        f"YouTube thumbnail detection "
-        f"time candidate {candidate_index}: "
-        f"{elapsed:.3f}s"
-    )
-
-    if not response:
-
-        logging.info(
-            f"YouTube thumbnail detector "
-            f"candidate {candidate_index}: "
-            "no response."
+    candidate_height = int(
+        candidate_image_info.get(
+            "height",
+            0
         )
-
-        return None
-
-    raw = get_response_text(
-        response
     )
 
-    logging.info(
-        f"YouTube thumbnail detector raw "
-        f"candidate {candidate_index}: "
-        f"{raw}"
-    )
-
-    data = extract_json(
-        raw
-    )
-
-    if not isinstance(
-        data,
-        dict
+    if (
+        candidate_width <= 0
+        or
+        candidate_height <= 0
     ):
-
-        logging.info(
-            f"YouTube thumbnail detector "
-            f"candidate {candidate_index}: "
-            "invalid JSON."
-        )
-
         return None
 
-    try:
+    # --------------------------------------------------
+    # SAFE VERIFIED-ROW CLICK REGION
+    #
+    # The row has already passed:
+    #   1. query relevance
+    #   2. ad rejection
+    #   3. structural verification
+    #
+    # Do not rely on thumbnail aspect ratio or a second
+    # vision model to locate the thumbnail. YouTube Music
+    # / Topic rows can use different visual thumbnail
+    # formatting.
+    #
+    # The thumbnail/media area is on the left side of the
+    # verified result. Keep a conservative region there.
+    # --------------------------------------------------
 
-        confidence = float(
-            data.get(
-                "confidence",
-                0.0
-            )
-        )
-
-    except Exception:
-
-        confidence = 0.0
-
-    found = bool(
-        data.get(
-            "found",
-            False
+    safe_left = int(
+        round(
+            candidate_width
+            *
+            0.03
         )
     )
 
-    if not found:
-
-        logging.info(
-            f"YouTube thumbnail detector "
-            f"candidate {candidate_index}: "
-            "thumbnail not found."
+    safe_right = int(
+        round(
+            candidate_width
+            *
+            0.38
         )
+    )
 
-        return None
+    safe_top = int(
+        round(
+            candidate_height
+            *
+            0.25
+        )
+    )
 
-    if confidence < YOUTUBE_THUMBNAIL_MIN_CONFIDENCE:
+    safe_bottom = int(
+        round(
+            candidate_height
+            *
+            0.75
+        )
+    )
+
+    safe_width = (
+        safe_right
+        -
+        safe_left
+    )
+
+    safe_height = (
+        safe_bottom
+        -
+        safe_top
+    )
+
+    if safe_width <= 0 or safe_height <= 0:
 
         logging.info(
-            f"YouTube thumbnail detector "
+            f"YouTube safe thumbnail region "
             f"candidate {candidate_index}: "
-            "LOW CONFIDENCE "
-            f"{confidence:.2f}"
+            "invalid geometry."
         )
 
         return None
 
     # --------------------------------------------------
-    # Thumbnail detector output is treated as
-    # candidate-relative PIXEL coordinates:
-    #
-    #   [top, left, bottom, right]
-    #
-    # Do not pass the thumbnail box through the general
-    # 0-1000 Qwen normalization function. The thumbnail
-    # model has been returning values such as:
-    #
-    #   [0, 0, 255, 271]
-    #
-    # for a roughly 255x271 candidate crop.
+    # Final candidate-relative bounds check.
     # --------------------------------------------------
 
-    raw_thumbnail_box = data.get(
-        "box_2d"
-    )
-
-    thumbnail_box = None
-
     if (
-        isinstance(
-            raw_thumbnail_box,
-            (list, tuple)
-        )
-        and
-        len(raw_thumbnail_box) == 4
+        safe_left < 0
+        or
+        safe_top < 0
+        or
+        safe_right > candidate_width
+        or
+        safe_bottom > candidate_height
     ):
 
-        try:
-
-            raw_top = float(
-                raw_thumbnail_box[0]
-            )
-
-            raw_left = float(
-                raw_thumbnail_box[1]
-            )
-
-            raw_bottom = float(
-                raw_thumbnail_box[2]
-            )
-
-            raw_right = float(
-                raw_thumbnail_box[3]
-            )
-
-            thumbnail_box = {
-
-                "top":
-                    max(
-                        0,
-                        min(
-                            int(round(raw_top)),
-                            candidate_height
-                        )
-                    ),
-
-                "left":
-                    max(
-                        0,
-                        min(
-                            int(round(raw_left)),
-                            candidate_width
-                        )
-                    ),
-
-                "bottom":
-                    max(
-                        0,
-                        min(
-                            int(round(raw_bottom)),
-                            candidate_height
-                        )
-                    ),
-
-                "right":
-                    max(
-                        0,
-                        min(
-                            int(round(raw_right)),
-                            candidate_width
-                        )
-                    )
-            }
-
-        except (
-            TypeError,
-            ValueError
-        ):
-
-            thumbnail_box = None
-
-    if not thumbnail_box:
-
         logging.info(
-            f"YouTube thumbnail detector "
+            f"YouTube safe thumbnail region "
             f"candidate {candidate_index}: "
-            "thumbnail box was invalid."
-        )
-
-        return None
-
-    if (
-        thumbnail_box["right"]
-        <=
-        thumbnail_box["left"]
-    ):
-
-        logging.info(
-            f"YouTube thumbnail detector "
-            f"candidate {candidate_index}: "
-            "thumbnail box has invalid width."
-        )
-
-        return None
-
-    if (
-        thumbnail_box["bottom"]
-        <=
-        thumbnail_box["top"]
-    ):
-
-        logging.info(
-            f"YouTube thumbnail detector "
-            f"candidate {candidate_index}: "
-            "thumbnail box has invalid height."
-        )
-
-        return None
-
-    if not thumbnail_box:
-
-        logging.info(
-            f"YouTube thumbnail detector "
-            f"candidate {candidate_index}: "
-            "invalid thumbnail box."
-        )
-
-        return None
-
-    thumbnail_width = (
-        thumbnail_box["right"]
-        -
-        thumbnail_box["left"]
-    )
-
-    thumbnail_height = (
-        thumbnail_box["bottom"]
-        -
-        thumbnail_box["top"]
-    )
-
-    # ------------------------------------------------------
-    # Thumbnail geometry repair
-    #
-    # Qwen sometimes returns a very wide but abnormally
-    # short box for the thumbnail. A normal YouTube
-    # thumbnail is approximately 16:9.
-    #
-    # Only repair obviously malformed geometry.
-    # ------------------------------------------------------
-
-    if thumbnail_width > 0 and thumbnail_height > 0:
-
-        aspect_ratio = (
-            thumbnail_width
-            /
-            float(thumbnail_height)
-        )
-
-        expected_height = int(
-            round(
-                thumbnail_width
-                *
-                9.0
-                /
-                16.0
-            )
-        )
-
-        height_is_obviously_too_small = (
-            thumbnail_height
-            <
-            max(
-                60,
-                int(
-                    candidate_height
-                    *
-                    0.30
-                )
-            )
-        )
-
-        aspect_is_obviously_too_wide = (
-            aspect_ratio
-            >
-            2.35
-        )
-
-        if (
-            height_is_obviously_too_small
-            or
-            aspect_is_obviously_too_wide
-        ):
-
-            repaired_height = max(
-                thumbnail_height,
-                expected_height
-            )
-
-            # Keep the repair safely inside the candidate.
-            repaired_height = min(
-                repaired_height,
-                candidate_height
-                -
-                thumbnail_box["top"]
-            )
-
-            if repaired_height > thumbnail_height:
-
-                logging.info(
-                    f"YouTube thumbnail candidate "
-                    f"{candidate_index}: "
-                    "repairing malformed thumbnail "
-                    f"geometry "
-                    f"{thumbnail_width}x"
-                    f"{thumbnail_height} "
-                    "-> "
-                    f"{thumbnail_width}x"
-                    f"{repaired_height} "
-                    f"(aspect={aspect_ratio:.2f})"
-                )
-
-                thumbnail_box["bottom"] = (
-                    thumbnail_box["top"]
-                    +
-                    repaired_height
-                )
-
-                thumbnail_height = (
-                    thumbnail_box["bottom"]
-                    -
-                    thumbnail_box["top"]
-                )
-
-                # If the model placed the thumbnail too far
-                # into the metadata side of the row, gently
-                # move it toward the left edge. Do not do this
-                # unless the placement is clearly suspicious.
-                if (
-                    thumbnail_box["left"]
-                    >
-                    candidate_width
-                    *
-                    0.25
-                ):
-
-                    shift = int(
-                        round(
-                            thumbnail_box["left"]
-                            -
-                            candidate_width
-                            *
-                            0.08
-                        )
-                    )
-
-                    new_left = max(
-                        0,
-                        thumbnail_box["left"]
-                        -
-                        shift
-                    )
-
-                    new_right = (
-                        new_left
-                        +
-                        thumbnail_width
-                    )
-
-                    if (
-                        new_right
-                        <=
-                        candidate_width
-                    ):
-
-                        logging.info(
-                            f"YouTube thumbnail candidate "
-                            f"{candidate_index}: "
-                            f"adjusting suspicious left "
-                            f"placement "
-                            f"{thumbnail_box['left']} "
-                            "-> "
-                            f"{new_left}"
-                        )
-
-                        thumbnail_box["left"] = (
-                            new_left
-                        )
-
-                        thumbnail_box["right"] = (
-                            new_right
-                        )
-
-    logging.info(
-        f"YouTube thumbnail candidate "
-        f"{candidate_index}: "
-        "final relative thumbnail geometry "
-        f"{thumbnail_box['left']},"
-        f"{thumbnail_box['top']},"
-        f"{thumbnail_box['right']},"
-        f"{thumbnail_box['bottom']} "
-        f"size={thumbnail_width}x"
-        f"{thumbnail_height}"
-    )
-
-    if (
-        thumbnail_width
-        <
-        YOUTUBE_MIN_THUMBNAIL_WIDTH
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail too narrow: "
-            f"{thumbnail_width}px"
-        )
-
-        return None
-
-    if (
-        thumbnail_height
-        <
-        YOUTUBE_MIN_THUMBNAIL_HEIGHT
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail too short: "
-            f"{thumbnail_height}px"
-        )
-
-        return None
-
-    if (
-        thumbnail_width
-        >
-        YOUTUBE_MAX_THUMBNAIL_WIDTH
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail too wide: "
-            f"{thumbnail_width}px"
-        )
-
-        return None
-
-    if (
-        thumbnail_height
-        >
-        YOUTUBE_MAX_THUMBNAIL_HEIGHT
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail too tall: "
-            f"{thumbnail_height}px"
-        )
-
-        return None
-
-    if (
-        thumbnail_width
-        >
-        candidate_width
-        *
-        YOUTUBE_MAX_THUMBNAIL_ROW_WIDTH_RATIO
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail occupies too much "
-            "of candidate width."
-        )
-
-        return None
-
-    if (
-        thumbnail_height
-        >
-        candidate_height
-        *
-        YOUTUBE_MAX_THUMBNAIL_ROW_HEIGHT_RATIO
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail occupies too much "
-            "of candidate height."
-        )
-
-        return None
-
-    thumbnail_center_x = (
-        thumbnail_box["left"]
-        +
-        thumbnail_width / 2.0
-    )
-
-    if (
-        thumbnail_center_x
-        >
-        candidate_width * 0.60
-    ):
-
-        logging.info(
-            f"YouTube thumbnail candidate "
-            f"{candidate_index}: "
-            "thumbnail is not on expected "
-            "left side."
+            "escaped candidate bounds."
         )
 
         return None
@@ -3055,32 +2538,41 @@ Return ONLY JSON.
         "left":
             candidate_image_info["left"]
             +
-            thumbnail_box["left"],
+            safe_left,
 
         "top":
             candidate_image_info["top"]
             +
-            thumbnail_box["top"],
+            safe_top,
 
         "right":
             candidate_image_info["left"]
             +
-            thumbnail_box["right"],
+            safe_right,
 
         "bottom":
             candidate_image_info["top"]
             +
-            thumbnail_box["bottom"]
+            safe_bottom
     }
+
+    confidence = 0.90
+
+    logging.info(
+        f"YouTube safe thumbnail region "
+        f"candidate {candidate_index}: "
+        f"relative="
+        f"{safe_left},"
+        f"{safe_top},"
+        f"{safe_right},"
+        f"{safe_bottom} "
+        f"size={safe_width}x"
+        f"{safe_height}"
+    )
 
     logging.info(
         f"YouTube thumbnail located "
         f"candidate {candidate_index}: "
-        f"candidate_relative="
-        f"{thumbnail_box['left']},"
-        f"{thumbnail_box['top']},"
-        f"{thumbnail_box['right']},"
-        f"{thumbnail_box['bottom']} "
         f"full_vision="
         f"{full_image_box['left']},"
         f"{full_image_box['top']},"
@@ -3263,58 +2755,196 @@ def get_youtube_thumbnail_click_point(
     candidate_index
 ):
 
-    if not validate_youtube_thumbnail_inside_candidate(
-        thumbnail_box,
-        candidate_box,
-        candidate_index
+    # --------------------------------------------------
+    # VERIFIED YOUTUBE ROW CLICK
+    #
+    # The candidate has already passed:
+    #   - deterministic relevance
+    #   - detector-side ad rejection
+    #   - structural video verification
+    #
+    # Thumbnail detection has proven unreliable across
+    # YouTube Music / Topic layouts, so do not trust a
+    # model-generated or synthetic thumbnail rectangle.
+    #
+    # Instead, use the verified result row and choose a
+    # conservative point in its left-side media region.
+    # --------------------------------------------------
+
+    if not candidate_box:
+        return None
+
+    try:
+
+        candidate_left = int(
+            candidate_box["left"]
+        )
+
+        candidate_top = int(
+            candidate_box["top"]
+        )
+
+        candidate_right = int(
+            candidate_box["right"]
+        )
+
+        candidate_bottom = int(
+            candidate_box["bottom"]
+        )
+
+    except (
+        KeyError,
+        TypeError,
+        ValueError
     ):
 
         return None
 
-    left = int(
-        thumbnail_box["left"]
-    )
-
-    top = int(
-        thumbnail_box["top"]
-    )
-
-    right = int(
-        thumbnail_box["right"]
-    )
-
-    bottom = int(
-        thumbnail_box["bottom"]
-    )
-
-    width = (
-        right
+    candidate_width = (
+        candidate_right
         -
-        left
+        candidate_left
     )
 
-    height = (
-        bottom
+    candidate_height = (
+        candidate_bottom
         -
-        top
+        candidate_top
     )
 
-    if width <= 0 or height <= 0:
+    if (
+        candidate_width <= 0
+        or
+        candidate_height <= 0
+    ):
+
+        logging.info(
+            f"YouTube verified row "
+            f"candidate {candidate_index}: "
+            "invalid candidate geometry."
+        )
 
         return None
 
-    x = left + (
-        width // 2
+    # --------------------------------------------------
+    # Conservative left-side media point.
+    #
+    # Keep well away from:
+    #   - title
+    #   - channel
+    #   - action buttons
+    #   - right-side metadata
+    #
+    # Use the vertical center because the candidate row
+    # itself has already been detected as the result.
+    # --------------------------------------------------
+
+    x = (
+        candidate_left
+        +
+        int(
+            candidate_width
+            *
+            0.16
+        )
     )
 
-    y = top + (
-        height // 2
+    y = (
+        candidate_top
+        +
+        int(
+            candidate_height
+            *
+            0.50
+        )
+    )
+
+    # --------------------------------------------------
+    # Final strict bounds margin.
+    # --------------------------------------------------
+
+    safe_left = (
+        candidate_left
+        +
+        max(
+            5,
+            int(
+                candidate_width
+                *
+                0.05
+            )
+        )
+    )
+
+    safe_right = (
+        candidate_left
+        +
+        int(
+            candidate_width
+            *
+            0.40
+        )
+    )
+
+    safe_top = (
+        candidate_top
+        +
+        max(
+            5,
+            int(
+                candidate_height
+                *
+                0.10
+            )
+        )
+    )
+
+    safe_bottom = (
+        candidate_bottom
+        -
+        max(
+            5,
+            int(
+                candidate_height
+                *
+                0.10
+            )
+        )
+    )
+
+    if (
+        safe_right <= safe_left
+        or
+        safe_bottom <= safe_top
+    ):
+
+        return None
+
+    x = max(
+        safe_left,
+        min(
+            x,
+            safe_right
+        )
+    )
+
+    y = max(
+        safe_top,
+        min(
+            y,
+            safe_bottom
+        )
     )
 
     logging.info(
-        f"YouTube verified thumbnail center "
+        f"YouTube verified row safe click "
         f"candidate {candidate_index}: "
-        f"{x},{y}"
+        f"{x},{y} "
+        f"row="
+        f"{candidate_left},"
+        f"{candidate_top},"
+        f"{candidate_right},"
+        f"{candidate_bottom}"
     )
 
     return x, y
@@ -4761,32 +4391,149 @@ def find_first_verified_youtube_result(
 
             continue
 
-        box = normalize_box_2d(
-            candidate.get(
-                "box_2d"
-            ),
-            width,
-            height
+        # --------------------------------------------------
+        # YouTube candidate box normalization.
+        #
+        # The documented format is:
+        #   [top, left, bottom, right]
+        #   normalized 0..1000
+        #
+        # However, the model has occasionally returned pixel
+        # coordinates such as:
+        #
+        #   [499, 470, 1046, 560]
+        #
+        # on a 1280x759 detector image.
+        #
+        # We only switch to pixel interpretation when at least
+        # one value exceeds 1000 AND the complete rectangle still
+        # fits inside the detector image. Otherwise we preserve
+        # the existing normalized interpretation.
+        # --------------------------------------------------
+
+        raw_box = candidate.get(
+            "box_2d"
         )
 
+        box = None
+
+        if (
+            isinstance(
+                raw_box,
+                (list, tuple)
+            )
+            and
+            len(raw_box) >= 4
+        ):
+
+            try:
+
+                v0 = float(
+                    raw_box[0]
+                )
+
+                v1 = float(
+                    raw_box[1]
+                )
+
+                v2 = float(
+                    raw_box[2]
+                )
+
+                v3 = float(
+                    raw_box[3]
+                )
+
+                looks_like_pixel_box = (
+                    max(
+                        abs(v0),
+                        abs(v1),
+                        abs(v2),
+                        abs(v3)
+                    )
+                    >
+                    1000.0
+                    and
+                    0.0 <= v0 <= float(width)
+                    and
+                    0.0 <= v1 <= float(height)
+                    and
+                    0.0 <= v2 <= float(width)
+                    and
+                    0.0 <= v3 <= float(height)
+                    and
+                    v2 > v0
+                    and
+                    v3 > v1
+                )
+
+                if looks_like_pixel_box:
+
+                    box = {
+
+                        "left":
+                            int(
+                                round(
+                                    v0
+                                )
+                            ),
+
+                        "top":
+                            int(
+                                round(
+                                    v1
+                                )
+                            ),
+
+                        "right":
+                            int(
+                                round(
+                                    v2
+                                )
+                            ),
+
+                        "bottom":
+                            int(
+                                round(
+                                    v3
+                                )
+                            )
+                    }
+
+                    logging.info(
+                        "YouTube candidate box "
+                        "interpreted as PIXEL "
+                        "[left,top,right,bottom]: "
+                        f"{v0},{v1},{v2},{v3}"
+                    )
+
+                else:
+
+                    box = normalize_box_2d(
+                        raw_box,
+                        width,
+                        height
+                    )
+
+                    if box:
+
+                        logging.info(
+                            "YouTube candidate box "
+                            "interpreted using "
+                            "existing normalized "
+                            "[top,left,bottom,right] "
+                            "convention: "
+                            f"{v0},{v1},{v2},{v3}"
+                        )
+
+            except (
+                TypeError,
+                ValueError
+            ):
+
+                box = None
+
         if not box:
-
-            continue
-
-        if (
-            box["right"]
-            <=
-            box["left"]
-        ):
-
-            continue
-
-        if (
-            box["bottom"]
-            <=
-            box["top"]
-        ):
-
             continue
 
         title = str(
@@ -5383,67 +5130,18 @@ def find_first_verified_youtube_result(
         # --------------------------------------------------
         # Candidate is now verified.
         #
-        # BEFORE CLICKING:
-        # independently locate its thumbnail.
-        # --------------------------------------------------
-
-        thumbnail = locate_youtube_thumbnail(
-            image,
-            box,
-            index
-        )
-
-        if not thumbnail:
-
-            logging.info(
-                f"YouTube candidate {index}: "
-                "REJECTED: could not safely "
-                "locate thumbnail."
-            )
-
-            continue
-
-        # --------------------------------------------------
-        # Ensure thumbnail is inside verified candidate.
-        # --------------------------------------------------
-
-        if not validate_youtube_thumbnail_inside_candidate(
-            thumbnail,
-            box,
-            index
-        ):
-
-            logging.info(
-                f"YouTube candidate {index}: "
-                "REJECTED: thumbnail is not safely "
-                "inside verified result row."
-            )
-
-            continue
-
-        # --------------------------------------------------
-        # Convert thumbnail to screen coordinates.
-        # --------------------------------------------------
-
-        thumbnail_screen_box = (
-            crop_to_screen_box(
-                thumbnail,
-                vision_info
-            )
-        )
-
-        if not thumbnail_screen_box:
-
-            logging.info(
-                f"YouTube candidate {index}: "
-                "thumbnail screen coordinate "
-                "conversion failed."
-            )
-
-            continue
-
-        # --------------------------------------------------
-        # Convert candidate to screen coordinates.
+        # The result has already passed:
+        #   - detector-side ad rejection
+        #   - deterministic relevance
+        #   - structural verification
+        #   - is_video validation
+        #
+        # Do not require a second thumbnail detector here.
+        # YouTube Music / Topic rows can use thumbnail layouts
+        # that the small vision model fails to localize.
+        #
+        # The click-point helper now derives a conservative point
+        # directly from the VERIFIED candidate row.
         # --------------------------------------------------
 
         screen_box = crop_to_screen_box(
@@ -5461,28 +5159,9 @@ def find_first_verified_youtube_result(
 
             continue
 
-        # --------------------------------------------------
-        # Ensure thumbnail remains physically inside the
-        # candidate after coordinate conversion.
-        # --------------------------------------------------
-
-        if not validate_youtube_thumbnail_inside_candidate(
-            thumbnail_screen_box,
-            screen_box,
-            index
-        ):
-
-            logging.info(
-                f"YouTube candidate {index}: "
-                "REJECTED: converted thumbnail "
-                "escaped candidate bounds."
-            )
-
-            continue
-
         click_point = (
             get_youtube_thumbnail_click_point(
-                thumbnail_screen_box,
+                None,
                 screen_box,
                 index
             )
@@ -5492,7 +5171,7 @@ def find_first_verified_youtube_result(
 
             logging.info(
                 f"YouTube candidate {index}: "
-                "REJECTED: no safe thumbnail "
+                "REJECTED: no safe verified-row "
                 "click point."
             )
 
@@ -5501,7 +5180,50 @@ def find_first_verified_youtube_result(
         click_x, click_y = click_point
 
         # --------------------------------------------------
-        # FINAL YOUTUBE CLICK SAFETY
+        # Final strict bounds validation.
+        # --------------------------------------------------
+
+        if not (
+            screen_box["left"]
+            <=
+            click_x
+            <=
+            screen_box["right"]
+            and
+            screen_box["top"]
+            <=
+            click_y
+            <=
+            screen_box["bottom"]
+        ):
+
+            logging.info(
+                f"YouTube candidate {index}: "
+                "REJECTED: click point escaped "
+                "verified row bounds."
+            )
+
+            continue
+
+        logging.info(
+            f"YouTube verified row click candidate "
+            f"{index}: "
+            f"{click_x},{click_y}"
+        )
+
+        # --------------------------------------------------
+        # Mouse calibration remains zero.
+        # --------------------------------------------------
+
+        click_x, click_y = (
+            convert_coordinates(
+                click_x,
+                click_y,
+                clicking=True,
+                target=target
+            )
+        )
+
         #
         # Search-result rows can vertically overlap slightly
         # when the vision model's boxes are imperfect.
@@ -5632,16 +5354,16 @@ def find_first_verified_youtube_result(
             "thumbnail":
                 {
                     "left":
-                        thumbnail_screen_box["left"],
+                        screen_box["left"],
 
                     "top":
-                        thumbnail_screen_box["top"],
+                        screen_box["top"],
 
                     "right":
-                        thumbnail_screen_box["right"],
+                        screen_box["right"],
 
                     "bottom":
-                        thumbnail_screen_box["bottom"]
+                        screen_box["bottom"]
                 },
 
             "click_x":
