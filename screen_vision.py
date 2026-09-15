@@ -2617,13 +2617,137 @@ Return ONLY JSON.
 
         return None
 
-    thumbnail_box = normalize_box_2d(
-        data.get(
-            "box_2d"
-        ),
-        candidate_width,
-        candidate_height
+    # --------------------------------------------------
+    # Thumbnail detector output is treated as
+    # candidate-relative PIXEL coordinates:
+    #
+    #   [top, left, bottom, right]
+    #
+    # Do not pass the thumbnail box through the general
+    # 0-1000 Qwen normalization function. The thumbnail
+    # model has been returning values such as:
+    #
+    #   [0, 0, 255, 271]
+    #
+    # for a roughly 255x271 candidate crop.
+    # --------------------------------------------------
+
+    raw_thumbnail_box = data.get(
+        "box_2d"
     )
+
+    thumbnail_box = None
+
+    if (
+        isinstance(
+            raw_thumbnail_box,
+            (list, tuple)
+        )
+        and
+        len(raw_thumbnail_box) == 4
+    ):
+
+        try:
+
+            raw_top = float(
+                raw_thumbnail_box[0]
+            )
+
+            raw_left = float(
+                raw_thumbnail_box[1]
+            )
+
+            raw_bottom = float(
+                raw_thumbnail_box[2]
+            )
+
+            raw_right = float(
+                raw_thumbnail_box[3]
+            )
+
+            thumbnail_box = {
+
+                "top":
+                    max(
+                        0,
+                        min(
+                            int(round(raw_top)),
+                            candidate_height
+                        )
+                    ),
+
+                "left":
+                    max(
+                        0,
+                        min(
+                            int(round(raw_left)),
+                            candidate_width
+                        )
+                    ),
+
+                "bottom":
+                    max(
+                        0,
+                        min(
+                            int(round(raw_bottom)),
+                            candidate_height
+                        )
+                    ),
+
+                "right":
+                    max(
+                        0,
+                        min(
+                            int(round(raw_right)),
+                            candidate_width
+                        )
+                    )
+            }
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            thumbnail_box = None
+
+    if not thumbnail_box:
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "thumbnail box was invalid."
+        )
+
+        return None
+
+    if (
+        thumbnail_box["right"]
+        <=
+        thumbnail_box["left"]
+    ):
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "thumbnail box has invalid width."
+        )
+
+        return None
+
+    if (
+        thumbnail_box["bottom"]
+        <=
+        thumbnail_box["top"]
+    ):
+
+        logging.info(
+            f"YouTube thumbnail detector "
+            f"candidate {candidate_index}: "
+            "thumbnail box has invalid height."
+        )
+
+        return None
 
     if not thumbnail_box:
 
