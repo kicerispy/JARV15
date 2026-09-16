@@ -1088,3 +1088,18 @@ if __name__ == "__main__":
     print("JARVIS browser controller loaded.")
     print(f"CDP: {CDP_URL}")
 
+
+    def scroll(self, direction: str = "down", distance: int = 400) -> dict[str, Any]:
+        page = self.ensure_connected()
+        delta_y = distance if direction == "down" else -distance
+        page.mouse.wheel(0, delta_y)
+        return {"success": True, "distance": delta_y}
+
+def browser_scroll(direction: str = "down", distance: int = 400) -> dict[str, Any]:
+    try:
+        page = _controller.ensure_connected()
+        delta_y = distance if direction == "down" else -distance
+        page.evaluate(f"window.scrollBy({{top: {delta_y}, behavior: \"smooth\"}})")
+        return {"success": True, "distance": delta_y}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
