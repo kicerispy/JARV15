@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 import certifi
 import psutil
 
+from tool_result import ToolResult
+
 import file_tools
 import jarvis_status
 import screen_vision
@@ -1621,12 +1623,116 @@ BROWSER_TOOLS = {
 }
 
 
+def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
+    """
+    Convert an existing raw tool result into the unified ToolResult format.
+
+    Existing tool behavior is preserved in ToolResult.data.
+    """
+
+    if isinstance(result, ToolResult):
+        return result
+
+    if isinstance(result, dict):
+        success = result.get("success")
+
+        if success is True:
+            return ToolResult(
+                success=True,
+                tool=tool_name,
+                data=result,
+                observation=result,
+            )
+
+        if success is False:
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                data=result,
+                error=str(
+                    result.get("error")
+                    or result.get("message")
+                    or f"{tool_name} failed"
+                ),
+                retryable=bool(result.get("retryable", False)),
+                observation=result,
+            )
+
+    if isinstance(result, str):
+        stripped = result.strip()
+
+        if stripped == "Unknown tool requested.":
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                data=result,
+                error=result,
+                retryable=False,
+            )
+
+        file_tools = {
+            "write_file",
+            "edit_file",
+            "read_file",
+            "delete_file",
+        }
+
+        if tool_name in file_tools:
+            file_error_prefixes = (
+                "Filename cannot be empty.",
+                "Content cannot be None.",
+                "Invalid folder path.",
+                "Folder not found:",
+                "Not a folder:",
+                "Invalid filename.",
+                "File not found:",
+                "Not a file:",
+                "old_text cannot be empty.",
+                "old_text not found in ",
+                "I couldn't write the file:",
+                "I couldn't edit the file:",
+                "I couldn't delete the file:",
+                "Error reading file:",
+            )
+
+            if stripped.startswith(file_error_prefixes):
+                return ToolResult(
+                    success=False,
+                    tool=tool_name,
+                    data=result,
+                    error=result,
+                    retryable=False,
+                )
+
+        return ToolResult(
+            success=True,
+            tool=tool_name,
+            data=result,
+        )
+
+    if result is None:
+        return ToolResult(
+            success=False,
+            tool=tool_name,
+            error=f"{tool_name} returned no result",
+        )
+
+    return ToolResult(
+        success=True,
+        tool=tool_name,
+        data=result,
+    )
+
+
 def run_browser_tool(
     tool_name: str,
     argument: str = "",
 ):
     """
     Dispatch browser automation tools to browser_controller.py.
+
+    All browser tool results are normalized into ToolResult while
+    preserving the original controller payload in ToolResult.data.
     """
 
     from browser_controller import (
@@ -1640,21 +1746,24 @@ def run_browser_tool(
 
     argument = str(argument or "").strip()
 
+    def normalize(result):
+        return normalize_tool_result(tool_name, result)
+
     if tool_name == "browser_connect":
-        return browser_connect()
+        return normalize(browser_connect())
 
     if tool_name == "browser_search_google":
-        return browser_search_google(argument)
+        return normalize(browser_search_google(argument))
 
     if tool_name == "browser_search_bing":
-        return browser_search_bing(argument)
+        return normalize(browser_search_bing(argument))
 
     if tool_name == "browser_click_first_bing_result":
         query = argument if argument else None
-        return browser_click_first_bing_result(query)
+        return normalize(browser_click_first_bing_result(query))
 
     if tool_name == "browser_goto":
-        return browser_goto(argument)
+        return normalize(browser_goto(argument))
 
     if tool_name in {
         "browser_find_element",
@@ -1672,13 +1781,14 @@ def run_browser_tool(
             try:
                 payload = json.loads(argument)
             except json.JSONDecodeError as exc:
-                return {
-                    "success": False,
-                    "error": (
+                return ToolResult(
+                    success=False,
+                    tool=tool_name,
+                    error=(
                         "DOM browser tool argument must be valid JSON: "
                         f"{exc}"
                     ),
-                }
+                )
 
         from browser_controller import (
             browser_find_element,
@@ -1690,65 +1800,68 @@ def run_browser_tool(
         )
 
         if tool_name == "browser_find_element":
-            return browser_find_element(
+            return normalize(browser_find_element(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
-            )
+            ))
 
         if tool_name == "browser_click_element":
-            return browser_click_element(
+            return normalize(browser_click_element(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
-            )
+            ))
 
         if tool_name == "browser_fill_element":
-            return browser_fill_element(
+            return normalize(browser_fill_element(
                 value=payload.get("value", ""),
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
-            )
+            ))
 
         if tool_name == "browser_press_key":
-            return browser_press_key(
+            return normalize(browser_press_key(
                 key=payload.get("key", ""),
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
-            )
+            ))
 
         if tool_name == "browser_wait_for_element":
-            return browser_wait_for_element(
+            return normalize(browser_wait_for_element(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
                 timeout=int(payload.get("timeout", 10000)),
-            )
+            ))
 
         if tool_name == "browser_extract_text":
-            return browser_extract_text(
+            return normalize(browser_extract_text(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
-            )
+            ))
 
     if tool_name == "browser_page_info":
-        return browser_page_info()
+        return normalize(browser_page_info())
 
-    return {
-        "success": False,
-        "message": f"Unknown browser tool: {tool_name}",
-    }
+    return ToolResult(
+        success=False,
+        tool=tool_name,
+        error=f"Unknown browser tool: {tool_name}",
+    )
 
-
-def run_tool(
+def _run_tool_raw(
     tool_name: str,
     argument: str = "",
 ) -> Union[str, Dict[str, Any]]:
     """
-    Main JARVIS tool dispatcher.
+    Internal JARVIS tool dispatcher.
+
+    This preserves the existing raw tool behavior. The public
+    run_tool() wrapper below converts the result into ToolResult.
     """
 
     # --------------------------------------------------------
@@ -2147,3 +2260,25 @@ def run_tool(
         return (
             "Unknown tool requested."
         )
+
+
+def run_tool(
+    tool_name: str,
+    argument: str = "",
+) -> ToolResult:
+    """
+    Public JARVIS tool dispatcher.
+
+    All tool results are normalized into the unified ToolResult
+    contract while preserving the original raw result in .data.
+    """
+
+    result = _run_tool_raw(
+        tool_name,
+        argument,
+    )
+
+    return normalize_tool_result(
+        tool_name,
+        result,
+    )

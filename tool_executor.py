@@ -10,6 +10,7 @@ from typing import Any, Dict
 from logger import logger
 from state import ActiveContext, TaskState
 from tools import run_tool
+from tool_result import ToolResult
 
 
 # ============================================================
@@ -36,122 +37,20 @@ def run_browser_tool(
     tool_name: str,
     argument: str = "",
 ):
-    """Dispatch Playwright/CDP browser tools."""
+    """
+    Dispatch browser tools through the canonical tools.py dispatcher.
 
-    from browser_controller import (
-        browser_connect,
-        browser_search_google,
-        browser_search_bing,
-        browser_click_first_bing_result,
-        browser_goto,
-        browser_page_info,
+    tools.run_browser_tool() is responsible for browser dispatch and
+    ToolResult normalization. Keeping one dispatcher prevents the
+    executor and tools layer from drifting apart.
+    """
+
+    from tools import run_browser_tool as dispatch_browser_tool
+
+    return dispatch_browser_tool(
+        tool_name,
+        argument,
     )
-
-    if tool_name == "browser_connect":
-        return browser_connect()
-
-    if tool_name == "browser_search_google":
-        return browser_search_google(argument)
-
-    if tool_name == "browser_search_bing":
-        return browser_search_bing(argument)
-
-    if tool_name == "browser_click_first_bing_result":
-        query = argument.strip() if argument else None
-        return browser_click_first_bing_result(query)
-
-    if tool_name == "browser_goto":
-        return browser_goto(argument)
-
-    if tool_name in {
-        "browser_find_element",
-        "browser_click_element",
-        "browser_fill_element",
-        "browser_press_key",
-        "browser_wait_for_element",
-        "browser_extract_text",
-    }:
-        import json
-
-        payload = {}
-
-        if argument:
-            try:
-                payload = json.loads(argument)
-            except json.JSONDecodeError as exc:
-                return {
-                    "success": False,
-                    "error": (
-                        "DOM browser tool argument must be valid JSON: "
-                        f"{exc}"
-                    ),
-                }
-
-        from browser_controller import (
-            browser_find_element,
-            browser_click_element,
-            browser_fill_element,
-            browser_press_key,
-            browser_wait_for_element,
-            browser_extract_text,
-        )
-
-        if tool_name == "browser_find_element":
-            return browser_find_element(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-            )
-
-        if tool_name == "browser_click_element":
-            return browser_click_element(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-            )
-
-        if tool_name == "browser_fill_element":
-            return browser_fill_element(
-                value=payload.get("value", ""),
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-            )
-
-        if tool_name == "browser_press_key":
-            return browser_press_key(
-                key=payload.get("key", ""),
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-            )
-
-        if tool_name == "browser_wait_for_element":
-            return browser_wait_for_element(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                timeout=int(payload.get("timeout", 10000)),
-            )
-
-        if tool_name == "browser_extract_text":
-            return browser_extract_text(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-            )
-
-    if tool_name == "browser_page_info":
-        return browser_page_info()
-
-    return {
-        "success": False,
-        "message": f"Unknown browser tool: {tool_name}",
-    }
-
-
-
-
 
 
 # ============================================================
@@ -357,6 +256,9 @@ def verify_action_for_task(
     when they are part of a multi-step task.
 
     Single-step commands are intentionally not delayed.
+
+    ToolResult is supported while preserving legacy dict
+    compatibility.
     """
 
     # --------------------------------------------------------
@@ -375,18 +277,50 @@ def verify_action_for_task(
 
         return result
 
-    if not isinstance(
+    # --------------------------------------------------------
+    # Unwrap ToolResult for the existing verification logic.
+    # --------------------------------------------------------
+
+    if isinstance(
+        result,
+        ToolResult,
+    ):
+        raw_result = result.data
+
+        if not isinstance(
+            raw_result,
+            dict,
+        ):
+            return result
+
+        if not result.success:
+            return result
+
+        verified_result = dict(
+            raw_result
+        )
+
+        result_data_is_tool_result = True
+
+    elif isinstance(
         result,
         dict,
     ):
+        raw_result = result
 
-        return result
+        if not result.get(
+            "success",
+            False,
+        ):
+            return result
 
-    if not result.get(
-        "success",
-        False,
-    ):
+        verified_result = dict(
+            raw_result
+        )
 
+        result_data_is_tool_result = False
+
+    else:
         return result
 
     # --------------------------------------------------------
@@ -394,10 +328,6 @@ def verify_action_for_task(
     # --------------------------------------------------------
 
     changed = quick_screen_verify()
-
-    verified_result = dict(
-        result
-    )
 
     verified_result["screen_changed"] = (
         changed
@@ -407,21 +337,26 @@ def verify_action_for_task(
 
         verified_result["verified"] = True
 
-        return verified_result
+    else:
 
-    # --------------------------------------------------------
-    # No visible change.
-    #
-    # We do not immediately fail here. Some legitimate
-    # actions do not cause obvious pixel changes.
-    #
-    # The tool itself already reported success.
-    # --------------------------------------------------------
+        # ----------------------------------------------------
+        # No visible change.
+        #
+        # We do not immediately fail here. Some legitimate
+        # actions do not cause obvious pixel changes.
+        #
+        # The tool itself already reported success.
+        # ----------------------------------------------------
 
-    verified_result["verified"] = True
-    verified_result["verification_note"] = (
-        "No immediate visible screen change was detected."
-    )
+        verified_result["verified"] = True
+        verified_result["verification_note"] = (
+            "No immediate visible screen change was detected."
+        )
+
+    if result_data_is_tool_result:
+        result.data = verified_result
+        result.observation = verified_result
+        return result
 
     return verified_result
 
@@ -441,6 +376,12 @@ def format_browser_result(
     This does not alter the underlying result. It only produces
     a human-readable execution message.
     """
+
+    if isinstance(result, ToolResult):
+        if isinstance(result.data, dict):
+            result = result.data
+        else:
+            return str(result)
 
     if not isinstance(result, dict):
         return str(result)
@@ -693,13 +634,59 @@ def normalize_tool_result(
         success
         verified
         message
+
+    ToolResult is the preferred format. Legacy dict results
+    remain supported for backwards compatibility.
     """
+
+    if isinstance(
+        result,
+        ToolResult,
+    ):
+        data = result.data
+
+        if isinstance(
+            data,
+            dict,
+        ):
+            verified = bool(
+                data.get(
+                    "verified",
+                    result.success,
+                )
+            )
+
+            message = str(
+                data.get(
+                    "message",
+                    result.error
+                    or data.get(
+                        "error",
+                        "Tool completed.",
+                    ),
+                )
+            )
+
+            return (
+                result.success,
+                verified,
+                message,
+            )
+
+        return (
+            result.success,
+            result.success,
+            str(
+                result.error
+                or data
+                or "Tool completed."
+            ),
+        )
 
     if isinstance(
         result,
         dict,
     ):
-
         success = bool(
             result.get(
                 "success",
@@ -717,7 +704,10 @@ def normalize_tool_result(
         message = str(
             result.get(
                 "message",
-                "Tool completed.",
+                result.get(
+                    "error",
+                    "Tool completed.",
+                ),
             )
         )
 
@@ -1085,7 +1075,7 @@ def execute_plan(
 
                 from recovery import retry_with_recovery
 
-                result = retry_with_recovery(
+                recovery_result = retry_with_recovery(
                     tool_name,
                     argument,
                     run_tool,
@@ -1093,41 +1083,58 @@ def execute_plan(
                 )
 
                 if not isinstance(
-                    result,
+                    recovery_result,
                     dict,
                 ):
-
-                    result = {
-                        "success": False,
-                        "message": (
+                    result = ToolResult(
+                        success=False,
+                        tool=tool_name,
+                        error=(
                             "File operation returned "
-                            "an invalid result."
+                            "an invalid recovery result."
                         ),
-                    }
+                    )
 
-                elif not result.get(
+                elif not recovery_result.get(
                     "success",
                     False,
                 ):
-
-                    result = {
-                        "success": False,
-                        "message": str(
-                            result.get(
+                    result = ToolResult(
+                        success=False,
+                        tool=tool_name,
+                        error=str(
+                            recovery_result.get(
                                 "error",
                                 "File operation failed.",
                             )
                         ),
-                    }
-
-                else:
-
-                    result = result.get(
-                        "result",
-                        result,
+                        retryable=False,
+                        observation={
+                            "attempts": recovery_result.get(
+                                "attempts",
+                                1,
+                            ),
+                        },
                     )
 
-            # =================================================
+                else:
+                    recovered_result = recovery_result.get(
+                        "result"
+                    )
+
+                    if isinstance(
+                        recovered_result,
+                        ToolResult,
+                    ):
+                        result = recovered_result
+
+                    else:
+                        result = ToolResult(
+                            success=True,
+                            tool=tool_name,
+                            data=recovered_result,
+                        )
+
             # NORMAL TOOL
             # =================================================
 
@@ -1255,7 +1262,30 @@ def execute_plan(
                         f"for {tool_name}: {message}"
                     )
 
-                    if isinstance(
+                    if isinstance(result, ToolResult):
+                        browser_data = result.data
+
+                        if isinstance(browser_data, dict):
+
+                            if browser_data.get("click_error"):
+                                logger.error(
+                                    "JARVIS: Browser click error: "
+                                    f"{browser_data.get('click_error')}"
+                                )
+
+                            if browser_data.get("before_url"):
+                                logger.error(
+                                    "JARVIS: Browser URL before action: "
+                                    f"{browser_data.get('before_url')}"
+                                )
+
+                            if browser_data.get("after_url"):
+                                logger.error(
+                                    "JARVIS: Browser URL after action: "
+                                    f"{browser_data.get('after_url')}"
+                                )
+
+                    elif isinstance(
                         result,
                         dict,
                     ):
