@@ -951,6 +951,18 @@ def execute_plan(
         or ""
     )
 
+    # Directly constructed plans may not contain a task-level
+    # resolved_command or goal. Use the first executable step's
+    # description as a safe fallback for task state.
+    if not planning_input:
+        planning_input = str(
+            executable_steps[0].get(
+                "description",
+                "",
+            )
+            or ""
+        )
+
     # --------------------------------------------------------
     # Reset execution trace
     # --------------------------------------------------------
@@ -1072,6 +1084,28 @@ def execute_plan(
                     max_attempts=2,
                 )
 
+                # Keep task state synchronized with the actual
+                # recovery executor rather than maintaining a
+                # separate attempt counter.
+                recovery_attempts = 1
+                if isinstance(
+                    recovery_result,
+                    dict,
+                ):
+                    recovery_attempts = int(
+                        recovery_result.get(
+                            "attempts",
+                            1,
+                        )
+                        or 1
+                    )
+
+                task_state.attempts = recovery_attempts
+                task_state.recovery_count = max(
+                    recovery_attempts - 1,
+                    0,
+                )
+
                 if not isinstance(
                     recovery_result,
                     dict,
@@ -1129,6 +1163,11 @@ def execute_plan(
             # =================================================
 
             else:
+
+                # Ordinary tools execute once and therefore have
+                # exactly one attempt with no recovery.
+                task_state.attempts = 1
+                task_state.recovery_count = 0
 
                 if tool_name in BROWSER_TOOLS:
                     result = run_browser_tool(
@@ -1239,6 +1278,15 @@ def execute_plan(
                 f"JARVIS: {message}"
             )
 
+            # ------------------------------------------------
+            # Record the normalized result in task state.
+            # ------------------------------------------------
+
+            if success and verified:
+                task_state.record_result(result)
+            else:
+                task_state.record_error(message)
+
             # =================================================
             # FAILURE
             # =================================================
@@ -1312,6 +1360,8 @@ def execute_plan(
                 if speak_status == 'interrupted':
                     return 'interrupted'
 
+                task_state.fail(message)
+
                 return 'failed'
 
             # =================================================
@@ -1377,6 +1427,9 @@ def execute_plan(
             logger.info(
                 f"JARVIS: {error_message}"
             )
+
+            task_state.record_error(error_message)
+            task_state.fail(error_message)
 
             # -------------------------------------------------
             # IMPORTANT:
