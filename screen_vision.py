@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import time
 import ctypes
@@ -8224,9 +8224,8 @@ def click_screen_target(
                     f"{youtube_scroll_attempts}"
                 )
 
-                pyautogui.scroll(
-                    -5
-                )
+                from browser_controller import browser_scroll
+                browser_scroll(direction="down", distance=400)
 
                 time.sleep(
                     1.0
@@ -10221,4 +10220,5 @@ def start_jarvis():
 if __name__ == "__main__":
 
     start_jarvis()
+
 
