@@ -1,9 +1,9 @@
-﻿from ollama import chat
+from ollama import chat
 import json
 import re
 
 
-MODEL = "gemma4:e2b"
+MODEL = "qwen3:8b"
 
 
 # ==================================================
@@ -276,73 +276,26 @@ def extract_search_query(text, site):
 
     # ------------------------------------------------------
     # Search phrase variations.
-    #
-    # Examples:
-    #
-    # search YouTube for Wi-Fi skeleton
-    # search YouTube Wi-Fi skeleton
-    # search for Wi-Fi skeleton on YouTube
-    # search Wi-Fi skeleton on YouTube
-    # search on YouTube for Wi-Fi skeleton
-    # look up Wi-Fi skeleton on YouTube
-    # find Wi-Fi skeleton on YouTube
-    # find Wi-Fi skeleton in YouTube
     # ------------------------------------------------------
 
     patterns = [
-
-        # search YouTube for X
         rf"\bsearch\s+{re.escape(site_name)}\s+for\s+(.+)",
-
-        # search YouTube X
         rf"\bsearch\s+{re.escape(site_name)}\s+(.+)",
-
-        # searching YouTube for X
         rf"\bsearching\s+{re.escape(site_name)}\s+for\s+(.+)",
-
-        # searching YouTube X
         rf"\bsearching\s+{re.escape(site_name)}\s+(.+)",
-
-        # search on YouTube for X
         rf"\bsearch\s+on\s+{re.escape(site_name)}\s+for\s+(.+)",
-
-        # searching on YouTube for X
         rf"\bsearching\s+on\s+{re.escape(site_name)}\s+for\s+(.+)",
-
-        # search for X on YouTube
         rf"\bsearch\s+for\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # searching for X on YouTube
         rf"\bsearching\s+for\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # search X on YouTube
         rf"\bsearch\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # look up X on YouTube
         rf"\blook\s+up\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # lookup X on YouTube
         rf"\blookup\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # find X on YouTube
         rf"\bfind\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # find X in YouTube
         rf"\bfind\s+(.+?)\s+in\s+{re.escape(site_name)}\b",
-
-        # look for X on YouTube
         rf"\blook\s+for\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # locate X on YouTube
         rf"\blocate\s+(.+?)\s+on\s+{re.escape(site_name)}\b",
-
-        # go to YouTube and search for X
         rf"\bgo\s+to\s+{re.escape(site_name)}\s+and\s+search\s+for\s+(.+)",
-
-        # on YouTube search for X
         rf"\bon\s+{re.escape(site_name)}\s+search\s+for\s+(.+)",
-
-        # search X using YouTube
         rf"\bsearch\s+(.+?)\s+(?:using|via)\s+{re.escape(site_name)}\b",
     ]
 
@@ -368,23 +321,15 @@ def extract_search_query(text, site):
     if not query:
         return None
 
-    # ------------------------------------------------------
-    # Remove trailing command language that belongs to the
-    # click/open/play instruction rather than the search.
-    # ------------------------------------------------------
-
     trailing_action_patterns = [
-
         r"\s+(?:and|then|,\s*)+\s+"
         r"(?:click|open|play|select)\s+"
         r"(?:on\s+)?(?:the\s+)?"
         r"(?:first|top|number\s+one|#?1)\b.*$",
-
         r"\s+(?:and|then)\s+"
         r"(?:click|open|play|select)\s+"
         r"(?:the\s+)?(?:first|top)\s+"
         r"(?:result|video|link|one)\b.*$",
-
         r"\s+(?:and|then)\s+"
         r"(?:click|open|play)\s+"
         r"(?:it|that|one)\b.*$",
@@ -399,23 +344,12 @@ def extract_search_query(text, site):
             flags=re.IGNORECASE
         ).strip()
 
-    # ------------------------------------------------------
-    # Remove a dangling conjunction left by Whisper.
-    #
-    # Example:
-    # "search YouTube for Wi-Fi skeleton and"
-    # ------------------------------------------------------
-
     query = re.sub(
         r"\s+(?:and|then)\s*$",
         "",
         query,
         flags=re.IGNORECASE
     ).strip()
-
-    # ------------------------------------------------------
-    # Remove conversational filler from the beginning.
-    # ------------------------------------------------------
 
     query = re.sub(
         r"^(?:please|can\s+you|could\s+you|would\s+you)\s+",
@@ -441,46 +375,32 @@ def wants_first_result(text):
     )
 
     patterns = [
-
-        # Open/click/play first result
         r"\bopen\s+(?:the\s+)?first\s+result\b",
         r"\bopen\s+(?:the\s+)?first\s+video\b",
         r"\bopen\s+(?:the\s+)?first\s+link\b",
         r"\bopen\s+(?:the\s+)?first\s+one\b",
-
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+result\b",
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+video\b",
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+link\b",
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+one\b",
-
         r"\bplay\s+(?:the\s+)?first\s+result\b",
         r"\bplay\s+(?:the\s+)?first\s+video\b",
         r"\bplay\s+(?:the\s+)?first\s+link\b",
         r"\bplay\s+(?:the\s+)?first\s+one\b",
-
-        # Top result / top video / top link
         r"\bopen\s+(?:the\s+)?top\s+result\b",
         r"\bopen\s+(?:the\s+)?top\s+video\b",
         r"\bopen\s+(?:the\s+)?top\s+link\b",
-
         r"\bclick\s+(?:on\s+)?(?:the\s+)?top\s+result\b",
         r"\bclick\s+(?:on\s+)?(?:the\s+)?top\s+video\b",
         r"\bclick\s+(?:on\s+)?(?:the\s+)?top\s+link\b",
-
         r"\bplay\s+(?:the\s+)?top\s+result\b",
         r"\bplay\s+(?:the\s+)?top\s+video\b",
-
-        # Number one
         r"\bopen\s+(?:result|video|link)\s+number\s+one\b",
         r"\bclick\s+(?:on\s+)?(?:result|video|link)\s+number\s+one\b",
         r"\bplay\s+(?:result|video|link)\s+number\s+one\b",
-
-        # First item / first one
         r"\bopen\s+(?:the\s+)?first\s+(?:item|one)\b",
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+(?:item|one)\b",
         r"\bplay\s+(?:the\s+)?first\s+(?:item|one)\b",
-
-        # Natural spoken variants
         r"\bgo\s+with\s+(?:the\s+)?first\s+(?:result|video|link|one)\b",
         r"\bselect\s+(?:the\s+)?first\s+(?:result|video|link|one)\b",
         r"\bchoose\s+(?:the\s+)?first\s+(?:result|video|link|one)\b",
@@ -514,17 +434,11 @@ def split_search_and_first_result(
         return None
 
     stop_patterns = [
-
         r"\s+(?:and|then)\s+open\s+(?:the\s+)?first\s+(?:result|video)\b.*$",
-
         r"\s+(?:and|then)\s+click\s+(?:the\s+)?first\s+(?:result|video)\b.*$",
-
         r"\s+(?:and|then)\s+play\s+(?:the\s+)?first\s+(?:result|video)\b.*$",
-
         r"\s+open\s+(?:the\s+)?first\s+(?:result|video)\b.*$",
-
         r"\s+click\s+(?:the\s+)?first\s+(?:result|video)\b.*$",
-
         r"\s+play\s+(?:the\s+)?first\s+(?:result|video)\b.*$",
     ]
 
@@ -555,10 +469,6 @@ def split_search_and_first_result(
     }
 
 
-# ==================================================
-# Detect browser launch
-# ==================================================
-
 def browser_requested(text):
 
     lowered = clean_text(text)
@@ -570,10 +480,6 @@ def browser_requested(text):
         or "start chrome" in lowered
     )
 
-
-# ==================================================
-# Build website search plan
-# ==================================================
 
 def build_website_search_plan(
     user_request,
@@ -589,7 +495,6 @@ def build_website_search_plan(
         return None
 
     steps = []
-
 
     if browser_requested(
         user_request
@@ -609,7 +514,6 @@ def build_website_search_plan(
             }
         )
 
-
     steps.append(
         {
             "tool": "search_website",
@@ -617,35 +521,15 @@ def build_website_search_plan(
         }
     )
 
-
     return {
         "steps": steps
     }
 
 
-# ==================================================
-# Build search + first-result plan
-# ==================================================
-
 def build_search_first_result_plan(
     user_request,
     site
 ):
-    """
-    Build a search + first-result plan.
-
-    The click target now respects the requested site.
-
-    YouTube:
-        first organic YouTube result
-
-    Google:
-        first organic Google result
-
-    Other sites:
-        generic first result
-    """
-
     combined = split_search_and_first_result(
         user_request,
         site
@@ -670,37 +554,24 @@ def build_search_first_result_plan(
 
     steps.append(
         {
-            "tool":
-                "search_website",
-
-            "argument":
-                f"{site}|{query}"
+            "tool": "search_website",
+            "argument": f"{site}|{query}"
         }
     )
 
     steps.append(
         {
-            "tool":
-                "wait",
-
-            "argument":
-                "2"
+            "tool": "wait",
+            "argument": "2"
         }
     )
-
-    # --------------------------------------------------
-    # Site-specific first-result handling.
-    # --------------------------------------------------
 
     if site == "youtube":
 
         steps.append(
             {
-                "tool":
-                    "click_screen",
-
-                "argument":
-                    f"first organic YouTube result for {query}"
+                "tool": "click_screen",
+                "argument": f"first organic YouTube result for {query}"
             }
         )
 
@@ -708,11 +579,8 @@ def build_search_first_result_plan(
 
         steps.append(
             {
-                "tool":
-                    "click_screen",
-
-                "argument":
-                    f"first organic Google result for {query}"
+                "tool": "click_screen",
+                "argument": f"first organic Google result for {query}"
             }
         )
 
@@ -720,41 +588,17 @@ def build_search_first_result_plan(
 
         steps.append(
             {
-                "tool":
-                    "click_screen",
-
-                "argument":
-                    "first result"
+                "tool": "click_screen",
+                "argument": "first result"
             }
         )
 
     return {
-        "steps":
-            steps
+        "steps": steps
     }
 
 
-# ==================================================
-# Browser search helpers
-# ==================================================
-
 def extract_generic_search_query(text):
-    """
-    Extract a normal web-search query without requiring
-    the user to name a specific website.
-
-    Examples:
-
-        search for Wi-Fi skeleton
-        search Wi-Fi skeleton
-        find Wi-Fi skeleton
-        look up Wi-Fi skeleton
-        lookup Wi-Fi skeleton
-
-        search for Wi-Fi skeleton and click the first result
-        find Wi-Fi skeleton and open the first result
-    """
-
     original = str(text or "").strip()
 
     if not original:
@@ -762,7 +606,6 @@ def extract_generic_search_query(text):
 
     cleaned = original.strip()
 
-    # Remove common spoken prefixes.
     cleaned = re.sub(
         r"^(?:please|can\s+you|could\s+you|would\s+you|"
         r"hey|hey\s+jarvis|jarvis|heed)\s+",
@@ -772,20 +615,10 @@ def extract_generic_search_query(text):
     ).strip()
 
     patterns = [
-
-        # search for X
         r"^(?:search)\s+for\s+(.+?)$",
-
-        # search X
         r"^(?:search)\s+(.+?)$",
-
-        # find X
         r"^(?:find)\s+(.+?)$",
-
-        # look up X
         r"^(?:look)\s+up\s+(.+?)$",
-
-        # lookup X
         r"^(?:lookup)\s+(.+?)$",
     ]
 
@@ -806,7 +639,6 @@ def extract_generic_search_query(text):
     if not query:
         return None
 
-    # Remove trailing first-result actions.
     query = re.sub(
         r"\s+(?:and|then)\s+"
         r"(?:click|open|play|select)\s+"
@@ -819,8 +651,6 @@ def extract_generic_search_query(text):
         flags=re.IGNORECASE,
     ).strip()
 
-    # Natural spoken variant:
-    # "search for X, click the first result"
     query = re.sub(
         r"\s*,?\s*"
         r"(?:click|open|play|select)\s+"
@@ -845,7 +675,6 @@ def extract_generic_search_query(text):
     if not query:
         return None
 
-    # Do not take over explicitly routed website searches.
     lowered = query.lower()
 
     explicit_sites = (
@@ -865,11 +694,6 @@ def extract_generic_search_query(text):
 
 
 def generic_search_wants_first_result(text):
-    """
-    Determine whether a generic web-search request also asks
-    JARVIS to open/click the first result.
-    """
-
     normalized = clean_text(
         text
     )
@@ -878,17 +702,13 @@ def generic_search_wants_first_result(text):
         return False
 
     patterns = [
-
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+result\b",
         r"\bopen\s+(?:the\s+)?first\s+result\b",
         r"\bselect\s+(?:the\s+)?first\s+result\b",
-
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+link\b",
         r"\bopen\s+(?:the\s+)?first\s+link\b",
-
         r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+one\b",
         r"\bopen\s+(?:the\s+)?first\s+one\b",
-
         r"\bgo\s+with\s+(?:the\s+)?first\s+result\b",
         r"\bchoose\s+(?:the\s+)?first\s+result\b",
     ]
@@ -906,23 +726,6 @@ def generic_search_wants_first_result(text):
 def build_browser_search_plan(
     user_request,
 ):
-    """
-    Build a deterministic browser search plan for generic web
-    searches.
-
-    Generic web search:
-
-        browser_search_bing
-
-    Generic first-result request:
-
-        browser_search_bing
-        browser_click_first_bing_result
-
-    YouTube and explicitly named websites are handled elsewhere
-    and are intentionally not intercepted here.
-    """
-
     query = extract_generic_search_query(
         user_request
     )
@@ -931,7 +734,6 @@ def build_browser_search_plan(
         return None
 
     steps = [
-
         {
             "tool": "browser_search_bing",
             "argument": query,
@@ -944,11 +746,8 @@ def build_browser_search_plan(
 
         steps.append(
             {
-                "tool":
-                    "browser_click_first_bing_result",
-
-                "argument":
-                    query,
+                "tool": "browser_click_first_bing_result",
+                "argument": query,
             }
         )
 
@@ -957,13 +756,35 @@ def build_browser_search_plan(
     }
 
 
-
 def deterministic_route(user_request):
 
     text = clean_text(
         user_request
     )
 
+    # ==================================================
+    # Media Controls
+    # ==================================================
+
+    if contains_any(
+        text,
+        [
+            "pause the video",
+            "play the video",
+            "resume playback",
+            "stop media",
+            "media pause",
+            "media play",
+        ]
+    ):
+        return {
+            "steps": [
+                {
+                    "tool": "browser_media_control",
+                    "argument": user_request
+                }
+            ]
+        }
 
     # ==================================================
     # YouTube
@@ -987,13 +808,8 @@ def deterministic_route(user_request):
             )
 
             if combined_plan:
-
-                print(
-                    "JARVIS: YouTube multi-step search detected."
-                )
-
+                print("JARVIS: YouTube multi-step search detected.")
                 return combined_plan
-
 
             plan = build_website_search_plan(
                 user_request,
@@ -1001,13 +817,8 @@ def deterministic_route(user_request):
             )
 
             if plan:
-
-                print(
-                    "JARVIS: YouTube search detected."
-                )
-
+                print("JARVIS: YouTube search detected.")
                 return plan
-
 
     # ==================================================
     # Google
@@ -1029,13 +840,8 @@ def deterministic_route(user_request):
             )
 
             if combined_plan:
-
-                print(
-                    "JARVIS: Google multi-step search detected."
-                )
-
+                print("JARVIS: Google multi-step search detected.")
                 return combined_plan
-
 
             plan = build_website_search_plan(
                 user_request,
@@ -1043,13 +849,8 @@ def deterministic_route(user_request):
             )
 
             if plan:
-
-                print(
-                    "JARVIS: Google search detected."
-                )
-
+                print("JARVIS: Google search detected.")
                 return plan
-
 
     # ==================================================
     # Amazon
@@ -1071,13 +872,8 @@ def deterministic_route(user_request):
             )
 
             if combined_plan:
-
-                print(
-                    "JARVIS: Amazon multi-step search detected."
-                )
-
+                print("JARVIS: Amazon multi-step search detected.")
                 return combined_plan
-
 
             plan = build_website_search_plan(
                 user_request,
@@ -1085,13 +881,8 @@ def deterministic_route(user_request):
             )
 
             if plan:
-
-                print(
-                    "JARVIS: Amazon search detected."
-                )
-
+                print("JARVIS: Amazon search detected.")
                 return plan
-
 
     # ==================================================
     # Reddit
@@ -1113,13 +904,8 @@ def deterministic_route(user_request):
             )
 
             if combined_plan:
-
-                print(
-                    "JARVIS: Reddit multi-step search detected."
-                )
-
+                print("JARVIS: Reddit multi-step search detected.")
                 return combined_plan
-
 
             plan = build_website_search_plan(
                 user_request,
@@ -1127,61 +913,11 @@ def deterministic_route(user_request):
             )
 
             if plan:
-
-                print(
-                    "JARVIS: Reddit search detected."
-                )
-
+                print("JARVIS: Reddit search detected.")
                 return plan
-
-
-    # ==================================================
-    # GENERIC GOOGLE SEARCH ROUTE
-    # ==================================================
-    #
-    # Examples:
-    #
-    #   search for Wi-Fi skeleton
-    #   search for Python tutorials
-    #   find information about quantum computing
-    #   look up Tesla
-    #
-    # When no specific site is named, route the request to
-    # Google through the deterministic search_website tool.
-    #
-    # Specific site handlers above this block remain higher
-    # priority, so:
-    #
-    #   search YouTube for X
-    #
-    # still uses the YouTube route.
-    # ==================================================
 
     # ==================================================
     # GENERIC BROWSER SEARCH
-    # ==================================================
-    #
-    # Generic web searches now use Playwright/CDP + Bing.
-    #
-    # Example:
-    #
-    #   search for Wi-Fi skeleton
-    #
-    # becomes:
-    #
-    #   browser_search_bing
-    #
-    # And:
-    #
-    #   search for Wi-Fi skeleton and click the first result
-    #
-    # becomes:
-    #
-    #   browser_search_bing
-    #   browser_click_first_bing_result
-    #
-    # Explicit YouTube / Google / Amazon / Reddit routes above
-    # remain untouched.
     # ==================================================
 
     browser_plan = build_browser_search_plan(
@@ -1199,7 +935,6 @@ def deterministic_route(user_request):
         )
 
         return browser_plan
-
 
     # ==================================================
     # Weather
@@ -1228,7 +963,6 @@ def deterministic_route(user_request):
                 }
             ]
         }
-
 
     # ==================================================
     # Time
@@ -1270,7 +1004,6 @@ def deterministic_route(user_request):
             ]
         }
 
-
     # ==================================================
     # Date
     # ==================================================
@@ -1296,7 +1029,6 @@ def deterministic_route(user_request):
             ]
         }
 
-
     # ==================================================
     # Active window
     # ==================================================
@@ -1321,7 +1053,6 @@ def deterministic_route(user_request):
                 }
             ]
         }
-
 
     # ==================================================
     # Screen analysis
@@ -1349,7 +1080,6 @@ def deterministic_route(user_request):
             ]
         }
 
-
     # ==================================================
     # Screenshot
     # ==================================================
@@ -1373,13 +1103,11 @@ def deterministic_route(user_request):
             ]
         }
 
-
     # ==================================================
     # Scroll
     # ==================================================
 
     if "scroll to the bottom" in text:
-
         return {
             "steps": [
                 {
@@ -1389,9 +1117,7 @@ def deterministic_route(user_request):
             ]
         }
 
-
     if "scroll to the top" in text:
-
         return {
             "steps": [
                 {
@@ -1401,9 +1127,7 @@ def deterministic_route(user_request):
             ]
         }
 
-
     if "scroll down" in text:
-
         return {
             "steps": [
                 {
@@ -1413,9 +1137,7 @@ def deterministic_route(user_request):
             ]
         }
 
-
     if "scroll up" in text:
-
         return {
             "steps": [
                 {
@@ -1425,43 +1147,28 @@ def deterministic_route(user_request):
             ]
         }
 
-
     # ==================================================
     # Open applications
     # ==================================================
 
     applications = {
-
         "google chrome": "chrome",
         "chrome": "chrome",
-
         "calculator": "calculator",
         "calc": "calculator",
-
         "notepad": "notepad",
-
         "paint": "paint",
-
         "file explorer": "file explorer",
         "explorer": "file explorer",
-
         "discord": "discord",
-
         "spotify": "spotify",
-
         "steam": "steam",
-
         "edge": "edge",
-
         "firefox": "firefox",
-
         "word": "word",
-
         "excel": "excel",
-
         "powerpoint": "powerpoint",
     }
-
 
     open_prefixes = (
         "open ",
@@ -1469,28 +1176,22 @@ def deterministic_route(user_request):
         "start ",
     )
 
-
     if text.startswith(
         open_prefixes
     ):
-
         command = clean_text(
             user_request
         )
 
-
         for spoken_name, program_name in applications.items():
-
             if (
                 command == f"open {spoken_name}"
                 or command == f"launch {spoken_name}"
                 or command == f"start {spoken_name}"
             ):
-
                 print(
                     f"JARVIS: Opening {program_name} deterministically."
                 )
-
                 return {
                     "steps": [
                         {
@@ -1500,7 +1201,6 @@ def deterministic_route(user_request):
                     ]
                 }
 
-
     # ==================================================
     # Double click
     # ==================================================
@@ -1509,7 +1209,6 @@ def deterministic_route(user_request):
         "double click " in text
         or "double-click " in text
     ):
-
         target = re.sub(
             r"^.*?double[- ]click\s+",
             "",
@@ -1518,7 +1217,6 @@ def deterministic_route(user_request):
         ).strip()
 
         if target:
-
             return {
                 "steps": [
                     {
@@ -1528,7 +1226,6 @@ def deterministic_route(user_request):
                 ]
             }
 
-
     # ==================================================
     # Click
     # ==================================================
@@ -1536,7 +1233,6 @@ def deterministic_route(user_request):
     if text.startswith(
         "click "
     ):
-
         target = re.sub(
             r"^click\s+",
             "",
@@ -1545,8 +1241,6 @@ def deterministic_route(user_request):
         ).strip()
 
         if target:
-            # Generic first-result follow-ups go to planner.py
-            # so active Google/YouTube search context can resolve them.
             _generic_first_result_targets = {
                 "first result",
                 "the first result",
@@ -1565,7 +1259,6 @@ def deterministic_route(user_request):
             if target.lower().strip() in _generic_first_result_targets:
                 return None
 
-
             return {
                 "steps": [
                     {
@@ -1574,7 +1267,6 @@ def deterministic_route(user_request):
                     }
                 ]
             }
-
 
     # ==================================================
     # Move mouse
@@ -1585,7 +1277,6 @@ def deterministic_route(user_request):
         or text.startswith("move my mouse")
         or text.startswith("move cursor")
     ):
-
         match = re.search(
             r"(?:to|toward|towards)\s+(.+)",
             user_request,
@@ -1593,7 +1284,6 @@ def deterministic_route(user_request):
         )
 
         if match:
-
             target = (
                 match.group(1)
                 .strip()
@@ -1609,7 +1299,6 @@ def deterministic_route(user_request):
                 ]
             }
 
-
     # ==================================================
     # Type
     # ==================================================
@@ -1617,7 +1306,6 @@ def deterministic_route(user_request):
     if text.startswith(
         "type "
     ):
-
         content = re.sub(
             r"^type\s+",
             "",
@@ -1634,7 +1322,6 @@ def deterministic_route(user_request):
             ]
         }
 
-
     # ==================================================
     # Press key
     # ==================================================
@@ -1644,7 +1331,6 @@ def deterministic_route(user_request):
         "hit enter",
         "press the enter key",
     }:
-
         return {
             "steps": [
                 {
@@ -1653,7 +1339,6 @@ def deterministic_route(user_request):
                 }
             ]
         }
-
 
     # ==================================================
     # System status
@@ -1670,7 +1355,6 @@ def deterministic_route(user_request):
             "ram usage",
         ]
     ):
-
         return {
             "steps": [
                 {
@@ -1679,7 +1363,6 @@ def deterministic_route(user_request):
                 }
             ]
         }
-
 
     return None
 
@@ -1731,6 +1414,7 @@ scroll_screen
 verify_screen
 type_text
 press_key
+browser_media_control
 
 RULES:
 
@@ -1778,52 +1462,41 @@ For normal conversation:
         }
     )
 
-
     try:
-
         result = json.loads(
             response["message"]["content"]
         )
-
 
         if not isinstance(
             result,
             dict
         ):
-
             return {
                 "steps": []
             }
-
 
         steps = result.get(
             "steps",
             []
         )
 
-
         if not isinstance(
             steps,
             list
         ):
-
             return {
                 "steps": []
             }
-
 
         return {
             "steps": steps
         }
 
-
     except Exception as e:
-
         print(
             "Planner JSON error:",
             e
         )
-
         return {
             "steps": []
         }
@@ -1834,17 +1507,12 @@ For normal conversation:
 # ==================================================
 
 def get_fast_command(user_request):
-    """
-    Return a deterministic fast-command plan when one exists.
-
-    main.py uses this function as the lightweight command lookup
-    before falling back to the full planner.
-    """
     try:
         return deterministic_route(user_request)
     except Exception as e:
         print(f"JARVIS: Fast command lookup error: {e}")
         return None
+
 
 # ==================================================
 # Public planner
@@ -1857,61 +1525,40 @@ def create_plan(user_request):
         .strip()
     )
 
-
     if not user_request:
-
         return {
             "steps": []
         }
-
-
-    # --------------------------------------------------
-    # Deterministic routing FIRST
-    # --------------------------------------------------
 
     plan = deterministic_route(
         user_request
     )
 
-
     if plan is not None:
-
         print(
             "JARVIS: Deterministic route selected."
         )
-
         return plan
-
-
-    # --------------------------------------------------
-    # Lightweight conversation gate
-    # --------------------------------------------------
 
     if looks_like_conversation(
         user_request
     ):
-
         print(
             "JARVIS: Conversation detected."
         )
-
         return {
             "steps": []
         }
-
-
-    # --------------------------------------------------
-    # LLM fallback for ambiguous requests
-    # --------------------------------------------------
 
     print(
         "JARVIS: Using LLM planner."
     )
 
-
     return llm_plan(
         user_request
     )
+
+
 # ==================================================
 # Compatibility helpers expected by main.py
 # ==================================================
@@ -2028,9 +1675,3 @@ def should_resolve_context(text):
             for phrase in context_phrases
         )
     )
-
-import re
-
-# ==================================================
-# Fast command override
-# ==================================================
