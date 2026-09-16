@@ -813,6 +813,7 @@ class JarvisAgent:
 
             self._record_execution_observation(
                 task,
+                task.replan_count + 1,
                 result,
             )
 
@@ -1274,3 +1275,4 @@ if __name__ == "__main__":
     print(
         task_state
     )
+

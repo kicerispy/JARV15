@@ -923,16 +923,16 @@ def search_website(
         )
 
     # --------------------------------------------------------
-    # Open directly in the browser
+    # Open through JARVIS CDP browser
     # --------------------------------------------------------
 
     try:
 
-        opened = webbrowser.open(
-            url
-        )
+        from browser_controller import browser_goto
 
-        if not opened:
+        result = browser_goto(url)
+
+        if not result.get("success", False):
 
             return (
                 f"I couldn't open {display_name} "
@@ -1394,59 +1394,23 @@ def open_program(program):
         "google chrome",
     }:
 
-        chrome_path = find_chrome()
+        try:
 
-        if chrome_path:
+            from browser_controller import ensure_cdp_chrome
 
-            try:
-
-                subprocess.Popen(
-                    [chrome_path]
-                )
+            if ensure_cdp_chrome():
 
                 return "Opening Chrome."
 
-            except Exception as e:
+        except Exception as e:
 
-                print(
-                    "Chrome launch error:",
-                    e,
-                )
-
-        chrome_path = (
-            find_executable(
-                "chrome.exe"
+            print(
+                "CDP Chrome launch error:",
+                e,
             )
-        )
-
-        if chrome_path:
-
-            try:
-
-                subprocess.Popen(
-                    [chrome_path]
-                )
-
-                return "Opening Chrome."
-
-            except Exception:
-                pass
-
-        app_info = (
-            find_start_menu_app(
-                "chrome"
-            )
-        )
-
-        if launch_start_menu_app(
-            app_info
-        ):
-
-            return "Opening Chrome."
 
         return (
-            "I couldn't find Google Chrome "
-            "on this computer."
+            "I couldn't start the JARVIS Chrome browser."
         )
 
     # --------------------------------------------------------

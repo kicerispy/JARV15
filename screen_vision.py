@@ -2962,6 +2962,39 @@ def youtube_query_tokens(
 # Generic YouTube Text Similarity
 # ==========================================================
 
+def canonical_search_key(text):
+    """
+    Build a separator-insensitive search comparison key.
+
+    This is intentionally used for matching/comparison rather
+    than for constructing search-engine URLs.
+
+    Examples:
+
+        Wi-Fi Skeleton  -> wifiskeleton
+        wifi skeleton   -> wifiskeleton
+        Wi Fi Skeleton   -> wifiskeleton
+        WiFi Skeleton    -> wifiskeleton
+    """
+
+    import unicodedata
+
+    value = str(text or "").strip()
+
+    value = unicodedata.normalize(
+        "NFKC",
+        value
+    )
+
+    value = value.casefold()
+
+    return "".join(
+        character
+        for character in value
+        if character.isalnum()
+    )
+
+
 def youtube_text_similarity(
     query,
     text
@@ -2988,6 +3021,9 @@ def youtube_text_similarity(
                 0.0,
 
             "exact_phrase":
+                False,
+
+            "canonical_exact":
                 False
         }
 
@@ -3034,12 +3070,37 @@ def youtube_text_similarity(
         text_normalized
     )
 
+    query_canonical = canonical_search_key(
+        query_normalized
+    )
+
+    text_canonical = canonical_search_key(
+        text_normalized
+    )
+
+    canonical_exact = (
+        bool(query_canonical)
+        and
+        bool(text_canonical)
+        and
+        query_canonical
+        in
+        text_canonical
+    )
+
     score = max(
         token_overlap,
         sequence_ratio
     )
 
     if exact_phrase:
+
+        score = max(
+            score,
+            1.0
+        )
+
+    elif canonical_exact:
 
         score = max(
             score,
@@ -3057,7 +3118,10 @@ def youtube_text_similarity(
             score,
 
         "exact_phrase":
-            exact_phrase
+            exact_phrase,
+
+        "canonical_exact":
+            canonical_exact
     }
 
 
@@ -8128,13 +8192,83 @@ def click_screen_target(
         False
     ):
 
-        return {
-            "success":
-                False,
+        # --------------------------------------------------
+        # YouTube organic-result recovery
+        #
+        # If the first visible results are ads, Shorts, or
+        # otherwise invalid candidates, scroll down and run
+        # the same verified YouTube detection pipeline again.
+        #
+        # All existing YouTube safety checks remain active.
+        # --------------------------------------------------
 
-            "message":
-                f"Target not found: {target}"
-        }
+        if is_youtube_target(
+            target
+        ):
+
+            logging.info(
+                "YouTube target not found on initial scan. "
+                "Starting limited scroll-and-rescan recovery."
+            )
+
+            youtube_scroll_attempts = 3
+
+            for scroll_attempt in range(
+                1,
+                youtube_scroll_attempts + 1
+            ):
+
+                logging.info(
+                    "YouTube scroll recovery "
+                    f"{scroll_attempt}/"
+                    f"{youtube_scroll_attempts}"
+                )
+
+                pyautogui.scroll(
+                    -5
+                )
+
+                time.sleep(
+                    1.0
+                )
+
+                retry_result = find_screen_target(
+                    target
+                )
+
+                if retry_result.get(
+                    "found",
+                    False
+                ):
+
+                    logging.info(
+                        "YouTube verified candidate found "
+                        "after scroll recovery."
+                    )
+
+                    result = retry_result
+
+                    break
+
+            else:
+
+                logging.info(
+                    "YouTube scroll recovery exhausted. "
+                    "No verified organic result found."
+                )
+
+        if not result.get(
+            "found",
+            False
+        ):
+
+            return {
+                "success":
+                    False,
+
+                "message":
+                    f"Target not found: {target}"
+            }
 
     # ------------------------------------------------------
     # YouTube:
