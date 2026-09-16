@@ -1,4 +1,4 @@
-﻿"""
+"""
 JARVIS task planner - converts user requests into tool calls.
 """
 import json
@@ -14,6 +14,18 @@ from logger import logger
 # ==========================================================
 
 AVAILABLE_TOOLS: Dict[str, str] = {
+    "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
+    "browser_search_google": "Search Google using the controlled browser.",
+    "browser_search_bing": "Search Bing using the controlled browser.",
+    "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
+    "browser_goto": "Navigate the controlled browser to a URL.",
+    "browser_page_info": "Read the current browser page title and URL.",
+    "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role.",
+    "browser_click_element": "Click a browser DOM element by CSS selector, visible text, or ARIA role.",
+    "browser_fill_element": "Fill a browser input by CSS selector, visible text, or ARIA role. Argument is JSON.",
+    "browser_press_key": "Press a keyboard key on a browser element by CSS selector, visible text, or ARIA role. Argument is JSON.",
+    "browser_wait_for_element": "Wait for a browser DOM element to become visible. Argument is JSON.",
+    "browser_extract_text": "Extract text from a browser DOM element. Argument is JSON.",
     "weather": "Get current weather. argument = location, or empty for default.",
     "current_time": "Get current time. argument = timezone/city, or empty for local.",
     "current_date": "Get today's date. argument = empty.",
@@ -70,6 +82,71 @@ Available tools:
 {tool_list}
 
 Rules:
+
+GENERIC BROWSER DOM RULES:
+
+When controlling a browser, prefer browser_* DOM tools over
+screen-coordinate tools whenever the target can be located in
+the page DOM.
+
+Browser workflow:
+
+1. Navigate to the intended page.
+2. Inspect the page with browser_page_info or browser_find_element.
+3. Use browser_fill_element for text inputs.
+4. Use browser_press_key for Enter or other keyboard actions.
+5. Use browser_click_element for links, buttons, and controls.
+6. Use browser_wait_for_element when content may load asynchronously.
+7. Use browser_extract_text or browser_page_info to verify the result.
+8. When an action fails, use the browser state and observations to
+   choose a different strategy during replanning.
+
+DOM TOOL ARGUMENT FORMAT:
+
+DOM browser tools use a JSON object encoded as the step's argument string.
+
+Examples:
+
+browser_find_element
+argument = {{"role":"searchbox"}}
+
+browser_find_element
+argument = {{"text":"Sign in"}}
+
+browser_find_element
+argument = {{"selector":"button[type=submit]"}}
+
+browser_fill_element
+argument = {{"role":"searchbox","value":"Iron Man trailer"}}
+
+browser_press_key
+argument = {{"role":"searchbox","key":"Enter"}}
+
+browser_click_element
+argument = {{"role":"button","text":"Submit"}}
+
+browser_wait_for_element
+argument = {{"text":"Results","timeout":10000}}
+
+browser_extract_text
+argument = {{"selector":"main"}}
+
+Browser rules:
+
+- Every DOM tool argument MUST be valid JSON.
+- Prefer ARIA roles and visible text over fragile CSS selectors.
+- Do not invent CSS selectors when a stable semantic target exists.
+- Do not use screen coordinates for browser interaction when a DOM
+  action can perform the same operation.
+- Keep browser actions atomic: one action per step.
+- Do not assume a click succeeded; verify the resulting state.
+- Use browser_page_info after important navigation or interactions.
+- Use browser_extract_text when page contents must be inspected.
+- Use browser_find_element before acting when element existence is uncertain.
+- Use browser_wait_for_element when the page may still be loading.
+- Use the specialized Bing/YouTube browser tools when their deterministic
+  behavior is clearly more reliable.
+- Do not combine multiple DOM operations into one step.
 
 1. Return ONLY JSON. No explanation.
 2. Every step must use exactly one tool name from the list above.

@@ -13,6 +13,162 @@ from tools import run_tool
 
 
 # ============================================================
+# PLAYWRIGHT BROWSER TOOLS
+# ============================================================
+
+BROWSER_TOOLS = {
+    "browser_find_element",
+    "browser_click_element",
+    "browser_fill_element",
+    "browser_press_key",
+    "browser_wait_for_element",
+    "browser_extract_text",
+    "browser_connect",
+    "browser_search_google",
+    "browser_search_bing",
+    "browser_click_first_bing_result",
+    "browser_goto",
+    "browser_page_info",
+}
+
+
+def run_browser_tool(
+    tool_name: str,
+    argument: str = "",
+):
+    """Dispatch Playwright/CDP browser tools."""
+
+    from browser_controller import (
+        browser_connect,
+        browser_search_google,
+        browser_search_bing,
+        browser_click_first_bing_result,
+        browser_goto,
+        browser_page_info,
+    )
+
+    if tool_name == "browser_connect":
+        return browser_connect()
+
+    if tool_name == "browser_search_google":
+        return browser_search_google(argument)
+
+    if tool_name == "browser_search_bing":
+        return browser_search_bing(argument)
+
+    if tool_name == "browser_click_first_bing_result":
+        query = argument.strip() if argument else None
+        return browser_click_first_bing_result(query)
+
+    if tool_name == "browser_goto":
+        return browser_goto(argument)
+
+    if tool_name in {
+        "browser_find_element",
+        "browser_click_element",
+        "browser_fill_element",
+        "browser_press_key",
+        "browser_wait_for_element",
+        "browser_extract_text",
+    }:
+        import json
+
+        payload = {}
+
+        if argument:
+            try:
+                payload = json.loads(argument)
+            except json.JSONDecodeError as exc:
+                return {
+                    "success": False,
+                    "error": (
+                        "DOM browser tool argument must be valid JSON: "
+                        f"{exc}"
+                    ),
+                }
+
+        from browser_controller import (
+            browser_find_element,
+            browser_click_element,
+            browser_fill_element,
+            browser_press_key,
+            browser_wait_for_element,
+            browser_extract_text,
+        )
+
+        if tool_name == "browser_find_element":
+            return browser_find_element(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_click_element":
+            return browser_click_element(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_fill_element":
+            return browser_fill_element(
+                value=payload.get("value", ""),
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_press_key":
+            return browser_press_key(
+                key=payload.get("key", ""),
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_wait_for_element":
+            return browser_wait_for_element(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+                timeout=int(payload.get("timeout", 10000)),
+            )
+
+        if tool_name == "browser_extract_text":
+            return browser_extract_text(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+    if tool_name == "browser_page_info":
+        return browser_page_info()
+
+    return {
+        "success": False,
+        "message": f"Unknown browser tool: {tool_name}",
+    }
+
+
+
+
+
+
+# ============================================================
+# EXECUTION TRACE
+# ============================================================
+
+LAST_EXECUTION_TRACE = []
+
+
+def get_last_execution_trace():
+    """
+    Return the structured trace from the most recent execution.
+    """
+    return list(LAST_EXECUTION_TRACE)
+
+
+# ============================================================
 # PERFORMANCE SETTINGS
 # ============================================================
 
@@ -136,6 +292,12 @@ def update_active_context(
             "current_date",
             "system_status",
             "jarvis_status",
+            "browser_connect",
+            "browser_search_google",
+            "browser_search_bing",
+            "browser_click_first_bing_result",
+            "browser_goto",
+            "browser_page_info",
         }:
 
             active_context.last_tool = (
@@ -268,6 +430,260 @@ def verify_action_for_task(
 # TOOL RESULT NORMALIZATION
 # ============================================================
 
+
+def format_browser_result(
+    tool_name: str,
+    result: Any,
+) -> str:
+    """
+    Convert structured browser results into useful JARVIS logs.
+
+    This does not alter the underlying result. It only produces
+    a human-readable execution message.
+    """
+
+    if not isinstance(result, dict):
+        return str(result)
+
+    success = result.get(
+        "success",
+        True,
+    )
+
+    if not success:
+
+        message = result.get(
+            "message",
+            result.get(
+                "error",
+                "Browser action failed.",
+            ),
+        )
+
+        return (
+            f"Browser action failed: "
+            f"{message}"
+        )
+
+    if tool_name == "browser_search_bing":
+
+        url = result.get(
+            "url",
+            "",
+        )
+
+        title = result.get(
+            "title",
+            "",
+        )
+
+        query = result.get(
+            "query",
+            "",
+        )
+
+        parts = [
+            "Bing search loaded."
+        ]
+
+        if query:
+            parts.append(
+                f"Query: {query}"
+            )
+
+        if title:
+            parts.append(
+                f"Title: {title}"
+            )
+
+        if url:
+            parts.append(
+                f"URL: {url}"
+            )
+
+        return " ".join(parts)
+
+    if tool_name == "browser_search_google":
+
+        url = result.get(
+            "url",
+            "",
+        )
+
+        title = result.get(
+            "title",
+            "",
+        )
+
+        parts = [
+            "Google search action completed."
+        ]
+
+        if title:
+            parts.append(
+                f"Title: {title}"
+            )
+
+        if url:
+            parts.append(
+                f"URL: {url}"
+            )
+
+        return " ".join(parts)
+
+    if tool_name == "browser_click_first_bing_result":
+
+        result_title = result.get(
+            "result_title",
+            "",
+        )
+
+        result_url = result.get(
+            "result_url",
+            "",
+        )
+
+        after_url = result.get(
+            "after_url",
+            "",
+        )
+
+        navigated = result.get(
+            "navigated",
+            False,
+        )
+
+        opened_new_page = result.get(
+            "opened_new_page",
+            False,
+        )
+
+        parts = []
+
+        if navigated:
+            parts.append(
+                "Bing first-result click succeeded."
+            )
+        else:
+            parts.append(
+                "Bing first-result action completed."
+            )
+
+        if result_title:
+            parts.append(
+                f"Result: {result_title}"
+            )
+
+        if result_url:
+            parts.append(
+                f"Result URL: {result_url}"
+            )
+
+        if after_url:
+            parts.append(
+                f"Current URL: {after_url}"
+            )
+
+        if opened_new_page:
+            parts.append(
+                "Opened in a new page."
+            )
+
+        return " ".join(parts)
+
+    if tool_name == "browser_goto":
+
+        url = result.get(
+            "url",
+            "",
+        )
+
+        title = result.get(
+            "title",
+            "",
+        )
+
+        parts = [
+            "Browser navigation succeeded."
+        ]
+
+        if title:
+            parts.append(
+                f"Title: {title}"
+            )
+
+        if url:
+            parts.append(
+                f"URL: {url}"
+            )
+
+        return " ".join(parts)
+
+    if tool_name == "browser_page_info":
+
+        url = result.get(
+            "url",
+            "",
+        )
+
+        title = result.get(
+            "title",
+            "",
+        )
+
+        parts = [
+            "Browser page inspected."
+        ]
+
+        if title:
+            parts.append(
+                f"Title: {title}"
+            )
+
+        if url:
+            parts.append(
+                f"URL: {url}"
+            )
+
+        return " ".join(parts)
+
+    if tool_name == "browser_connect":
+
+        url = result.get(
+            "url",
+            "",
+        )
+
+        title = result.get(
+            "title",
+            "",
+        )
+
+        parts = [
+            "Browser connection succeeded."
+        ]
+
+        if title:
+            parts.append(
+                f"Title: {title}"
+            )
+
+        if url:
+            parts.append(
+                f"URL: {url}"
+            )
+
+        return " ".join(parts)
+
+    message = result.get(
+        "message",
+        "Browser action completed.",
+    )
+
+    return str(message)
+
+
+
 def normalize_tool_result(
     result: Any,
 ) -> tuple[bool, bool, str]:
@@ -348,6 +764,114 @@ def add_assistant_message(
 # ============================================================
 # SPEAK RESULT
 # ============================================================
+
+
+def browser_spoken_message(
+    tool_name: str,
+    result: Any,
+) -> str:
+    """
+    Produce a concise spoken response for browser actions.
+
+    Detailed URLs, titles, navigation metadata, and diagnostic
+    information remain in the logs/results, but TTS should stay
+    natural and fast.
+    """
+
+    if not isinstance(result, dict):
+        return str(result)
+
+    if not result.get(
+        "success",
+        True,
+    ):
+        return str(
+            result.get(
+                "message",
+                "The browser action failed.",
+            )
+        )
+
+    if tool_name == "browser_search_bing":
+
+        query = str(
+            result.get(
+                "query",
+                "",
+            )
+        ).strip()
+
+        if query:
+            return (
+                f"I searched Bing for {query}."
+            )
+
+        return "I completed the Bing search."
+
+    if tool_name == "browser_search_google":
+
+        return "I completed the Google search."
+
+    if tool_name == "browser_click_first_bing_result":
+
+        result_title = str(
+            result.get(
+                "result_title",
+                "",
+            )
+        ).strip()
+
+        if result_title:
+            return (
+                f"Opened {result_title}."
+            )
+
+        return "I opened the first Bing result."
+
+    if tool_name == "browser_goto":
+
+        title = str(
+            result.get(
+                "title",
+                "",
+            )
+        ).strip()
+
+        if title:
+            return (
+                f"Opened {title}."
+            )
+
+        return "Navigation completed."
+
+    if tool_name == "browser_page_info":
+
+        title = str(
+            result.get(
+                "title",
+                "",
+            )
+        ).strip()
+
+        if title:
+            return (
+                f"The current page is {title}."
+            )
+
+        return "I inspected the current browser page."
+
+    if tool_name == "browser_connect":
+
+        return "The browser is connected."
+
+    return str(
+        result.get(
+            "message",
+            "Browser action completed.",
+        )
+    )
+
+
 
 def speak_result(
     message: str,
@@ -448,6 +972,14 @@ def execute_plan(
     )
 
     # --------------------------------------------------------
+    # Reset execution trace
+    # --------------------------------------------------------
+
+    global LAST_EXECUTION_TRACE
+
+    LAST_EXECUTION_TRACE = []
+
+    # --------------------------------------------------------
     # Start task state
     # --------------------------------------------------------
 
@@ -521,6 +1053,23 @@ def execute_plan(
             f"Running {tool_name}"
         )
 
+        # ----------------------------------------------------
+        # Track the exact step currently being executed.
+        # ----------------------------------------------------
+
+        LAST_EXECUTION_TRACE.append(
+            {
+                "index": index,
+                "tool": tool_name,
+                "argument": argument,
+                "status": "executing",
+                "success": None,
+                "verified": False,
+                "result": None,
+                "message": "",
+            }
+        )
+
         try:
 
             # =================================================
@@ -584,10 +1133,56 @@ def execute_plan(
 
             else:
 
-                result = run_tool(
+                if tool_name in BROWSER_TOOLS:
+                    result = run_browser_tool(
+                        tool_name,
+                        argument,
+                    )
+                else:
+                    result = run_tool(
+                        tool_name,
+                        argument,
+                    )
+
+            # =================================================
+            # BROWSER RESULT FORMATTING / VERIFICATION
+            # =================================================
+
+            if tool_name in BROWSER_TOOLS:
+
+                # Browser controller already performs DOM-level
+                # navigation checks. Surface that structured
+                # result in the execution log rather than
+                # collapsing it into "Tool completed."
+
+                browser_message = format_browser_result(
                     tool_name,
-                    argument,
+                    result,
                 )
+
+                if isinstance(
+                    result,
+                    dict,
+                ):
+
+                    result = dict(
+                        result
+                    )
+
+                    result["message"] = (
+                        browser_message
+                    )
+
+                    # A browser controller reporting success is
+                    # considered verified unless it explicitly
+                    # says otherwise.
+                    if "verified" not in result:
+                        result["verified"] = bool(
+                            result.get(
+                                "success",
+                                False,
+                            )
+                        )
 
             # =================================================
             # OPTIONAL SCREEN VERIFICATION
@@ -625,6 +1220,24 @@ def execute_plan(
                 )
             )
 
+            # ------------------------------------------------
+            # Update the trace entry for this exact step.
+            # ------------------------------------------------
+
+            if LAST_EXECUTION_TRACE:
+
+                trace_entry = LAST_EXECUTION_TRACE[-1]
+
+                trace_entry["success"] = success
+                trace_entry["verified"] = verified
+                trace_entry["result"] = result
+                trace_entry["message"] = message
+
+                if success and verified:
+                    trace_entry["status"] = "completed"
+                else:
+                    trace_entry["status"] = "failed"
+
             logger.info(
                 f"JARVIS: {message}"
             )
@@ -635,16 +1248,51 @@ def execute_plan(
 
             if not success or not verified:
 
+                if tool_name in BROWSER_TOOLS:
+
+                    logger.error(
+                        f"JARVIS: Browser verification failed "
+                        f"for {tool_name}: {message}"
+                    )
+
+                    if isinstance(
+                        result,
+                        dict,
+                    ):
+
+                        if result.get("click_error"):
+                            logger.error(
+                                "JARVIS: Browser click error: "
+                                f"{result.get('click_error')}"
+                            )
+
+                        if result.get("before_url"):
+                            logger.error(
+                                "JARVIS: Browser URL before action: "
+                                f"{result.get('before_url')}"
+                            )
+
+                        if result.get("after_url"):
+                            logger.error(
+                                "JARVIS: Browser URL after action: "
+                                f"{result.get('after_url')}"
+                            )
+
                 active_context.clear()
 
                 add_assistant_message(
                     message
                 )
 
-                return speak_result(
+                speak_status = speak_result(
                     message,
                     speak_callback,
                 )
+
+                if speak_status == 'interrupted':
+                    return 'interrupted'
+
+                return 'failed'
 
             # =================================================
             # SUCCESS
@@ -710,10 +1358,25 @@ def execute_plan(
                 f"JARVIS: {error_message}"
             )
 
-            return speak_result(
+            # -------------------------------------------------
+            # IMPORTANT:
+            #
+            # speak_result() returns "done" when TTS finishes.
+            # That does NOT mean the task succeeded.
+            #
+            # Preserve the execution failure so JarvisAgent
+            # can trigger its replan/recovery loop.
+            # -------------------------------------------------
+
+            speak_status = speak_result(
                 error_message,
                 speak_callback,
             )
+
+            if speak_status == "interrupted":
+                return "interrupted"
+
+            return "failed"
 
     # ========================================================
     # MULTI-STEP COMPLETION
@@ -737,8 +1400,160 @@ def execute_plan(
 
         task_state.finish()
 
+        # ----------------------------------------------------
+        # Browser actions use concise spoken summaries.
+        # Detailed browser metadata remains available in logs.
+        # ----------------------------------------------------
+
+        spoken_message = final_tool_message
+
+        if executable_steps:
+
+            final_tool = executable_steps[-1]
+
+            final_tool_name = str(
+                final_tool.get(
+                    "tool",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if final_tool_name in BROWSER_TOOLS:
+
+                try:
+                    browser_result = {
+                        "success": True,
+                        "message": final_tool_message,
+                    }
+
+                    # Recover structured fields from the final
+                    # execution when available.
+                    #
+                    # The detailed result is already logged.
+                    # For speech, use the concise formatter.
+                    #
+                    # At this point final_tool_message is the
+                    # formatted diagnostic message, so construct
+                    # the natural response directly from it.
+
+                    if (
+                        final_tool_name
+                        == "browser_click_first_bing_result"
+                    ):
+
+                        marker = "Result: "
+
+                        if marker in final_tool_message:
+
+                            spoken_title = (
+                                final_tool_message
+                                .split(
+                                    marker,
+                                    1
+                                )[1]
+                                .split(
+                                    " Result URL:",
+                                    1
+                                )[0]
+                                .strip()
+                            )
+
+                            if spoken_title:
+                                spoken_message = (
+                                    f"Opened {spoken_title}."
+                                )
+                            else:
+                                spoken_message = (
+                                    "I opened the first Bing result."
+                                )
+
+                        else:
+                            spoken_message = (
+                                "I opened the first Bing result."
+                            )
+
+                    elif (
+                        final_tool_name
+                        == "browser_search_bing"
+                    ):
+
+                        marker = "Query: "
+
+                        if marker in final_tool_message:
+
+                            spoken_query = (
+                                final_tool_message
+                                .split(
+                                    marker,
+                                    1
+                                )[1]
+                                .split(
+                                    " Title:",
+                                    1
+                                )[0]
+                                .strip()
+                            )
+
+                            if spoken_query:
+                                spoken_message = (
+                                    f"I searched Bing for "
+                                    f"{spoken_query}."
+                                )
+                            else:
+                                spoken_message = (
+                                    "I completed the Bing search."
+                                )
+
+                    elif (
+                        final_tool_name
+                        == "browser_search_google"
+                    ):
+
+                        spoken_message = (
+                            "I completed the Google search."
+                        )
+
+                    elif (
+                        final_tool_name
+                        == "browser_goto"
+                    ):
+
+                        marker = "Title: "
+
+                        if marker in final_tool_message:
+
+                            spoken_title = (
+                                final_tool_message
+                                .split(
+                                    marker,
+                                    1
+                                )[1]
+                                .split(
+                                    " URL:",
+                                    1
+                                )[0]
+                                .strip()
+                            )
+
+                            if spoken_title:
+                                spoken_message = (
+                                    f"Opened {spoken_title}."
+                                )
+                            else:
+                                spoken_message = (
+                                    "Navigation completed."
+                                )
+
+                except Exception as e:
+
+                    logger.debug(
+                        f"JARVIS: Browser speech formatting "
+                        f"fallback: {e}"
+                    )
+
         return speak_result(
-            final_tool_message,
+            spoken_message,
             speak_callback,
         )
 

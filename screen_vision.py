@@ -1708,75 +1708,114 @@ def refine_google_result_title(
     crop_result,
     target,
 ):
+    """
+    Locate the first organic Google result title.
+
+    Pass 1:
+        Find the first organic result.
+
+    Pass 2:
+        Independently verify/refine the clickable title box.
+
+    The complete screenshot is used for both passes.
+    """
+
     try:
+
         source = Image.open(
             vision_file
         ).convert(
             "RGB"
         )
 
-        left = max(
-            0,
-            int(crop_result.get("left", 0)),
-        )
+        source_width = source.width
+        source_height = source.height
 
-        top = max(
-            0,
-            int(crop_result.get("top", 0)),
-        )
+        # ----------------------------------------------------
+        # COMPLETE SCREENSHOT.
+        # ----------------------------------------------------
 
-        right = min(
-            source.width,
-            int(crop_result.get("right", source.width)),
-        )
-
-        bottom = min(
-            source.height,
-            int(crop_result.get("bottom", source.height)),
-        )
-
-        if right <= left or bottom <= top:
-            return None
-
-        region = source.crop(
-            (left, top, right, bottom)
-        )
-
-        region.save(
+        source.save(
             VISION_CROP_FILE
         )
 
+        # ====================================================
+        # PASS 1
+        # ====================================================
+
         prompt = f"""
-You are JARVIS Google search-result click localization.
+You are JARVIS locating the FIRST organic Google search result.
 
-This image contains ONE already-selected Google search result row.
+The image is the COMPLETE Google search-results page.
 
-Requested result:
+Search query:
 {target}
 
-Find ONLY the PRIMARY CLICKABLE SEARCH RESULT TITLE/LINK.
+Find the FIRST NORMAL ORGANIC WEB RESULT in the main results
+column.
 
-Do NOT return the entire result row.
-Do NOT return the snippet.
-Do NOT return author or artist names inside the snippet.
-Do NOT return metadata.
-Do NOT return secondary links.
+A normal result usually contains:
 
-Return a TIGHT bounding box around the visible primary clickable title/link.
+SITE / DOMAIN
+CLICKABLE TITLE
+SNIPPET
 
-For example, if the row contains:
+Example:
+
+Wikipedia
 Wifiskeleton
 Jeremiah Justin Simms
+
+SITE:
 Wikipedia
 
-the correct target is the Wifiskeleton title.
+CLICKABLE TITLE:
+Wifiskeleton
+
+The requested box MUST surround ONLY the clickable result
+title.
+
+Do NOT return:
+
+- site labels
+- domain names
+- snippets
+- advertisements
+- Shopping
+- sponsored results
+- AI Overview
+- People also ask
+- knowledge panels
+- sidebars
+- browser UI
+- Google navigation
+- search box
+
+Use the visual ordering of the complete page.
+
+The FIRST organic result is the first normal web result in the
+main results column.
+
+Return normalized coordinates from 0 to 1000.
 
 Return ONLY JSON:
+
 {{
   "found": true,
+  "confidence": 0.95,
+  "result_title": "Wifiskeleton",
+  "site": "Wikipedia",
+  "box_2d": [left, top, right, bottom]
+}}
+
+If there is no confidently visible normal result:
+
+{{
+  "found": false,
   "confidence": 0.0,
-  "box_2d": [top, left, bottom, right],
-  "description": "primary clickable Google result title"
+  "result_title": "",
+  "site": "",
+  "box_2d": [0, 0, 0, 0]
 }}
 """
 
@@ -1790,7 +1829,8 @@ Return ONLY JSON:
                 {
                     "role": "user",
                     "content": (
-                        "Locate ONLY the primary clickable title for: "
+                        "Find the clickable title of the FIRST "
+                        "organic Google result for: "
                         f"{target}"
                     ),
                     "images": [
@@ -1799,7 +1839,7 @@ Return ONLY JSON:
                 },
             ],
             json_mode=True,
-            num_predict=64,
+            num_predict=128,
         )
 
         raw = get_response_text(
@@ -1809,118 +1849,469 @@ Return ONLY JSON:
         if not raw:
             return None
 
-        logging.info(
-            "GOOGLE TITLE REFINEMENT RAW RESPONSE: %s",
-            raw,
-        )
-
         data = extract_json(
             raw
         )
 
         if not isinstance(
             data,
-            dict,
+            dict
         ):
             return None
+
+        if not data.get(
+            "found",
+            False
+        ):
+            return None
+
+        title = str(
+            data.get(
+                "result_title",
+                ""
+            )
+        ).strip()
+
+        site = str(
+            data.get(
+                "site",
+                ""
+            )
+        ).strip()
 
         box = data.get(
             "box_2d"
         )
 
+        if not title:
+            return None
+
         if not isinstance(
             box,
-            (list, tuple),
+            (list, tuple)
         ) or len(box) < 4:
             return None
 
+        # ====================================================
+        # PASS 2
+        #
+        # Ask the vision model to independently validate the
+        # candidate against the COMPLETE screenshot.
+        # ====================================================
+
+        verify_prompt = f"""
+You are JARVIS clickable-target verification.
+
+The image is the COMPLETE Google search-results page.
+
+Requested search:
+{target}
+
+The first vision pass believes the first organic result is:
+
+TITLE:
+{title}
+
+SITE:
+{site}
+
+Candidate bounding box is:
+
+[left={box[0]}, top={box[1]}, right={box[2]}, bottom={box[3]}]
+
+Coordinates are normalized from 0 to 1000.
+
+Independently inspect the COMPLETE screenshot.
+
+Your job is to determine the EXACT CLICKABLE TITLE of the
+FIRST ORGANIC SEARCH RESULT.
+
+CRITICAL:
+
+The candidate may be wrong.
+
+Do NOT trust the candidate automatically.
+
+Check whether the candidate box actually surrounds the
+clickable blue/purple result title.
+
+Do NOT select:
+
+- Shopping
+- product cards
+- advertisements
+- sponsored results
+- AI Overview
+- featured answers
+- knowledge panels
+- site labels
+- domain labels
+- snippets
+- browser controls
+- search box
+- Google navigation
+
+The clickable title is the text the user would click to open
+the normal web result.
+
+Return the CORRECTED tight title box if necessary.
+
+Return ONLY JSON:
+
+{{
+  "verified": true,
+  "confidence": 0.95,
+  "result_title": "Wifiskeleton",
+  "site": "Wikipedia",
+  "box_2d": [left, top, right, bottom],
+  "reason": "candidate surrounds the clickable result title"
+}}
+
+If the candidate is wrong but another correct title is visible,
+return the corrected title and corrected box.
+
+If no confident organic result exists:
+
+{{
+  "verified": false,
+  "confidence": 0.0,
+  "result_title": "",
+  "site": "",
+  "box_2d": [0, 0, 0, 0],
+  "reason": "no confidently identifiable clickable organic result"
+}}
+"""
+
+        verify_response = vision_chat(
+            VISION_MODEL,
+            [
+                {
+                    "role": "system",
+                    "content": verify_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Verify the clickable title of the "
+                        "first organic Google result."
+                    ),
+                    "images": [
+                        VISION_CROP_FILE
+                    ],
+                },
+            ],
+            json_mode=True,
+            num_predict=128,
+        )
+
+        verify_raw = get_response_text(
+            verify_response
+        )
+
+        if not verify_raw:
+
+            logging.warning(
+                "JARVIS: Google pre-click verification "
+                "returned no response."
+            )
+
+            return None
+
+        logging.info(
+            "GOOGLE PRE-CLICK VERIFICATION: %s",
+            verify_raw
+        )
+
+        verified = extract_json(
+            verify_raw
+        )
+
+        if not isinstance(
+            verified,
+            dict
+        ):
+
+            return None
+
+        if not verified.get(
+            "verified",
+            False
+        ):
+
+            logging.warning(
+                "JARVIS: Google candidate failed "
+                "pre-click verification."
+            )
+
+            return None
+
+        final_title = str(
+            verified.get(
+                "result_title",
+                title
+            )
+        ).strip()
+
+        final_site = str(
+            verified.get(
+                "site",
+                site
+            )
+        ).strip()
+
+        final_box = verified.get(
+            "box_2d"
+        )
+
+        if not isinstance(
+            final_box,
+            (list, tuple)
+        ) or len(final_box) < 4:
+
+            return None
+
         try:
-            rel_top = float(box[0])
-            rel_left = float(box[1])
-            rel_bottom = float(box[2])
-            rel_right = float(box[3])
+
+            left_n = float(
+                final_box[0]
+            )
+
+            top_n = float(
+                final_box[1]
+            )
+
+            right_n = float(
+                final_box[2]
+            )
+
+            bottom_n = float(
+                final_box[3]
+            )
+
         except (
             TypeError,
             ValueError,
         ):
+
             return None
 
-        crop_width = max(
-            1,
-            right - left,
+        # ----------------------------------------------------
+        # Normalize.
+        # ----------------------------------------------------
+
+        left_n = max(
+            0.0,
+            min(
+                1000.0,
+                left_n
+            )
         )
 
-        crop_height = max(
-            1,
-            bottom - top,
+        top_n = max(
+            0.0,
+            min(
+                1000.0,
+                top_n
+            )
         )
 
-        refined = {
-            "found": bool(
-                data.get(
-                    "found",
-                    True,
-                )
-            ),
-            "confidence": float(
-                data.get(
-                    "confidence",
-                    0.0,
-                )
-            ),
-            "left": int(
-                left +
-                (rel_left / 1000.0) *
-                crop_width
-            ),
-            "top": int(
-                top +
-                (rel_top / 1000.0) *
-                crop_height
-            ),
-            "right": int(
-                left +
-                (rel_right / 1000.0) *
-                crop_width
-            ),
-            "bottom": int(
-                top +
-                (rel_bottom / 1000.0) *
-                crop_height
-            ),
-            "description": data.get(
-                "description",
-                "primary clickable Google result title",
-            ),
+        right_n = max(
+            0.0,
+            min(
+                1000.0,
+                right_n
+            )
+        )
+
+        bottom_n = max(
+            0.0,
+            min(
+                1000.0,
+                bottom_n
+            )
+        )
+
+        if (
+            right_n <= left_n
+            or
+            bottom_n <= top_n
+        ):
+
+            return None
+
+        # ----------------------------------------------------
+        # Convert normalized coordinates into vision-image
+        # pixels.
+        # ----------------------------------------------------
+
+        refined_left = int(
+            round(
+                left_n
+                / 1000.0
+                * source_width
+            )
+        )
+
+        refined_top = int(
+            round(
+                top_n
+                / 1000.0
+                * source_height
+            )
+        )
+
+        refined_right = int(
+            round(
+                right_n
+                / 1000.0
+                * source_width
+            )
+        )
+
+        refined_bottom = int(
+            round(
+                bottom_n
+                / 1000.0
+                * source_height
+            )
+        )
+
+        width = (
+            refined_right
+            -
+            refined_left
+        )
+
+        height = (
+            refined_bottom
+            -
+            refined_top
+        )
+
+        if (
+            width <= 0
+            or
+            height <= 0
+        ):
+            return None
+
+        # ----------------------------------------------------
+        # Reject giant boxes.
+        # ----------------------------------------------------
+
+        if (
+            width > source_width * 0.70
+            or
+            height > source_height * 0.08
+        ):
+
+            logging.warning(
+                "JARVIS: Verified Google title box is "
+                f"unreasonably large: {width}x{height}"
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # Reject obvious site labels.
+        # ----------------------------------------------------
+
+        site_labels = {
+            "wikipedia",
+            "youtube",
+            "reddit",
+            "facebook",
+            "instagram",
+            "amazon",
+            "linkedin",
+            "github",
+            "microsoft",
+            "google",
+            "shopping",
         }
 
-        if not refined["found"]:
+        if (
+            final_title.lower()
+            in
+            site_labels
+        ):
+
+            logging.warning(
+                "JARVIS: Verified Google title is actually "
+                f"a site label: {final_title!r}"
+            )
+
             return None
 
-        if refined["right"] <= refined["left"]:
-            return None
+        confidence = float(
+            verified.get(
+                "confidence",
+                0.0
+            )
+        )
 
-        if refined["bottom"] <= refined["top"]:
-            return None
+        reason = str(
+            verified.get(
+                "reason",
+                ""
+            )
+        ).strip()
 
         logging.info(
-            "GOOGLE TITLE REFINEMENT BOX: "
-            f"left={refined['left']} "
-            f"top={refined['top']} "
-            f"right={refined['right']} "
-            f"bottom={refined['bottom']} "
-            f"confidence={refined['confidence']}"
+            "GOOGLE VERIFIED ORGANIC TITLE: "
+            f"title={final_title!r} "
+            f"site={final_site!r} "
+            f"left={refined_left} "
+            f"top={refined_top} "
+            f"right={refined_right} "
+            f"bottom={refined_bottom} "
+            f"confidence={confidence} "
+            f"reason={reason!r}"
         )
 
-        return refined
+        return {
+            "found":
+                True,
+
+            "confidence":
+                confidence,
+
+            "left":
+                refined_left,
+
+            "top":
+                refined_top,
+
+            "right":
+                refined_right,
+
+            "bottom":
+                refined_bottom,
+
+            "description":
+                final_title,
+
+            "title":
+                final_title,
+
+            "context":
+                final_site,
+
+            "type":
+                "organic_result",
+
+            "verified":
+                True,
+        }
 
     except Exception as e:
-        logging.warning(
-            "Google title refinement failed: %s",
-            e,
-        )
-        return None
 
+        logging.warning(
+            "Google organic-title refinement failed: %s",
+            e
+        )
+
+        return None
 
 def _find_screen_target_generic(
     target
@@ -2285,41 +2676,7 @@ If no confident match exists:
             vision_info
         )
 
-        # --------------------------------------------------------
-        # Refine Google result row to the actual clickable title.
-        # --------------------------------------------------------
-
-        target_lower = str(
-            target or ""
-        ).lower()
-
-        if (
-            "organic google result" in target_lower
-            or "google result" in target_lower
-        ) and crop_result.get(
-            "found",
-            False
-        ):
-
-            refined_result = refine_google_result_title(
-                vision_file,
-                crop_result,
-                target
-            )
-
-            if refined_result:
-                refined_screen_box = crop_to_screen_box(
-                    refined_result,
-                    vision_info
-                )
-
-                if refined_screen_box:
-                    logging.info(
-                        "JARVIS: Using refined Google clickable-title box."
-                    )
-
-                    crop_result = refined_result
-                    screen_box = refined_screen_box
+        
 
         if not screen_box:
             last_failure = {
@@ -6566,6 +6923,447 @@ def find_first_verified_youtube_result(
 # ==========================================================
 # Find Screen Target
 # ==========================================================
+# ==========================================================
+# GOOGLE ORGANIC RESULT SEARCH
+# ==========================================================
+
+def is_google_organic_target(
+    target
+):
+    """
+    Detect requests that specifically ask for an organic
+    Google search result.
+    """
+
+    text = str(
+        target or ""
+    ).lower()
+
+    return (
+        "organic google result" in text
+        or "google organic result" in text
+    )
+
+
+def extract_google_query(
+    target
+):
+    """
+    Extract the search query from phrases such as:
+
+        click the first organic Google result for Wi-Fi skeleton
+
+    Returns:
+        Wi-Fi skeleton
+    """
+
+    text = str(
+        target or ""
+    ).strip()
+
+    patterns = [
+        r"organic\s+google\s+result\s+for\s+(.+)$",
+        r"google\s+organic\s+result\s+for\s+(.+)$",
+        r"google\s+result\s+for\s+(.+)$",
+    ]
+
+    import re
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE,
+        )
+
+        if match:
+
+            query = match.group(
+                1
+            ).strip()
+
+            if query:
+                return query
+
+    return text
+
+
+def find_first_google_organic_result(
+    target,
+    max_scrolls=3,
+    scroll_amount=-450
+):
+    """
+    Locate the first organic Google result by using the
+    existing dedicated refine_google_result_title() locator.
+
+    The refinement routine:
+        - ignores Google's upper answer/AI region
+        - searches the lower portion of the page
+        - identifies the primary clickable result title
+        - returns a tight title bounding box
+
+    YouTube behavior is completely unaffected.
+    """
+
+    query = extract_google_query(
+        target
+    )
+
+    logging.info(
+        "JARVIS: Google organic-result search query: "
+        f"{query!r}"
+    )
+
+    last_failure = None
+
+    for attempt in range(
+        max_scrolls + 1
+    ):
+
+        # --------------------------------------------------
+        # Scroll before retries.
+        # --------------------------------------------------
+
+        if attempt > 0:
+
+            logging.info(
+                "JARVIS: Scrolling Google page "
+                f"(attempt={attempt}, amount={scroll_amount})"
+            )
+
+            try:
+
+                pyautogui.scroll(
+                    scroll_amount
+                )
+
+                time.sleep(
+                    0.60
+                )
+
+            except Exception as e:
+
+                logging.warning(
+                    f"Google scroll failed: {e}"
+                )
+
+        # --------------------------------------------------
+        # Capture the current full-screen vision image.
+        # --------------------------------------------------
+
+        vision_info = create_vision_image(
+            None
+        )
+
+        if not vision_info.get(
+            "success",
+            False
+        ):
+
+            last_failure = {
+                "found":
+                    False,
+
+                "confidence":
+                    0.0,
+
+                "description":
+                    "Google vision image creation failed"
+            }
+
+            continue
+
+        vision_file = vision_info[
+            "file"
+        ]
+
+        # --------------------------------------------------
+        # Use the existing dedicated Google title locator.
+        #
+        # IMPORTANT:
+        # refine_google_result_title() returns coordinates
+        # relative to vision_file.
+        # crop_to_screen_box() then maps those coordinates
+        # to the real Windows screen.
+        # --------------------------------------------------
+
+        refined = refine_google_result_title(
+            vision_file,
+            None,
+            target
+        )
+
+        if not refined:
+
+            logging.info(
+                "JARVIS: Google title refinement did not "
+                f"find a result on attempt {attempt}."
+            )
+
+            last_failure = {
+                "found":
+                    False,
+
+                "confidence":
+                    0.0,
+
+                "description":
+                    "Google organic result title was not confidently located",
+
+                "scroll_attempt":
+                    attempt
+            }
+
+            continue
+
+        logging.info(
+            "JARVIS: Google refined title box: "
+            f"left={refined.get('left')} "
+            f"top={refined.get('top')} "
+            f"right={refined.get('right')} "
+            f"bottom={refined.get('bottom')}"
+        )
+
+        # --------------------------------------------------
+        # Convert vision-image coordinates to real screen
+        # coordinates using the established mapping.
+        # --------------------------------------------------
+
+        screen_box = crop_to_screen_box(
+            {
+                "left":
+                    refined["left"],
+
+                "top":
+                    refined["top"],
+
+                "right":
+                    refined["right"],
+
+                "bottom":
+                    refined["bottom"]
+            },
+
+            vision_info
+        )
+
+        if not screen_box:
+
+            logging.warning(
+                "JARVIS: Google refined title coordinate "
+                "conversion failed."
+            )
+
+            last_failure = {
+                "found":
+                    False,
+
+                "confidence":
+                    refined.get(
+                        "confidence",
+                        0.0
+                    ),
+
+                "description":
+                    "Google refined title coordinate conversion failed",
+
+                "scroll_attempt":
+                    attempt
+            }
+
+            continue
+
+        screen_width = int(
+            vision_info[
+                "screen_width"
+            ]
+        )
+
+        screen_height = int(
+            vision_info[
+                "screen_height"
+            ]
+        )
+
+        # --------------------------------------------------
+        # Clamp to actual screen.
+        # --------------------------------------------------
+
+        screen_box["left"] = max(
+            0,
+            min(
+                int(screen_box["left"]),
+                screen_width - 1
+            )
+        )
+
+        screen_box["top"] = max(
+            0,
+            min(
+                int(screen_box["top"]),
+                screen_height - 1
+            )
+        )
+
+        screen_box["right"] = max(
+            0,
+            min(
+                int(screen_box["right"]),
+                screen_width - 1
+            )
+        )
+
+        screen_box["bottom"] = max(
+            0,
+            min(
+                int(screen_box["bottom"]),
+                screen_height - 1
+            )
+        )
+
+        if (
+            screen_box["right"]
+            <=
+            screen_box["left"]
+            or
+            screen_box["bottom"]
+            <=
+            screen_box["top"]
+        ):
+
+            logging.info(
+                "JARVIS: Google refined title box "
+                "failed final geometry validation."
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # A title box should be relatively small.
+        # Reject obviously incorrect full-screen boxes.
+        # --------------------------------------------------
+
+        width = (
+            screen_box["right"]
+            -
+            screen_box["left"]
+        )
+
+        height = (
+            screen_box["bottom"]
+            -
+            screen_box["top"]
+        )
+
+        if (
+            width > screen_width * 0.80
+            or
+            height > screen_height * 0.12
+        ):
+
+            logging.info(
+                "JARVIS: Google refined title box rejected: "
+                f"unreasonable geometry {width}x{height}"
+            )
+
+            last_failure = {
+                "found":
+                    False,
+
+                "confidence":
+                    refined.get(
+                        "confidence",
+                        0.0
+                    ),
+
+                "description":
+                    "Google refined title geometry was unreasonable",
+
+                "scroll_attempt":
+                    attempt
+            }
+
+            continue
+
+        description = str(
+            refined.get(
+                "description",
+                ""
+            )
+        ).strip()
+
+        logging.info(
+            "JARVIS: Google organic title accepted: "
+            f"{description!r} "
+            f"screen_box={screen_box} "
+            f"attempt={attempt}"
+        )
+
+        return {
+            "found":
+                True,
+
+            "confidence":
+                float(
+                    refined.get(
+                        "confidence",
+                        0.0
+                    )
+                ),
+
+            "left":
+                screen_box["left"],
+
+            "top":
+                screen_box["top"],
+
+            "right":
+                screen_box["right"],
+
+            "bottom":
+                screen_box["bottom"],
+
+            "description":
+                description
+                or
+                f"first organic Google result for {query}",
+
+            "query":
+                query,
+
+            "title":
+                description,
+
+            "context":
+                "",
+
+            "type":
+                "organic_result",
+
+            "verified":
+                True,
+
+            "scroll_attempt":
+                attempt
+        }
+
+    return (
+        last_failure
+        or
+        {
+            "found":
+                False,
+
+            "confidence":
+                0.0,
+
+            "description":
+                f"Could not find an organic Google result for {query}"
+        }
+    )
+
 
 def find_screen_target(
     target
@@ -6579,9 +7377,18 @@ def find_screen_target(
             target
         )
 
+    if is_google_organic_target(
+        target
+    ):
+
+        return find_first_google_organic_result(
+            target
+        )
+
     return _find_screen_target_generic(
         target
     )
+
 
 
 # ==========================================================
@@ -6675,22 +7482,39 @@ def get_center(
         bottom - top
     )
 
-    # Google/search-result targets are usually broad result-row boxes.
-    # Favor the upper portion where the clickable title/link normally sits.
-    target_text = str(target or "").lower()
+    target_text = str(
+        result.get(
+            "description",
+            ""
+        )
+    ).lower()
 
+    # Google now returns a tight bounding box around the
+    # primary clickable result title. Click the center of that
+    # box. Do not apply an artificial vertical offset.
     if (
         "organic google result" in target_text
-        or "google result" in target_text
-        or "search result" in target_text
+        or
+        "google result" in target_text
+        or
+        "search result" in target_text
     ):
-        x = left + int(width * 0.50)
-        y = top + max(
-            5,
-            int(height * 0.08)
-        )
+
+        x = (
+            left
+            +
+            right
+        ) // 2
+
+        y = (
+            top
+            +
+            bottom
+        ) // 2
+
         return x, y
 
+    # Default behavior for every other target.
     x = (
         left
         +
@@ -6704,10 +7528,6 @@ def get_center(
     ) // 2
 
     return x, y
-
-
-# Move Mouse To Target
-# ==========================================================
 
 def move_mouse_to_target(
     target

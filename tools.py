@@ -881,9 +881,16 @@ def search_website(
 
     elif site == "google":
 
+        # Use Google's Web-only results view so AI Overview,
+        # generated answers, and other non-web result blocks
+        # do not interfere with JARVIS visual targeting.
+        #
+        # Google Search currently supports the Web filter via
+        # the udm=14 parameter.
         url = (
             "https://www.google.com/search?q="
             + quote_plus(query)
+            + "&udm=14"
         )
 
         display_name = "Google"
@@ -1594,6 +1601,148 @@ def system_status():
 # MAIN TOOL DISPATCHER
 # ============================================================
 
+# ============================================================
+# BROWSER / CDP TOOLS
+# ============================================================
+
+BROWSER_TOOLS = {
+    "browser_find_element",
+    "browser_click_element",
+    "browser_fill_element",
+    "browser_press_key",
+    "browser_wait_for_element",
+    "browser_extract_text",
+    "browser_connect",
+    "browser_search_google",
+    "browser_search_bing",
+    "browser_click_first_bing_result",
+    "browser_goto",
+    "browser_page_info",
+}
+
+
+def run_browser_tool(
+    tool_name: str,
+    argument: str = "",
+):
+    """
+    Dispatch browser automation tools to browser_controller.py.
+    """
+
+    from browser_controller import (
+        browser_connect,
+        browser_search_google,
+        browser_search_bing,
+        browser_click_first_bing_result,
+        browser_goto,
+        browser_page_info,
+    )
+
+    argument = str(argument or "").strip()
+
+    if tool_name == "browser_connect":
+        return browser_connect()
+
+    if tool_name == "browser_search_google":
+        return browser_search_google(argument)
+
+    if tool_name == "browser_search_bing":
+        return browser_search_bing(argument)
+
+    if tool_name == "browser_click_first_bing_result":
+        query = argument if argument else None
+        return browser_click_first_bing_result(query)
+
+    if tool_name == "browser_goto":
+        return browser_goto(argument)
+
+    if tool_name in {
+        "browser_find_element",
+        "browser_click_element",
+        "browser_fill_element",
+        "browser_press_key",
+        "browser_wait_for_element",
+        "browser_extract_text",
+    }:
+        import json
+
+        payload = {}
+
+        if argument:
+            try:
+                payload = json.loads(argument)
+            except json.JSONDecodeError as exc:
+                return {
+                    "success": False,
+                    "error": (
+                        "DOM browser tool argument must be valid JSON: "
+                        f"{exc}"
+                    ),
+                }
+
+        from browser_controller import (
+            browser_find_element,
+            browser_click_element,
+            browser_fill_element,
+            browser_press_key,
+            browser_wait_for_element,
+            browser_extract_text,
+        )
+
+        if tool_name == "browser_find_element":
+            return browser_find_element(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_click_element":
+            return browser_click_element(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_fill_element":
+            return browser_fill_element(
+                value=payload.get("value", ""),
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_press_key":
+            return browser_press_key(
+                key=payload.get("key", ""),
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+        if tool_name == "browser_wait_for_element":
+            return browser_wait_for_element(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+                timeout=int(payload.get("timeout", 10000)),
+            )
+
+        if tool_name == "browser_extract_text":
+            return browser_extract_text(
+                selector=payload.get("selector", ""),
+                text=payload.get("text", ""),
+                role=payload.get("role", ""),
+            )
+
+    if tool_name == "browser_page_info":
+        return browser_page_info()
+
+    return {
+        "success": False,
+        "message": f"Unknown browser tool: {tool_name}",
+    }
+
+
 def run_tool(
     tool_name: str,
     argument: str = "",
@@ -1601,6 +1750,17 @@ def run_tool(
     """
     Main JARVIS tool dispatcher.
     """
+
+    # --------------------------------------------------------
+    # BROWSER / CDP
+    # --------------------------------------------------------
+
+    if tool_name in BROWSER_TOOLS:
+        return run_browser_tool(
+            tool_name,
+            argument,
+        )
+
 
     # --------------------------------------------------------
     # WEATHER

@@ -696,11 +696,74 @@ def process_command(
 
                 execution_start = perf_now()
 
-                result = execute_plan(
-                    fast_plan,
-                    state.active_context,
-                    state.task_state,
-                    speak_callback,
+                # --------------------------------------------------
+                # Agent execution
+                #
+                # Keep deterministic fast-command planning, but
+                # execute the resulting task through JarvisAgent so
+                # failures can trigger observation + replanning.
+                # --------------------------------------------------
+
+                agent_task = jarvis_agent.create_task(
+                    user_input,
+                    active_context=(
+                        state.active_context.to_dict()
+                        if hasattr(
+                            state.active_context,
+                            "to_dict",
+                        )
+                        else dict(
+                            state.active_context or {}
+                        )
+                    ),
+                )
+
+                # The fast router already produced the plan.
+                # Do not spend another LLM call planning the same
+                # task. Give the existing agent the deterministic
+                # plan and let its execution/replan loop manage it.
+                agent_task.planner_result = fast_plan
+
+                agent_task.goal = str(
+                    fast_plan.get(
+                        "goal",
+                        user_input,
+                    )
+                    or user_input
+                )
+
+                agent_task.steps = (
+                    jarvis_agent._build_steps(
+                        fast_plan
+                    )
+                )
+
+                agent_task.status = "ready"
+
+                agent_task = (
+                    jarvis_agent.execute_task(
+                        agent_task,
+                        state.active_context,
+                        state.task_state,
+                        speak_callback,
+                        history_text="",
+                    )
+                )
+
+                result = (
+                    "done"
+                    if agent_task.status == "completed"
+                    else (
+                        "cancelled"
+                        if agent_task.status == "cancelled"
+                        else "failed"
+                    )
+                )
+
+                logger.info(
+                    "JARVIS AGENT: Fast task "
+                    f"status={agent_task.status}, "
+                    f"replans={agent_task.replan_count}"
                 )
 
                 logger.info(

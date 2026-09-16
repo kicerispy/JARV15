@@ -631,6 +631,20 @@ def build_search_first_result_plan(
     user_request,
     site
 ):
+    """
+    Build a search + first-result plan.
+
+    The click target now respects the requested site.
+
+    YouTube:
+        first organic YouTube result
+
+    Google:
+        first organic Google result
+
+    Other sites:
+        generic first result
+    """
 
     combined = split_search_and_first_result(
         user_request,
@@ -640,62 +654,309 @@ def build_search_first_result_plan(
     if not combined:
         return None
 
-    query = combined["query"]
+    query = combined.get(
+        "query",
+        ""
+    ).strip()
+
+    if not query:
+        return None
+
+    site = str(
+        site or ""
+    ).strip().lower()
 
     steps = []
 
+    steps.append(
+        {
+            "tool":
+                "search_website",
 
-    if browser_requested(
+            "argument":
+                f"{site}|{query}"
+        }
+    )
+
+    steps.append(
+        {
+            "tool":
+                "wait",
+
+            "argument":
+                "2"
+        }
+    )
+
+    # --------------------------------------------------
+    # Site-specific first-result handling.
+    # --------------------------------------------------
+
+    if site == "youtube":
+
+        steps.append(
+            {
+                "tool":
+                    "click_screen",
+
+                "argument":
+                    f"first organic YouTube result for {query}"
+            }
+        )
+
+    elif site == "google":
+
+        steps.append(
+            {
+                "tool":
+                    "click_screen",
+
+                "argument":
+                    f"first organic Google result for {query}"
+            }
+        )
+
+    else:
+
+        steps.append(
+            {
+                "tool":
+                    "click_screen",
+
+                "argument":
+                    "first result"
+            }
+        )
+
+    return {
+        "steps":
+            steps
+    }
+
+
+# ==================================================
+# Browser search helpers
+# ==================================================
+
+def extract_generic_search_query(text):
+    """
+    Extract a normal web-search query without requiring
+    the user to name a specific website.
+
+    Examples:
+
+        search for Wi-Fi skeleton
+        search Wi-Fi skeleton
+        find Wi-Fi skeleton
+        look up Wi-Fi skeleton
+        lookup Wi-Fi skeleton
+
+        search for Wi-Fi skeleton and click the first result
+        find Wi-Fi skeleton and open the first result
+    """
+
+    original = str(text or "").strip()
+
+    if not original:
+        return None
+
+    cleaned = original.strip()
+
+    # Remove common spoken prefixes.
+    cleaned = re.sub(
+        r"^(?:please|can\s+you|could\s+you|would\s+you|"
+        r"hey|hey\s+jarvis|jarvis|heed)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    patterns = [
+
+        # search for X
+        r"^(?:search)\s+for\s+(.+?)$",
+
+        # search X
+        r"^(?:search)\s+(.+?)$",
+
+        # find X
+        r"^(?:find)\s+(.+?)$",
+
+        # look up X
+        r"^(?:look)\s+up\s+(.+?)$",
+
+        # lookup X
+        r"^(?:lookup)\s+(.+?)$",
+    ]
+
+    query = None
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            cleaned,
+            re.IGNORECASE,
+        )
+
+        if match:
+            query = match.group(1).strip()
+            break
+
+    if not query:
+        return None
+
+    # Remove trailing first-result actions.
+    query = re.sub(
+        r"\s+(?:and|then)\s+"
+        r"(?:click|open|play|select)\s+"
+        r"(?:on\s+)?"
+        r"(?:the\s+)?"
+        r"(?:first|top)\s+"
+        r"(?:result|video|link|one)\b.*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Natural spoken variant:
+    # "search for X, click the first result"
+    query = re.sub(
+        r"\s*,?\s*"
+        r"(?:click|open|play|select)\s+"
+        r"(?:on\s+)?"
+        r"(?:the\s+)?"
+        r"(?:first|top)\s+"
+        r"(?:result|video|link|one)\b.*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    query = re.sub(
+        r"\s+(?:and|then)\s*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    query = query.strip().rstrip("?.!,").strip()
+
+    if not query:
+        return None
+
+    # Do not take over explicitly routed website searches.
+    lowered = query.lower()
+
+    explicit_sites = (
+        "youtube",
+        "google",
+        "amazon",
+        "reddit",
+    )
+
+    if any(
+        site in lowered
+        for site in explicit_sites
+    ):
+        return None
+
+    return query
+
+
+def generic_search_wants_first_result(text):
+    """
+    Determine whether a generic web-search request also asks
+    JARVIS to open/click the first result.
+    """
+
+    normalized = clean_text(
+        text
+    )
+
+    if not normalized:
+        return False
+
+    patterns = [
+
+        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+result\b",
+        r"\bopen\s+(?:the\s+)?first\s+result\b",
+        r"\bselect\s+(?:the\s+)?first\s+result\b",
+
+        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+link\b",
+        r"\bopen\s+(?:the\s+)?first\s+link\b",
+
+        r"\bclick\s+(?:on\s+)?(?:the\s+)?first\s+one\b",
+        r"\bopen\s+(?:the\s+)?first\s+one\b",
+
+        r"\bgo\s+with\s+(?:the\s+)?first\s+result\b",
+        r"\bchoose\s+(?:the\s+)?first\s+result\b",
+    ]
+
+    return any(
+        re.search(
+            pattern,
+            normalized,
+            re.IGNORECASE,
+        )
+        for pattern in patterns
+    )
+
+
+def build_browser_search_plan(
+    user_request,
+):
+    """
+    Build a deterministic browser search plan for generic web
+    searches.
+
+    Generic web search:
+
+        browser_search_bing
+
+    Generic first-result request:
+
+        browser_search_bing
+        browser_click_first_bing_result
+
+    YouTube and explicitly named websites are handled elsewhere
+    and are intentionally not intercepted here.
+    """
+
+    query = extract_generic_search_query(
+        user_request
+    )
+
+    if not query:
+        return None
+
+    steps = [
+
+        {
+            "tool": "browser_search_bing",
+            "argument": query,
+        }
+    ]
+
+    if generic_search_wants_first_result(
         user_request
     ):
 
         steps.append(
             {
-                "tool": "open_program",
-                "argument": "chrome"
+                "tool":
+                    "browser_click_first_bing_result",
+
+                "argument":
+                    query,
             }
         )
-
-        steps.append(
-            {
-                "tool": "wait",
-                "argument": "2"
-            }
-        )
-
-
-    steps.append(
-        {
-            "tool": "search_website",
-            "argument": f"{site}|{query}"
-        }
-    )
-
-
-    steps.append(
-        {
-            "tool": "wait",
-            "argument": "2"
-        }
-    )
-
-
-    steps.append(
-        {
-            "tool": "click_screen",
-            "argument": f"first organic YouTube result for {query}"
-        }
-    )
-
 
     return {
         "steps": steps
     }
 
 
-# ==================================================
-# Deterministic routing
-# ==================================================
 
 def deterministic_route(user_request):
 
@@ -894,48 +1155,48 @@ def deterministic_route(user_request):
     # still uses the YouTube route.
     # ==================================================
 
-    generic_search_match = re.match(
-        r"^(?:please\s+)?(?:search\s+for|search|find|look\s+up|lookup)\s+(.+?)\s*[?.!]*$",
-        user_request.strip(),
-        re.IGNORECASE
+    # ==================================================
+    # GENERIC BROWSER SEARCH
+    # ==================================================
+    #
+    # Generic web searches now use Playwright/CDP + Bing.
+    #
+    # Example:
+    #
+    #   search for Wi-Fi skeleton
+    #
+    # becomes:
+    #
+    #   browser_search_bing
+    #
+    # And:
+    #
+    #   search for Wi-Fi skeleton and click the first result
+    #
+    # becomes:
+    #
+    #   browser_search_bing
+    #   browser_click_first_bing_result
+    #
+    # Explicit YouTube / Google / Amazon / Reddit routes above
+    # remain untouched.
+    # ==================================================
+
+    browser_plan = build_browser_search_plan(
+        user_request
     )
 
-    if generic_search_match:
-        query = (
-            generic_search_match.group(1)
-            .strip()
-            .rstrip("?.!")
+    if browser_plan:
+
+        query = extract_generic_search_query(
+            user_request
         )
 
-        # Do not steal explicitly targeted website searches.
-        explicit_site_words = (
-            "youtube",
-            "google",
-            "amazon",
-            "reddit"
+        print(
+            f"JARVIS: Generic browser search detected: {query}"
         )
 
-        query_lower = query.lower()
-
-        if (
-            query
-            and not any(
-                site_word in query_lower
-                for site_word in explicit_site_words
-            )
-        ):
-            print(
-                f"JARVIS: Generic Google search detected: {query}"
-            )
-
-            return {
-                "steps": [
-                    {
-                        "tool": "search_website",
-                        "argument": f"google|{query}"
-                    }
-                ]
-            }
+        return browser_plan
 
 
     # ==================================================

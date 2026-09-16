@@ -1,28 +1,39 @@
 __pycache__/
 *.pyc
-jarvis_cuda/
+
 .venv/
 venv/
+env/
+jarvis_cuda/
+
 .env
 *.log
-input.wav
+*.tmp
+*.bak
+*.before_*
+*_backup*
+*.backup*
+*backup*
+
+# Build output
+build/
+dist/
+
+# Browser profile / browser state
+chrome_automation/
+
+# Runtime/user data
 conversation_history.json
-jarvis_screen.png
-jarvis_vision_crop.png
-jarvis_youtube_candidate.png
-jarvis_youtube_verify_context.png
-jarvis_youtube_thumbnail.png
-*.before_*.py
-patch_*.py
 jarvis_memory.db
 profile.json
-conversation_history.json
-input.wav
-jarvis_screen.png
-jarvis_vision_crop.png
-test.png
-dist/
-build/
+
+# Generated media
+*.png
+*.wav
+
+# Archives / large model data
+*.zip
 voice_model/
-Jarvis.zip
-*.spec
+
+# Temporary patch scripts
+patch_*.py

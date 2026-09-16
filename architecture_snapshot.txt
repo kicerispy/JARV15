@@ -1,0 +1,4032 @@
+===== agent_core.py =====
+﻿"""
+JARVIS Agent Core
+
+High-level orchestration layer.
+
+The Agent Core owns:
+- task creation
+- planning
+- task metadata
+- agent state
+- high-level results
+
+The existing tool_executor.py remains responsible for:
+- executing tools
+- task state
+- cancellation
+- screen verification
+- retries/recovery
+- active context updates
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from logger import logger
+from planner import create_plan, validate_plan
+from tool_executor import execute_plan
+from state import ActiveContext, TaskState
+
+
+# ==========================================================
+# Agent Step
+# ==========================================================
+
+@dataclass
+class AgentStep:
+    tool: str
+    argument: str = ""
+    status: str = "pending"
+    attempts: int = 0
+    result: Any = None
+    error: Optional[str] = None
+
+
+# ==========================================================
+# Agent Task
+# ==========================================================
+
+@dataclass
+class AgentTask:
+    task_id: str
+
+    request: str
+
+    goal: str = ""
+
+    status: str = "created"
+
+    steps: List[AgentStep] = field(
+        default_factory=list
+    )
+
+    active_context: Dict[str, Any] = field(
+        default_factory=dict
+    )
+
+    planner_result: Optional[Dict[str, Any]] = None
+
+    execution_result: Any = None
+
+    created_at: float = field(
+        default_factory=time.time
+    )
+
+    started_at: Optional[float] = None
+
+    completed_at: Optional[float] = None
+
+    error: Optional[str] = None
+
+
+# ==========================================================
+# JARVIS Agent
+# ==========================================================
+
+class JarvisAgent:
+
+    def __init__(
+        self,
+        planner=create_plan,
+        executor=execute_plan,
+    ):
+        self.planner = planner
+        self.executor = executor
+
+        self.current_task: Optional[
+            AgentTask
+        ] = None
+
+        self.state: Dict[str, Any] = {
+            "last_request": "",
+            "last_goal": "",
+            "last_result": None,
+            "last_status": "",
+            "last_error": None,
+        }
+
+    # ======================================================
+    # Create Task
+    # ======================================================
+
+    def create_task(
+        self,
+        request: str,
+        active_context: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> AgentTask:
+
+        task = AgentTask(
+            task_id=str(uuid.uuid4()),
+            request=str(
+                request or ""
+            ).strip(),
+            active_context=dict(
+                active_context or {}
+            ),
+        )
+
+        self.current_task = task
+
+        self.state[
+            "last_request"
+        ] = task.request
+
+        self.state[
+            "last_error"
+        ] = None
+
+        return task
+
+    # ======================================================
+    # Planning
+    # ======================================================
+
+    def plan_task(
+        self,
+        task: AgentTask,
+        history_text: str = "",
+    ) -> AgentTask:
+
+        task.status = "planning"
+
+        logger.info(
+            "JARVIS AGENT: Planning task "
+            f"{task.task_id}"
+        )
+
+        try:
+
+            plan = self.planner(
+                task.request,
+                active_context=(
+                    task.active_context
+                ),
+                history_text=history_text,
+            )
+
+            plan = validate_plan(
+                plan
+            )
+
+            task.planner_result = plan
+
+            task.goal = str(
+                plan.get(
+                    "goal",
+                    "",
+                )
+                or ""
+            )
+
+            task.steps = [
+                AgentStep(
+                    tool=str(
+                        step.get(
+                            "tool",
+                            "",
+                        )
+                    ),
+                    argument=str(
+                        step.get(
+                            "argument",
+                            "",
+                        )
+                        or ""
+                    ),
+                )
+                for step in plan.get(
+                    "steps",
+                    [],
+                )
+                if isinstance(
+                    step,
+                    dict,
+                )
+            ]
+
+            self.state[
+                "last_goal"
+            ] = task.goal
+
+        except Exception as exc:
+
+            logger.exception(
+                "JARVIS AGENT: "
+                "Planning failed"
+            )
+
+            task.status = "failed"
+
+            task.error = str(exc)
+
+            self.state[
+                "last_error"
+            ] = str(exc)
+
+            return task
+
+        if not task.steps:
+
+            task.status = "conversation"
+
+            self.state[
+                "last_status"
+            ] = task.status
+
+            logger.info(
+                "JARVIS AGENT: "
+                "No executable tools required."
+            )
+
+            return task
+
+        task.status = "ready"
+
+        self.state[
+            "last_status"
+        ] = task.status
+
+        logger.info(
+            "JARVIS AGENT: Planned "
+            f"{len(task.steps)} step(s)"
+        )
+
+        for index, step in enumerate(
+            task.steps,
+            start=1,
+        ):
+
+            logger.info(
+                "JARVIS AGENT STEP "
+                f"{index}: "
+                f"{step.tool}"
+                f"({step.argument})"
+            )
+
+        return task
+
+    # ======================================================
+    # Execute Existing Plan
+    # ======================================================
+
+    def execute_task(
+        self,
+        task: AgentTask,
+        active_context,
+        task_state,
+        speak_callback,
+    ) -> AgentTask:
+
+        if task.status in {
+            "conversation",
+            "failed",
+            "cancelled",
+        }:
+            return task
+
+        if not task.planner_result:
+            task.status = "failed"
+            task.error = "No valid planner result."
+
+            self.state["last_status"] = task.status
+            self.state["last_error"] = task.error
+
+            return task
+
+        task.status = "executing"
+        task.started_at = time.time()
+
+        logger.info(
+            "JARVIS AGENT: "
+            "Handing task to existing executor."
+        )
+
+        try:
+
+            task.execution_result = self.executor(
+                task.planner_result,
+                active_context,
+                task_state,
+                speak_callback,
+            )
+
+            task.completed_at = time.time()
+
+            result_text = str(
+                task.execution_result or ""
+            ).strip().lower()
+
+            if result_text == "cancelled":
+
+                task.status = "cancelled"
+
+                for step in task.steps:
+                    if step.status in {
+                        "pending",
+                        "executing",
+                    }:
+                        step.status = "cancelled"
+
+            elif result_text == "done":
+
+                task.status = "completed"
+
+                for step in task.steps:
+                    step.status = "completed"
+
+            else:
+
+                task.status = "failed"
+
+                task.error = (
+                    str(
+                        task.execution_result
+                        or "Executor reported a failure."
+                    )
+                )
+
+                for step in task.steps:
+                    if step.status in {
+                        "pending",
+                        "executing",
+                    }:
+                        step.status = "failed"
+                        step.error = task.error
+
+            self.state["last_result"] = (
+                task.execution_result
+            )
+
+            self.state["last_status"] = (
+                task.status
+            )
+
+            if task.status == "failed":
+                self.state["last_error"] = (
+                    task.error
+                )
+
+            logger.info(
+                "JARVIS AGENT: "
+                f"Execution finished with "
+                f"status={task.status}"
+            )
+
+        except Exception as exc:
+
+            task.completed_at = time.time()
+            task.status = "failed"
+            task.error = str(exc)
+
+            self.state["last_error"] = str(exc)
+            self.state["last_status"] = task.status
+
+            for step in task.steps:
+                if step.status in {
+                    "pending",
+                    "executing",
+                }:
+                    step.status = "failed"
+                    step.error = str(exc)
+
+            logger.exception(
+                "JARVIS AGENT: Execution failed"
+            )
+
+        return task
+
+    # ======================================================
+    # Full Run
+    # ======================================================
+
+    def run(
+        self,
+        request: str,
+        active_context,
+        task_state,
+        speak_callback,
+        history_text: str = "",
+    ) -> AgentTask:
+
+        task = self.create_task(
+            request,
+            active_context=(
+                active_context.to_dict()
+                if hasattr(
+                    active_context,
+                    "to_dict",
+                )
+                else dict(
+                    active_context or {}
+                )
+            ),
+        )
+
+        task = self.plan_task(
+            task,
+            history_text=history_text,
+        )
+
+        if task.status in {
+            "conversation",
+            "failed",
+        }:
+
+            return task
+
+        task = self.execute_task(
+            task,
+            active_context,
+            task_state,
+            speak_callback,
+        )
+
+        return task
+
+    # ======================================================
+    # Summary
+    # ======================================================
+
+    def summarize(
+        self,
+        task: Optional[AgentTask] = None,
+    ) -> Dict[str, Any]:
+
+        task = task or self.current_task
+
+        if task is None:
+
+            return {
+                "status": "idle"
+            }
+
+        start = (
+            task.started_at
+            or task.created_at
+        )
+
+        end = (
+            task.completed_at
+            or time.time()
+        )
+
+        return {
+            "task_id": task.task_id,
+            "request": task.request,
+            "goal": task.goal,
+            "status": task.status,
+            "step_count": len(
+                task.steps
+            ),
+            "duration": max(
+                0.0,
+                end - start,
+            ),
+            "result": task.execution_result,
+            "error": task.error,
+        }
+
+
+# ==========================================================
+# Factory
+# ==========================================================
+
+def build_agent() -> JarvisAgent:
+
+    return JarvisAgent(
+        planner=create_plan,
+        executor=execute_plan,
+    )
+
+
+# ==========================================================
+# Standalone Test
+# ==========================================================
+
+if __name__ == "__main__":
+
+    # Use the real JARVIS state objects.
+    active_context = ActiveContext(
+        site="google",
+        last_query="Wi-Fi skeleton",
+        last_tool="search_website",
+        last_result=None,
+    )
+
+    task_state = TaskState()
+
+    def test_speak(text):
+        print(
+            "[TEST SPEAK]",
+            text
+        )
+
+    agent = build_agent()
+
+    task = agent.run(
+        "Click the first result",
+        active_context=active_context,
+        task_state=task_state,
+        speak_callback=test_speak,
+    )
+
+    print()
+    print("========== AGENT SUMMARY ==========")
+    print(agent.summarize(task))
+    print("====================================")
+
+    print()
+    print("Active context after execution:")
+    print(active_context)
+
+    print()
+    print("Task state after execution:")
+    print(task_state)
+
+
+===== planner.py =====
+﻿"""
+JARVIS task planner - converts user requests into tool calls.
+"""
+import json
+from typing import Any, Dict, List, Optional
+
+from ollama import chat
+
+from config import PLANNER_MODEL
+from logger import logger
+
+# ==========================================================
+# Available Tools
+# ==========================================================
+
+AVAILABLE_TOOLS: Dict[str, str] = {
+    "weather": "Get current weather. argument = location, or empty for default.",
+    "current_time": "Get current time. argument = timezone/city, or empty for local.",
+    "current_date": "Get today's date. argument = empty.",
+    "wait": "Wait N seconds. argument = number of seconds.",
+    "open_website": "Open a website in the browser. argument = site name or URL.",
+    "search_website": "Search a specific site. argument = 'site|query', e.g. 'youtube|iron man trailer'.",
+    "open_program": "Launch a desktop application. argument = program name, e.g. 'notepad', 'chrome'.",
+    "system_status": "Report CPU/RAM usage. argument = empty.",
+    "create_folder": "Create a folder. argument = folder name.",
+    "list_files": "List files in a folder. argument = folder path, or empty for current folder.",
+    "find_file": "Search for a file by name. argument = filename.",
+    "open_folder": "Open a folder in File Explorer. argument = folder path.",
+    "write_file": "Write content to a file. argument = 'filename|||content' format.",
+    "read_file": "Read content from a file. argument = filename.",
+    "edit_file": "Edit a file by replacing text. argument = 'filename|||old_text|||new_text'.",
+    "delete_file": "Delete a file. argument = filename.",
+    "web_search": "Search the web for information. argument = search query.",
+    "jarvis_status": "Report JARVIS's own status/uptime. argument = empty.",
+    "capture_screen": "Take a screenshot. argument = empty.",
+    "screen_size": "Get screen resolution. argument = empty.",
+    "get_active_window": "Get the currently focused window. argument = empty.",
+    "analyze_screen": "Describe what's on screen. argument = optional question about the screen.",
+    "move_mouse": "Move the mouse to an on-screen target. argument = description of the target.",
+    "click_screen": "Click an on-screen target. argument = description of the target.",
+    "double_click_screen": "Double-click an on-screen target. argument = description of the target.",
+    "scroll_screen": "Scroll the screen. argument = direction/amount, e.g. 'down', 'up 3'.",
+    "verify_screen": "Verify the screen matches an expected state. argument = description of expected state.",
+    "type_text": "Type text at the current cursor/focus. argument = the text to type.",
+    "press_key": "Press a keyboard key or combo. argument = key name, e.g. 'enter', 'ctrl+c'.",
+}
+
+
+# ==========================================================
+# Planner Prompt
+# ==========================================================
+
+def _planner_prompt() -> str:
+    """Build the planner prompt with available tools."""
+    tool_list = "\n".join(
+        f"{name}: {desc}"
+        for name, desc in AVAILABLE_TOOLS.items()
+    )
+    return f"""
+You are JARVIS's task planner â€” an expert software engineer and systems architect.
+
+Your job: convert a user request into a list of tool calls.
+
+If the request needs no tool (a question, chit-chat, opinion,
+or something you'd just answer in conversation), return an
+empty steps list.
+
+Available tools:
+
+{tool_list}
+
+Rules:
+
+1. Return ONLY JSON. No explanation.
+2. Every step must use exactly one tool name from the list above.
+3. "argument" must always be a string (use "" if the tool needs none).
+4. For complex requests, break them into multiple steps.
+   Example: "Create a todo app" -> write index.html, write styles.css, write app.js
+5. Never invent a tool name that isn't in the list.
+6. If unsure whether a tool applies, return an empty steps list
+   instead of guessing.
+7. When generating code, include ALL necessary files.
+8. Prefer single HTML files for web apps (embed CSS/JS).
+9. For multi-file projects, order steps logically (styles before scripts).
+
+Multi-Step Examples:
+
+User:
+Create a todo app with HTML, CSS, and JavaScript
+
+Output:
+{{
+"goal": "create todo app",
+"steps": [
+  {{"tool": "write_file", "argument": "todo.html|||<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Todo App</title>\\n<link rel=\"stylesheet\" href=\"styles.css\">\\n</head>\\n<body>\\n<div id=\"app\">\\n<input id=\"new-todo\" type=\"text\">\\n<button id=\"add-btn\">Add</button>\\n<ul id=\"todo-list\"></ul>\\n</body>\\n</html>"}},
+  {{"tool": "write_file", "argument": "styles.css|||#app {{ max-width: 400px; margin: 50px auto; padding: 20px; }}\\n.todo-item {{ padding: 10px; border: 1px solid #ccc; margin: 5px 0; }}"}}
+]
+}}
+
+User:
+Set up a Python project with a main script and requirements file
+
+Output:
+{{
+"goal": "create python project",
+"steps": [
+  {{"tool": "write_file", "argument": "requirements.txt|||requests>=2.31.0\\npytest>=7.4.0"}},
+  {{"tool": "write_file", "argument": "main.py|||# Main application\\nimport requests\\n\\ndef main():\\n    print('Hello World')\\n\\nif __name__ == '__main__':\\n    main()"}}
+]
+}}
+
+User:
+What's the weather in Chicago?
+
+Output:
+{{
+"goal": "check weather",
+"steps": [
+  {{"tool": "weather", "argument": "Chicago"}}
+]
+}}
+
+User:
+Search YouTube for the Iron Man trailer
+
+Output:
+{{
+"goal": "search youtube",
+"steps": [
+  {{"tool": "search_website", "argument": "youtube|Iron Man trailer"}}
+]
+}}
+
+User:
+Tell me a joke
+
+Output:
+{{
+"goal": "conversation",
+"steps": []
+}}
+
+User:
+Tell me a story about Iron Man
+
+Output:
+{{
+"goal": "conversation",
+"steps": []
+}}
+
+IMPORTANT: When the user asks you to CREATE, WRITE, or BUILD something (code, scripts, games, documents), you MUST generate the complete, working content yourself and use the write_file tool. Do NOT say you can't do it - just generate the code and write it.
+
+CRITICAL: Requests to tell a story, joke, or share creative content are CONVERSATIONAL â€” return an empty steps list. JARVIS generates creative content directly, it does not search the web for stories. Examples that should return empty steps:
+- "Tell me a story about X"
+- "Write a joke"
+- "Create a poem"
+- "Tell me a fun fact"
+- "Say something creative"
+"""
+
+
+# ==========================================================
+# JSON Extraction
+# ==========================================================
+
+def extract_json(text: str) -> Optional[Dict[str, Any]]:
+    """Extract JSON from a string, handling markdown code blocks."""
+    if not text:
+        return None
+
+    # Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON object in the text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+# ==========================================================
+# Plan Validation
+# ==========================================================
+
+def validate_plan(plan: Any) -> Dict[str, Any]:
+    """Validate and clean a planner response."""
+    if not isinstance(plan, dict) or "steps" not in plan:
+        return {"goal": "", "steps": []}
+
+    steps = plan.get("steps")
+    if not isinstance(steps, list):
+        return {"goal": plan.get("goal", ""), "steps": []}
+
+    clean: List[Dict[str, str]] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+
+        tool = step.get("tool")
+        argument = step.get("argument", "")
+
+        if tool not in AVAILABLE_TOOLS:
+            logger.warning(f"Rejected unknown tool: {tool}")
+            continue
+
+        clean.append({
+            "tool": str(tool),
+            "argument": str(argument) if argument is not None else ""
+        })
+
+    return {
+        "goal": plan.get("goal", ""),
+        "steps": clean
+    }
+
+
+# ==========================================================
+# Create Plan
+# ==========================================================
+
+def create_plan(
+    user_command: str,
+    active_context: Optional[Dict[str, Any]] = None,
+    history_text: str = ""
+) -> Dict[str, Any]:
+    """
+    Convert a user command into a plan of tool calls.
+
+    Args:
+        user_command: The user's request.
+        active_context: Current active task context.
+        history_text: Recent conversation history.
+
+    Returns:
+        A dict with 'goal' and 'steps' keys.
+    """
+    if not user_command or not user_command.strip():
+        return {"goal": "", "steps": []}
+
+    # ========================================================
+    # DETERMINISTIC FIRST-RESULT ROUTER
+    # ========================================================
+    #
+    # When a previous search established a website and query,
+    # commands such as:
+    #
+    #   Click the first result
+    #
+    # should NOT be left to the language model.
+    #
+    # Google:
+    #   click the first organic Google result for QUERY
+    #
+    # YouTube:
+    #   click the first organic YouTube result for QUERY
+    #
+    # This creates a normal planner result so the rest of the
+    # existing execution pipeline remains unchanged.
+    # ========================================================
+
+    normalized_command = (
+        user_command
+        .strip()
+        .lower()
+        .rstrip(".,!?")
+    )
+
+    normalized_command = " ".join(
+        normalized_command.split()
+    )
+
+    first_result_phrases = {
+        "click the first result",
+        "click first result",
+        "click on the first result",
+        "click on first result",
+
+        "open the first result",
+        "open first result",
+
+        "play the first result",
+        "play first result",
+
+        "click the first video",
+        "click first video",
+        "click on the first video",
+        "click on first video",
+
+        "open the first video",
+        "open first video",
+
+        "play the first video",
+        "play first video",
+
+        "click the first link",
+        "click first link",
+        "click on the first link",
+        "click on first link",
+
+        "open the first link",
+        "open first link",
+
+        "click the first one",
+        "click first one",
+        "click on the first one",
+        "click on first one",
+
+        "open the first one",
+        "open first one",
+    }
+
+    if (
+        normalized_command in first_result_phrases
+        and active_context
+    ):
+        active_site = str(
+            active_context.get("site", "") or ""
+        ).strip().lower()
+
+        active_query = str(
+            active_context.get("last_query", "") or ""
+        ).strip()
+
+        if (
+            active_site in {
+                "google",
+                "youtube",
+            }
+            and active_query
+        ):
+            if active_site == "google":
+                resolved_command = (
+                    "click the first organic Google result for "
+                    + active_query
+                )
+
+                print(
+                    "JARVIS planner:"
+                )
+
+                print(
+                    f"  Original: {user_command}"
+                )
+
+                print(
+                    f"  Context site: Google"
+                )
+
+                print(
+                    f"  Context query: {active_query}"
+                )
+
+                print(
+                    f"  Resolved: {resolved_command}"
+                )
+
+                return {
+                    "goal": "click first Google result",
+                    "steps": [
+                        {
+                            "tool": "click_screen",
+                            "argument": resolved_command,
+                        }
+                    ],
+                    "resolved_command": resolved_command,
+                }
+
+            if active_site == "youtube":
+                resolved_command = (
+                    "click the first organic YouTube result for "
+                    + active_query
+                )
+
+                print(
+                    "JARVIS planner:"
+                )
+
+                print(
+                    f"  Original: {user_command}"
+                )
+
+                print(
+                    f"  Context site: YouTube"
+                )
+
+                print(
+                    f"  Context query: {active_query}"
+                )
+
+                print(
+                    f"  Resolved: {resolved_command}"
+                )
+
+                return {
+                    "goal": "click first YouTube result",
+                    "steps": [
+                        {
+                            "tool": "click_screen",
+                            "argument": resolved_command,
+                        }
+                    ],
+                    "resolved_command": resolved_command,
+                }
+
+    context_str = ""
+    if active_context:
+        context_str = f"""
+
+Active task context:
+Website: {active_context.get('site', 'none')}
+Search query: {active_context.get('last_query', 'none')}
+Last tool: {active_context.get('last_tool', 'none')}
+"""
+
+    history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
+
+    messages = [
+        {
+            "role": "system",
+            "content": _planner_prompt() + context_str + history_str
+        },
+        {
+            "role": "user",
+            "content": user_command
+        }
+    ]
+
+    try:
+        response = chat(
+            model=PLANNER_MODEL,
+            messages=messages,
+            format="json"
+        )
+    except Exception as e:
+        logger.error(f"Planner LLM call failed: {e}")
+        return {"goal": "", "steps": []}
+
+    content = response.get("message", {}).get("content", "")
+    data = extract_json(content)
+
+    if not data:
+        logger.warning(f"Planner returned invalid JSON: {content[:200]}")
+        return {"goal": "", "steps": []}
+
+    return validate_plan(data)
+
+
+
+===== tool_executor.py =====
+"""
+JARVIS tool execution engine.
+
+Optimized for low latency while preserving reliable execution
+for multi-step computer-control tasks.
+"""
+
+from typing import Any, Dict
+
+from logger import logger
+from state import ActiveContext, TaskState
+from tools import run_tool
+
+
+# ============================================================
+# PERFORMANCE SETTINGS
+# ============================================================
+
+# Only these actions are candidates for screen-change checks.
+SCREEN_ACTION_TOOLS = {
+    "click_screen",
+    "double_click_screen",
+    "right_click_screen",
+}
+
+# Verification is intentionally short.
+#
+# Single-step clicks do NOT wait for verification.
+# Multi-step tasks get a quick confirmation.
+SCREEN_VERIFY_TIMEOUT = 0.75
+SCREEN_VERIFY_INTERVAL = 0.20
+
+
+# ============================================================
+# CONTEXT UPDATE
+# ============================================================
+
+def update_active_context(
+    plan: Dict[str, Any],
+    active_context: ActiveContext,
+    result_message: str = "",
+) -> None:
+    """
+    Update active context from executed tool steps.
+    """
+
+    steps = plan.get(
+        "steps",
+        [],
+    )
+
+    if not isinstance(
+        steps,
+        list,
+    ):
+        return
+
+    for step in steps:
+
+        if not isinstance(
+            step,
+            dict,
+        ):
+            continue
+
+        tool_name = str(
+            step.get(
+                "tool",
+                "",
+            )
+            or ""
+        ).strip()
+
+        argument = str(
+            step.get(
+                "argument",
+                "",
+            )
+            or ""
+        )
+
+        # ----------------------------------------------------
+        # Website search
+        # ----------------------------------------------------
+
+        if tool_name == "search_website":
+
+            parts = argument.split(
+                "|",
+                1,
+            )
+
+            if len(parts) == 2:
+
+                active_context.site = (
+                    parts[0]
+                    .strip()
+                    .lower()
+                )
+
+                active_context.last_query = (
+                    parts[1]
+                    .strip()
+                )
+
+            active_context.last_tool = (
+                tool_name
+            )
+
+            if result_message:
+
+                active_context.last_result = (
+                    str(result_message)
+                )
+
+            continue
+
+        # ----------------------------------------------------
+        # General tool context
+        # ----------------------------------------------------
+
+        if tool_name in {
+            "open_website",
+            "open_program",
+            "click_screen",
+            "double_click_screen",
+            "right_click_screen",
+            "move_mouse",
+            "scroll_screen",
+            "type_text",
+            "press_key",
+            "analyze_screen",
+            "capture_screen",
+            "weather",
+            "current_time",
+            "current_date",
+            "system_status",
+            "jarvis_status",
+        }:
+
+            active_context.last_tool = (
+                tool_name
+            )
+
+            if result_message:
+
+                active_context.last_result = (
+                    str(result_message)
+                )
+
+
+# ============================================================
+# FAST SCREEN VERIFICATION
+# ============================================================
+
+def quick_screen_verify() -> bool:
+    """
+    Perform a very short screen-change check.
+
+    This is intentionally much faster than the previous
+    multi-second verification path.
+    """
+
+    try:
+
+        from screen_vision import wait_for_change
+
+        return bool(
+            wait_for_change(
+                timeout=SCREEN_VERIFY_TIMEOUT,
+                interval=SCREEN_VERIFY_INTERVAL,
+            )
+        )
+
+    except Exception as e:
+
+        logger.debug(
+            f"JARVIS: Quick screen verification unavailable: {e}"
+        )
+
+        return True
+
+
+# ============================================================
+# VERIFY ACTION WHEN NECESSARY
+# ============================================================
+
+def verify_action_for_task(
+    tool_name: str,
+    result: Any,
+    multi_step: bool,
+) -> Any:
+    """
+    Add lightweight verification to screen actions only
+    when they are part of a multi-step task.
+
+    Single-step commands are intentionally not delayed.
+    """
+
+    # --------------------------------------------------------
+    # Non-screen actions require no screen verification.
+    # --------------------------------------------------------
+
+    if tool_name not in SCREEN_ACTION_TOOLS:
+
+        return result
+
+    # --------------------------------------------------------
+    # Single-step actions should remain fast.
+    # --------------------------------------------------------
+
+    if not multi_step:
+
+        return result
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+
+        return result
+
+    if not result.get(
+        "success",
+        False,
+    ):
+
+        return result
+
+    # --------------------------------------------------------
+    # Quick screen-change check.
+    # --------------------------------------------------------
+
+    changed = quick_screen_verify()
+
+    verified_result = dict(
+        result
+    )
+
+    verified_result["screen_changed"] = (
+        changed
+    )
+
+    if changed:
+
+        verified_result["verified"] = True
+
+        return verified_result
+
+    # --------------------------------------------------------
+    # No visible change.
+    #
+    # We do not immediately fail here. Some legitimate
+    # actions do not cause obvious pixel changes.
+    #
+    # The tool itself already reported success.
+    # --------------------------------------------------------
+
+    verified_result["verified"] = True
+    verified_result["verification_note"] = (
+        "No immediate visible screen change was detected."
+    )
+
+    return verified_result
+
+
+# ============================================================
+# TOOL RESULT NORMALIZATION
+# ============================================================
+
+def normalize_tool_result(
+    result: Any,
+) -> tuple[bool, bool, str]:
+    """
+    Convert different tool result formats into:
+
+        success
+        verified
+        message
+    """
+
+    if isinstance(
+        result,
+        dict,
+    ):
+
+        success = bool(
+            result.get(
+                "success",
+                True,
+            )
+        )
+
+        verified = bool(
+            result.get(
+                "verified",
+                True,
+            )
+        )
+
+        message = str(
+            result.get(
+                "message",
+                "Tool completed.",
+            )
+        )
+
+        return (
+            success,
+            verified,
+            message,
+        )
+
+    return (
+        True,
+        True,
+        str(result),
+    )
+
+
+# ============================================================
+# ADD ASSISTANT MESSAGE
+# ============================================================
+
+def add_assistant_message(
+    message: str,
+) -> None:
+    """
+    Add a message to conversation history safely.
+    """
+
+    try:
+
+        from conversation import add_message
+
+        add_message(
+            "assistant",
+            message,
+        )
+
+    except Exception as e:
+
+        logger.debug(
+            f"JARVIS: Conversation history update skipped: {e}"
+        )
+
+
+# ============================================================
+# SPEAK RESULT
+# ============================================================
+
+def speak_result(
+    message: str,
+    speak_callback,
+) -> str:
+    """
+    Speak a tool result and handle interruption.
+    """
+
+    interrupted = speak_callback(
+        message
+    )
+
+    if interrupted:
+
+        return "interrupted"
+
+    return "done"
+
+
+# ============================================================
+# EXECUTE PLAN
+# ============================================================
+
+def execute_plan(
+    plan: Dict[str, Any],
+    active_context: ActiveContext,
+    task_state: TaskState,
+    speak_callback,
+) -> str:
+    """
+    Execute a plan of tool calls.
+
+    Optimizations:
+    - No screen verification for ordinary single-step clicks.
+    - Short verification only for multi-step screen actions.
+    - File operations retain recovery/retry support.
+    - Tool results are handled without unnecessary work.
+    """
+
+    if not isinstance(
+        plan,
+        dict,
+    ):
+
+        return "done"
+
+    steps = plan.get(
+        "steps",
+        [],
+    )
+
+    if not isinstance(
+        steps,
+        list,
+    ):
+
+        return "done"
+
+    # --------------------------------------------------------
+    # Filter invalid steps
+    # --------------------------------------------------------
+
+    executable_steps = [
+        step
+        for step in steps
+        if isinstance(
+            step,
+            dict,
+        )
+        and step.get(
+            "tool",
+            "",
+        ) not in {
+            "",
+            "none",
+            None,
+        }
+    ]
+
+    if not executable_steps:
+
+        return "done"
+
+    multi_step = (
+        len(executable_steps) > 1
+    )
+
+    planning_input = str(
+        plan.get(
+            "resolved_command",
+            plan.get(
+                "goal",
+                "",
+            ),
+        )
+        or ""
+    )
+
+    # --------------------------------------------------------
+    # Start task state
+    # --------------------------------------------------------
+
+    task_state.start(
+        description=planning_input,
+        total_steps=len(
+            executable_steps
+        ),
+    )
+
+    logger.info(
+        f"Task started: "
+        f"{len(executable_steps)} executable step(s)"
+    )
+
+    final_tool_message = ""
+    task_completed = False
+
+    # ========================================================
+    # EXECUTE STEPS
+    # ========================================================
+
+    for index, step in enumerate(
+        executable_steps,
+        start=1,
+    ):
+
+        # ----------------------------------------------------
+        # Cancellation before action
+        # ----------------------------------------------------
+
+        if task_state.is_cancelled():
+
+            logger.info(
+                "JARVIS: Cancellation detected."
+            )
+
+            active_context.clear()
+            task_state.finish()
+
+            return "cancelled"
+
+        tool_name = str(
+            step.get(
+                "tool",
+                "",
+            )
+            or ""
+        ).strip()
+
+        argument = str(
+            step.get(
+                "argument",
+                "",
+            )
+            or ""
+        )
+
+        if not tool_name:
+
+            continue
+
+        task_state.update_step(
+            index,
+            tool_name,
+        )
+
+        logger.info(
+            f"Step {index}/"
+            f"{len(executable_steps)}: "
+            f"Running {tool_name}"
+        )
+
+        try:
+
+            # =================================================
+            # FILE OPERATIONS
+            # =================================================
+
+            if tool_name in {
+                "write_file",
+                "edit_file",
+                "read_file",
+                "delete_file",
+            }:
+
+                from recovery import retry_with_recovery
+
+                result = retry_with_recovery(
+                    tool_name,
+                    argument,
+                    run_tool,
+                    max_attempts=2,
+                )
+
+                if not isinstance(
+                    result,
+                    dict,
+                ):
+
+                    result = {
+                        "success": False,
+                        "message": (
+                            "File operation returned "
+                            "an invalid result."
+                        ),
+                    }
+
+                elif not result.get(
+                    "success",
+                    False,
+                ):
+
+                    result = {
+                        "success": False,
+                        "message": str(
+                            result.get(
+                                "error",
+                                "File operation failed.",
+                            )
+                        ),
+                    }
+
+                else:
+
+                    result = result.get(
+                        "result",
+                        result,
+                    )
+
+            # =================================================
+            # NORMAL TOOL
+            # =================================================
+
+            else:
+
+                result = run_tool(
+                    tool_name,
+                    argument,
+                )
+
+            # =================================================
+            # OPTIONAL SCREEN VERIFICATION
+            # =================================================
+
+            result = verify_action_for_task(
+                tool_name,
+                result,
+                multi_step,
+            )
+
+            # =================================================
+            # CANCELLATION AFTER TOOL
+            # =================================================
+
+            if task_state.is_cancelled():
+
+                logger.info(
+                    "JARVIS: Task cancelled after "
+                    "tool execution."
+                )
+
+                active_context.clear()
+                task_state.finish()
+
+                return "cancelled"
+
+            # =================================================
+            # NORMALIZE RESULT
+            # =================================================
+
+            success, verified, message = (
+                normalize_tool_result(
+                    result
+                )
+            )
+
+            logger.info(
+                f"JARVIS: {message}"
+            )
+
+            # =================================================
+            # FAILURE
+            # =================================================
+
+            if not success or not verified:
+
+                active_context.clear()
+
+                add_assistant_message(
+                    message
+                )
+
+                return speak_result(
+                    message,
+                    speak_callback,
+                )
+
+            # =================================================
+            # SUCCESS
+            # =================================================
+
+            final_tool_message = message
+
+            update_active_context(
+                plan={
+                    "steps": [
+                        step,
+                    ],
+                },
+                active_context=active_context,
+                result_message=message,
+            )
+
+            # -------------------------------------------------
+            # Single-step task
+            #
+            # FAST PATH:
+            # No verification delay.
+            # -------------------------------------------------
+
+            if not multi_step:
+
+                add_assistant_message(
+                    message
+                )
+
+                task_state.finish()
+
+                return speak_result(
+                    message,
+                    speak_callback,
+                )
+
+            # -------------------------------------------------
+            # Multi-step task continues.
+            # -------------------------------------------------
+
+            task_completed = True
+
+        except Exception as e:
+
+            logger.error(
+                f"JARVIS: Tool error "
+                f"({tool_name}): {e}"
+            )
+
+            error_message = (
+                f"I couldn't complete the "
+                f"{tool_name} action."
+            )
+
+            active_context.clear()
+
+            add_assistant_message(
+                error_message
+            )
+
+            logger.info(
+                f"JARVIS: {error_message}"
+            )
+
+            return speak_result(
+                error_message,
+                speak_callback,
+            )
+
+    # ========================================================
+    # MULTI-STEP COMPLETION
+    # ========================================================
+
+    if (
+        task_completed
+        and multi_step
+        and final_tool_message
+    ):
+
+        update_active_context(
+            plan=plan,
+            active_context=active_context,
+            result_message=final_tool_message,
+        )
+
+        add_assistant_message(
+            final_tool_message
+        )
+
+        task_state.finish()
+
+        return speak_result(
+            final_tool_message,
+            speak_callback,
+        )
+
+    # ========================================================
+    # FALLBACK COMPLETION
+    # ========================================================
+
+    if final_tool_message:
+
+        add_assistant_message(
+            final_tool_message
+        )
+
+        task_state.finish()
+
+        return speak_result(
+            final_tool_message,
+            speak_callback,
+        )
+
+    task_state.finish()
+
+    return "done"
+
+===== main.py =====
+﻿"""
+JARVIS - Main entry point.
+
+Includes lightweight performance timing so we can identify
+latency between speech recognition, command routing, planning,
+tool execution, and response generation.
+"""
+
+import sys
+import time
+from typing import Optional
+
+from code_gen import handle_code_generation, is_code_request
+from agent_core import JarvisAgent
+
+from commands import (
+    get_fast_command,
+    is_cancel_command,
+    is_creative_request,
+    is_end_conversation_command,
+    is_remember_command,
+    is_shutdown_command,
+    normalize_command,
+    should_resolve_context,
+    wants_first_result,
+)
+from config import PROFILE_PATH
+from context_aware import JarvisContext
+from context_resolver import resolve_followup
+from conversation import ConversationHistory
+from conversation_handler import (
+    handle_normal_conversation,
+    run_memory_analysis_background,
+)
+from logger import logger
+from memory import create_memory
+from planner import create_plan
+from state import JarvisState
+from tool_executor import execute_plan
+
+
+# ============================================================
+# AGENT CORE
+# ============================================================
+jarvis_agent = JarvisAgent()
+
+
+# ============================================================
+# PERFORMANCE TIMING
+# ============================================================
+
+def perf_now() -> float:
+    """
+    Return a high-resolution performance timestamp.
+    """
+    return time.perf_counter()
+
+
+def log_perf(
+    label: str,
+    start_time: float,
+) -> float:
+    """
+    Log elapsed time since start_time.
+
+    Returns a fresh timestamp so callers can chain timing.
+    """
+
+    elapsed = perf_now() - start_time
+
+    logger.info(
+        f"PERF: {label}: {elapsed:.3f}s"
+    )
+
+    return perf_now()
+
+
+# ============================================================
+# PROFILE
+# ============================================================
+
+def load_profile():
+    """Load user profile from profile.json."""
+
+    try:
+
+        with open(
+            PROFILE_PATH,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            import json
+
+            profile = json.load(f)
+
+        return profile
+
+    except FileNotFoundError:
+
+        print(
+            'JARVIS: profile.json not found. '
+            'Create one with at least {"name": "YourName"} '
+            'in the project folder and try again.'
+        )
+
+        sys.exit(1)
+
+    except (json.JSONDecodeError, KeyError) as e:
+
+        print(
+            f"JARVIS: profile.json exists but is invalid ({e}). "
+            "Check the file's contents and try again."
+        )
+
+        sys.exit(1)
+
+
+# ============================================================
+# SYSTEM PROMPT
+# ============================================================
+
+def build_system_prompt(
+    user_name: str,
+    context: JarvisContext,
+    profile: Optional[dict] = None,
+) -> str:
+    """Build the system prompt for JARVIS."""
+
+    context_str = context.build_context_string()
+
+    if profile is None:
+        profile = load_profile()
+
+    persona_traits = (
+        profile
+        .get("preferences", {})
+        .get("persona_traits", {})
+    )
+
+    wit = persona_traits.get(
+        "wit",
+        0.4,
+    )
+
+    formality = persona_traits.get(
+        "formality",
+        0.85,
+    )
+
+    technical_depth = persona_traits.get(
+        "technical_depth",
+        0.7,
+    )
+
+    tone_parts: list[str] = []
+
+    if wit > 0.3:
+
+        tone_parts.append(
+            "You have a subtle, sophisticated wit. "
+            "Your humor is dry and understated."
+        )
+
+    if formality > 0.7:
+
+        tone_parts.append(
+            "You are formally polite, addressing the user by name "
+            "and maintaining a composed demeanor."
+        )
+
+    if technical_depth > 0.6:
+
+        tone_parts.append(
+            "You are technically precise, favoring accuracy over speculation."
+        )
+
+    if not tone_parts:
+
+        tone_parts.append(
+            "You are JARVIS â€” composed, efficient, and precise."
+        )
+
+    tone_note = " ".join(
+        tone_parts
+    )
+
+    return f"""
+You are JARVIS, a personal AI assistant.
+
+You are calm, precise, intelligent, and efficient.
+
+Keep answers concise unless the user asks for more detail.
+
+Address the user naturally as {user_name} when appropriate.
+
+Use saved memories and recent conversation context when relevant.
+
+{tone_note}
+
+You refer to yourself as JARVIS.
+
+You use confident, understated phrasing.
+
+Never pretend to have completed an action unless a tool
+actually completed it.
+
+When a tool completes an action, treat that result as
+part of the conversation context.
+
+You are not merely a coding assistant.
+
+Programming, computer control, web research, vision,
+automation, file management, and other capabilities are
+tools that you can use when appropriate.
+
+Remain JARVIS regardless of which capability you are using.
+
+USER & PROJECT CONTEXT:
+
+{context_str}
+
+Acknowledge the user naturally during wake-word interactions
+with phrases such as:
+
+"Yes, {user_name}?"
+
+"Very well, {user_name}."
+
+"Executing."
+
+"Very well. I am on it."
+"""
+
+
+# ============================================================
+# FAST COMMAND EXECUTION
+# ============================================================
+
+def execute_fast_command(
+    tool_name: str,
+    argument: str,
+    user_input: str,
+    state: JarvisState,
+    speak_callback,
+) -> str:
+    """
+    Execute a deterministic command without using
+    the LLM planner or background memory analysis.
+    """
+
+    logger.info(
+        f"JARVIS: Executing fast command: "
+        f"{tool_name}"
+        + (
+            f" ({argument})"
+            if argument
+            else ""
+        )
+    )
+
+    start = perf_now()
+
+    plan = {
+        "goal": user_input,
+        "resolved_command": user_input,
+        "steps": [
+            {
+                "tool": tool_name,
+                "argument": argument,
+            }
+        ],
+    }
+
+    result = execute_plan(
+        plan,
+        state.active_context,
+        state.task_state,
+        speak_callback,
+    )
+
+    elapsed = perf_now() - start
+
+    logger.info(
+        f"PERF: fast command '{tool_name}' "
+        f"execution: {elapsed:.3f}s"
+    )
+
+    return result
+
+
+# ============================================================
+# PROCESS COMMAND
+# ============================================================
+
+def process_command(
+    user_input: str,
+    state: JarvisState,
+    conversation: ConversationHistory,
+    system_prompt: str,
+    speak_callback,
+) -> str:
+    """
+    Process a single user command.
+
+    Returns:
+        "done"
+        "cancelled"
+        "interrupted"
+        "shutdown"
+    """
+
+    command_start = perf_now()
+
+    if user_input is None:
+        return "done"
+
+    # --------------------------------------------------------
+    # Normalize
+    # --------------------------------------------------------
+
+    normalize_start = perf_now()
+
+    user_input = normalize_command(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: command normalization: "
+        f"{perf_now() - normalize_start:.3f}s"
+    )
+
+    if not user_input:
+        return "done"
+
+    logger.info(
+        f"USER: {user_input}"
+    )
+
+    # ========================================================
+    # CONTEXTUAL YOUTUBE FOLLOW-UP
+    # ========================================================
+    #
+    # When JARVIS is already working with a YouTube search,
+    # short follow-ups such as:
+    #
+    #   click the first result
+    #   open the first video
+    #   play the first result
+    #   click the first link
+    #   choose the top result
+    #
+    # should reuse the existing YouTube search query instead
+    # of being interpreted as a brand-new search for words such
+    # as "first result".
+    #
+    # We reuse the existing ActiveContext rather than creating
+    # another memory system.
+    # ========================================================
+
+    active_site = (
+        state.active_context.site or ""
+    ).strip().lower()
+
+    active_query = (
+        state.active_context.last_query or ""
+    ).strip()
+
+    if (
+        active_site == "youtube"
+        and
+        active_query
+        and
+        wants_first_result(user_input)
+    ):
+
+        original_followup = user_input
+
+        user_input = (
+            "click the first organic YouTube result for "
+            f"{active_query}"
+        )
+
+        logger.info(
+            "JARVIS: Resolved YouTube follow-up "
+            f"'{original_followup}' -> '{user_input}'"
+        )
+
+    logger.info(
+        "PERF: command processing started."
+    )
+
+    # ==================================================
+    # END CONVERSATION
+    # ==================================================
+
+    if is_end_conversation_command(
+        user_input
+    ):
+
+        logger.info(
+            "JARVIS: Returning to wake-word mode."
+        )
+
+        state.continuous_mode = False
+        state.active_context.clear()
+        state.task_state.finish()
+        state.pending_input = None
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "done"
+
+    # ==================================================
+    # CANCEL
+    # ==================================================
+
+    if is_cancel_command(
+        user_input
+    ):
+
+        state.task_state.cancel()
+        state.continuous_mode = False
+        state.pending_input = None
+        state.active_context.clear()
+
+        logger.info(
+            "JARVIS: Command cancelled."
+        )
+
+        state.task_state.finish()
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "cancelled"
+
+    # ==================================================
+    # SHUTDOWN
+    # ==================================================
+
+    if is_shutdown_command(
+        user_input
+    ):
+
+        state.task_state.finish()
+
+        reply = "Shutting down. Goodbye."
+
+        conversation.add_message(
+            "user",
+            user_input,
+        )
+
+        conversation.add_message(
+            "assistant",
+            reply,
+        )
+
+        logger.info(
+            f"JARVIS: {reply}"
+        )
+
+        speak_start = perf_now()
+
+        speak_callback(
+            reply
+        )
+
+        logger.info(
+            f"PERF: shutdown TTS: "
+            f"{perf_now() - speak_start:.3f}s"
+        )
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "shutdown"
+
+    # ==================================================
+    # REMEMBER
+    # ==================================================
+
+    if is_remember_command(
+        user_input
+    ):
+
+        fact = user_input[8:].strip()
+
+        conversation.add_message(
+            "user",
+            user_input,
+        )
+
+        if fact:
+
+            from memory import save_memory
+
+            memory_start = perf_now()
+
+            save_memory(
+                fact
+            )
+
+            logger.info(
+                f"PERF: save memory: "
+                f"{perf_now() - memory_start:.3f}s"
+            )
+
+            reply = "I will remember that."
+
+        else:
+
+            reply = (
+                "What would you like me to remember?"
+            )
+
+        conversation.add_message(
+            "assistant",
+            reply,
+        )
+
+        logger.info(
+            f"JARVIS: {reply}"
+        )
+
+        speak_start = perf_now()
+
+        interrupted = speak_callback(
+            reply
+        )
+
+        logger.info(
+            f"PERF: remember TTS: "
+            f"{perf_now() - speak_start:.3f}s"
+        )
+
+        if interrupted:
+
+            state.pending_input = (
+                _listen_after_barge_in()
+            )
+
+            if state.pending_input:
+                return "interrupted"
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "done"
+
+    # ==================================================
+    # WHAT DO YOU REMEMBER
+    # ==================================================
+
+    if user_input.lower() == "what do you remember":
+
+        from memory import get_memories
+
+        memory_start = perf_now()
+
+        memories = get_memories()
+
+        logger.info(
+            f"PERF: get memories: "
+            f"{perf_now() - memory_start:.3f}s"
+        )
+
+        if not memories:
+
+            reply = (
+                "I currently have no saved memories."
+            )
+
+        else:
+
+            memory_items = [
+                item[0]
+                for item in memories
+            ]
+
+            reply = (
+                "Your saved memories are: "
+                + ". ".join(memory_items)
+            )
+
+        conversation.add_message(
+            "user",
+            user_input,
+        )
+
+        conversation.add_message(
+            "assistant",
+            reply,
+        )
+
+        logger.info(
+            f"JARVIS: {reply}"
+        )
+
+        speak_start = perf_now()
+
+        interrupted = speak_callback(
+            reply
+        )
+
+        logger.info(
+            f"PERF: memory response TTS: "
+            f"{perf_now() - speak_start:.3f}s"
+        )
+
+        if interrupted:
+
+            state.pending_input = (
+                _listen_after_barge_in()
+            )
+
+            if state.pending_input:
+                return "interrupted"
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "done"
+
+    # ==================================================
+    # SAVE USER INPUT
+    # ==================================================
+
+    conversation.add_message(
+        "user",
+        user_input,
+    )
+
+    # ==================================================
+    # FAST COMMAND
+    # ==================================================
+
+    fast_start = perf_now()
+
+    fast_command = get_fast_command(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: fast-command lookup: "
+        f"{perf_now() - fast_start:.3f}s"
+    )
+
+    if fast_command:
+
+        # ==================================================
+        # MULTI-STEP FAST COMMAND
+        # ==================================================
+
+        if isinstance(
+            fast_command,
+            dict
+        ):
+
+            fast_steps = fast_command.get(
+                "steps",
+                []
+            )
+
+            if fast_steps:
+
+                logger.info(
+                    "JARVIS: Fast multi-step command detected."
+                )
+
+                # The deterministic router has already done
+                # the planning. Pass the complete plan to the
+                # normal executor as ONE task.
+                #
+                # This allows execute_plan() to recognize that
+                # the task is multi-step and avoid speaking
+                # every intermediate tool result.
+
+                fast_plan = {
+                    "goal": user_input,
+                    "resolved_command": user_input,
+                    "steps": fast_steps,
+                }
+
+                execution_start = perf_now()
+
+                result = execute_plan(
+                    fast_plan,
+                    state.active_context,
+                    state.task_state,
+                    speak_callback,
+                )
+
+                logger.info(
+                    f"PERF: fast multi-step execution: "
+                    f"{perf_now() - execution_start:.3f}s"
+                )
+
+                logger.info(
+                    f"PERF: total command processing: "
+                    f"{perf_now() - command_start:.3f}s"
+                )
+
+                return result
+
+            logger.warning(
+                "JARVIS: Fast command returned an empty plan."
+            )
+
+            logger.info(
+                f"PERF: total command processing: "
+                f"{perf_now() - command_start:.3f}s"
+            )
+
+            return "done"
+
+        # ==================================================
+        # OLD SINGLE-STEP FAST COMMAND FORMAT
+        # ==================================================
+
+        elif (
+            isinstance(
+                fast_command,
+                tuple
+            )
+            and len(
+                fast_command
+            ) == 2
+        ):
+
+            tool_name, argument = fast_command
+
+            logger.info(
+                f"JARVIS: Fast command detected: "
+                f"{tool_name}"
+                + (
+                    f" ({argument})"
+                    if argument
+                    else ""
+                )
+            )
+
+            result = execute_fast_command(
+                tool_name,
+                argument,
+                user_input,
+                state,
+                speak_callback,
+            )
+
+            logger.info(
+                f"PERF: total command processing: "
+                f"{perf_now() - command_start:.3f}s"
+            )
+
+            return result
+
+        # ==================================================
+        # UNKNOWN FAST COMMAND FORMAT
+        # ==================================================
+
+        logger.warning(
+            "JARVIS: Fast command returned "
+            "an unsupported format."
+        )
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "done"
+
+    # ==================================================
+    # MEMORY ANALYSIS
+    # ==================================================
+
+    memory_analysis_start = perf_now()
+
+    run_memory_analysis_background(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: memory-analysis dispatch: "
+        f"{perf_now() - memory_analysis_start:.3f}s"
+    )
+
+    # ==================================================
+    # CREATIVE REQUEST
+    # ==================================================
+
+    creative_start = perf_now()
+
+    creative = is_creative_request(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: creative lookup: "
+        f"{perf_now() - creative_start:.3f}s"
+    )
+
+    if creative:
+
+        normal_start = perf_now()
+
+        result = handle_normal_conversation(
+            user_input,
+            state.active_context,
+            system_prompt,
+            speak_callback,
+        )
+
+        logger.info(
+            f"PERF: creative conversation: "
+            f"{perf_now() - normal_start:.3f}s"
+        )
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return result
+
+    # ==================================================
+    # CODE GENERATION
+    # ==================================================
+
+    code_check_start = perf_now()
+
+    code_request = is_code_request(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: code-request lookup: "
+        f"{perf_now() - code_check_start:.3f}s"
+    )
+
+    if code_request:
+
+        code_start = perf_now()
+
+        result = handle_code_generation(
+            user_input
+        )
+
+        logger.info(
+            f"PERF: code generation: "
+            f"{perf_now() - code_start:.3f}s"
+        )
+
+        conversation.add_message(
+            "assistant",
+            result,
+        )
+
+        logger.info(
+            f"JARVIS: {result}"
+        )
+
+        speak_start = perf_now()
+
+        interrupted = speak_callback(
+            result
+        )
+
+        logger.info(
+            f"PERF: code TTS: "
+            f"{perf_now() - speak_start:.3f}s"
+        )
+
+        if interrupted:
+
+            state.pending_input = (
+                _listen_after_barge_in()
+            )
+
+            if state.pending_input:
+                return "interrupted"
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return "done"
+
+    # ==================================================
+    # BUILD HISTORY
+    # ==================================================
+
+    history_start = perf_now()
+
+    history_text = ""
+
+    for message in conversation.get_recent(
+        limit=10
+    ):
+
+        role = message.get(
+            "role",
+            "",
+        )
+
+        content = message.get(
+            "content",
+            "",
+        )
+
+        if content:
+
+            history_text += (
+                f"{role.upper()}: "
+                f"{content}\n"
+            )
+
+    logger.info(
+        f"PERF: history build: "
+        f"{perf_now() - history_start:.3f}s"
+    )
+
+    # ==================================================
+    # CONTEXT RESOLUTION
+    # ==================================================
+
+    planning_input = user_input
+
+    context_check_start = perf_now()
+
+    needs_context = should_resolve_context(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: context check: "
+        f"{perf_now() - context_check_start:.3f}s"
+    )
+
+    if needs_context:
+
+        context_start = perf_now()
+
+        planning_input = resolve_followup(
+            user_input,
+            state.active_context.to_dict(),
+            history_text,
+        )
+
+        logger.info(
+            f"PERF: context resolution: "
+            f"{perf_now() - context_start:.3f}s"
+        )
+
+        if planning_input != user_input:
+
+            logger.info(
+                f"Context resolved: "
+                f"'{user_input}' -> "
+                f"'{planning_input}'"
+            )
+
+    # ==================================================
+    # AGENT CORE PLANNING
+    # ==================================================
+
+    planner_start = perf_now()
+
+    try:
+
+        agent_task = jarvis_agent.create_task(
+            planning_input,
+            state.active_context.to_dict(),
+        )
+
+        jarvis_agent.plan_task(
+            agent_task,
+            history_text=history_text,
+        )
+
+        steps = agent_task.steps
+
+    except Exception as e:
+
+        logger.error(
+            f"Agent Core planning error: {e}"
+        )
+
+        agent_task = None
+        steps = []
+
+    logger.info(
+        f"PERF: agent planning: "
+        f"{perf_now() - planner_start:.3f}s"
+    )
+    # ==================================================
+    # NORMAL CONVERSATION
+    # ==================================================
+
+    if not steps:
+
+        conversation_start = perf_now()
+
+        result = handle_normal_conversation(
+            planning_input,
+            state.active_context,
+            system_prompt,
+            speak_callback,
+        )
+
+        logger.info(
+            f"PERF: normal conversation: "
+            f"{perf_now() - conversation_start:.3f}s"
+        )
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        return result
+
+    # ==================================================
+    # EXECUTE AGENT TASK
+    # ==================================================
+
+    execution_start = perf_now()
+
+    if agent_task is None:
+
+        result = "I couldn't create a task for that request."
+
+    else:
+
+        result = jarvis_agent.execute_task(
+            agent_task,
+            state.active_context,
+            state.task_state,
+            speak_callback,
+        )
+
+    logger.info(
+        f"PERF: agent execution: {perf_now() - execution_start:.3f}s"
+    )
+
+    logger.info(
+        f"PERF: total command processing: {perf_now() - command_start:.3f}s"
+    )
+
+    return result
+
+
+# ============================================================
+# BARGE-IN
+# ============================================================
+
+def _listen_after_barge_in():
+    """
+    Listen for a command after TTS interruption.
+    """
+
+    try:
+
+        from speech import listen
+        from voice import (
+            get_interrupted_audio,
+            was_interrupted,
+        )
+
+        if not was_interrupted():
+
+            return None
+
+        logger.info(
+            "JARVIS: Barge-in detected."
+        )
+
+        interrupted_audio = (
+            get_interrupted_audio()
+        )
+
+        start = perf_now()
+
+        result = listen(
+            initial_audio=interrupted_audio,
+            mode="continuous",
+        )
+
+        logger.info(
+            f"PERF: barge-in transcription: "
+            f"{perf_now() - start:.3f}s"
+        )
+
+        if result:
+
+            logger.info(
+                f"JARVIS: Barge-in command captured: "
+                f"{result}"
+            )
+
+            return result
+
+        logger.info(
+            "JARVIS: Barge-in speech was not transcribed."
+        )
+
+        return None
+
+    except Exception as e:
+
+        logger.warning(
+            f"JARVIS: Barge-in listening error: {e}"
+        )
+
+        return None
+
+    finally:
+
+        try:
+
+            from voice import clear_interruption
+
+            clear_interruption()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    """Main JARVIS entry point."""
+
+    startup_start = perf_now()
+
+    # ==================================================
+    # INITIALIZATION
+    # ==================================================
+
+    create_memory()
+
+    profile = load_profile()
+
+    user_name = profile["name"]
+
+    context = JarvisContext()
+
+    system_prompt = build_system_prompt(
+        user_name,
+        context,
+        profile,
+    )
+
+    state = JarvisState()
+
+    conversation = ConversationHistory()
+
+    logger.info(
+        f"PERF: base initialization: "
+        f"{perf_now() - startup_start:.3f}s"
+    )
+
+    # ==================================================
+    # PRELOAD WHISPER
+    # ==================================================
+
+    whisper_start = perf_now()
+
+    try:
+
+        from speech import listen
+
+        logger.info(
+            "JARVIS: Preloading Whisper..."
+        )
+
+        logger.info(
+            "JARVIS: Whisper ready."
+        )
+
+        logger.info(
+            f"PERF: Whisper preload: "
+            f"{perf_now() - whisper_start:.3f}s"
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"JARVIS: Whisper initialization failed: {e}"
+        )
+
+        logger.info(
+            f"PERF: Whisper initialization failure: "
+            f"{perf_now() - whisper_start:.3f}s"
+        )
+
+        listen = None
+
+    # ==================================================
+    # ONLINE
+    # ==================================================
+
+    logger.info(
+        f"JARVIS online. Welcome back, "
+        f"{user_name}."
+    )
+
+    logger.info(
+        f"Project: "
+        f"{context._project_info['file_count']} files, "
+        f"languages: "
+        f"{context._project_info['languages']}"
+    )
+
+    logger.info(
+        f"PERF: startup initialization complete: "
+        f"{perf_now() - startup_start:.3f}s"
+    )
+
+    # ==================================================
+    # SPEAK FUNCTION
+    # ==================================================
+
+    def speak(
+        text: str,
+    ) -> bool:
+        """Speak text aloud."""
+
+        speak_start = perf_now()
+
+        try:
+
+            from voice import speak as voice_speak
+
+            result = voice_speak(
+                text
+            )
+
+            logger.info(
+                f"PERF: TTS call: "
+                f"{perf_now() - speak_start:.3f}s"
+            )
+
+            return result
+
+        except Exception as e:
+
+            logger.error(
+                f"Voice error: {e}"
+            )
+
+            logger.info(
+                f"PERF: failed TTS call: "
+                f"{perf_now() - speak_start:.3f}s"
+            )
+
+            return False
+
+    # ==================================================
+    # STARTUP MESSAGE
+    # ==================================================
+
+    speak(
+        f"Welcome back, "
+        f"{user_name}. "
+        f"JARVIS is online."
+    )
+
+    # ==================================================
+    # MAIN STATE MACHINE
+    # ==================================================
+
+    try:
+
+        while True:
+
+            # ------------------------------------------
+            # Pending barge-in command
+            # ------------------------------------------
+
+            if state.pending_input:
+
+                current_input = (
+                    state.pending_input
+                )
+
+                state.pending_input = None
+
+                process_start = perf_now()
+
+                result = process_command(
+                    current_input,
+                    state,
+                    conversation,
+                    system_prompt,
+                    speak,
+                )
+
+                logger.info(
+                    f"PERF: pending command total: "
+                    f"{perf_now() - process_start:.3f}s"
+                )
+
+                if result == "shutdown":
+
+                    break
+
+                continue
+
+            # ------------------------------------------
+            # Continuous conversation mode
+            # ------------------------------------------
+
+            if state.continuous_mode:
+
+                logger.info(
+                    "JARVIS: Listening for follow-up..."
+                )
+
+                if listen is None:
+
+                    logger.error(
+                        "JARVIS: Whisper is unavailable."
+                    )
+
+                    state.continuous_mode = False
+
+                    continue
+
+                try:
+
+                    listen_start = perf_now()
+
+                    current_input = listen(
+                        mode="continuous"
+                    )
+
+                    logger.info(
+                        f"PERF: follow-up listen/transcription: "
+                        f"{perf_now() - listen_start:.3f}s"
+                    )
+
+                except KeyboardInterrupt:
+
+                    state.continuous_mode = False
+
+                    logger.info(
+                        "JARVIS: Follow-up listening interrupted. "
+                        "Returning to wake-word mode."
+                    )
+
+                    continue
+
+                except Exception as e:
+
+                    logger.error(
+                        f"Listen error: {e}"
+                    )
+
+                    current_input = None
+
+                if current_input is None:
+
+                    state.continuous_mode = False
+
+                    logger.info(
+                        "JARVIS: Conversation timeout."
+                    )
+
+                    continue
+
+                result = process_command(
+                    current_input,
+                    state,
+                    conversation,
+                    system_prompt,
+                    speak,
+                )
+
+                if result == "shutdown":
+
+                    break
+
+                continue
+
+            # ------------------------------------------
+            # Wake-word mode
+            # ------------------------------------------
+
+            logger.info(
+                "JARVIS: Waiting for wake word..."
+            )
+
+            try:
+
+                from wakeword import (
+                    wait_for_wake_word
+                )
+
+                wake_start = perf_now()
+
+                triggered = (
+                    wait_for_wake_word()
+                )
+
+                logger.info(
+                    f"PERF: wake listener cycle: "
+                    f"{perf_now() - wake_start:.3f}s"
+                )
+
+            except Exception as e:
+
+                logger.error(
+                    f"Wake word error: {e}"
+                )
+
+                triggered = False
+
+            if not triggered:
+
+                continue
+
+            # ------------------------------------------
+            # Wake acknowledgement
+            # ------------------------------------------
+
+            interrupted = speak(
+                f"Yes, {user_name}?"
+            )
+
+            if interrupted:
+
+                state.pending_input = (
+                    _listen_after_barge_in()
+                )
+
+                if state.pending_input:
+
+                    state.continuous_mode = True
+
+                    continue
+
+            # ------------------------------------------
+            # First command
+            # ------------------------------------------
+
+            if listen is None:
+
+                logger.error(
+                    "JARVIS: Whisper is unavailable."
+                )
+
+                continue
+
+            try:
+
+                listen_start = perf_now()
+
+                current_input = listen(
+                    mode="wake"
+                )
+
+                logger.info(
+                    f"PERF: wake command "
+                    f"listen/transcription: "
+                    f"{perf_now() - listen_start:.3f}s"
+                )
+
+            except KeyboardInterrupt:
+
+                logger.info(
+                    "JARVIS: Command listening interrupted."
+                )
+
+                current_input = None
+
+            except Exception as e:
+
+                logger.error(
+                    f"Listen error: {e}"
+                )
+
+                current_input = None
+
+            if current_input is None:
+
+                logger.info(
+                    "JARVIS: No command heard."
+                )
+
+                continue
+
+            # ------------------------------------------
+            # Enter continuous mode
+            # ------------------------------------------
+
+            state.continuous_mode = True
+
+            process_start = perf_now()
+
+            result = process_command(
+                current_input,
+                state,
+                conversation,
+                system_prompt,
+                speak,
+            )
+
+            logger.info(
+                f"PERF: wake command total: "
+                f"{perf_now() - process_start:.3f}s"
+            )
+
+            if result == "shutdown":
+
+                break
+
+    except KeyboardInterrupt:
+
+        logger.info(
+            "JARVIS: Shutdown requested."
+        )
+
+        state.task_state.finish()
+
+        speak(
+            "Goodbye."
+        )
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+===== state.py =====
+"""
+JARVIS state management - replaces global variables in main.py.
+"""
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class ActiveContext:
+    """Tracks the current active task context for follow-up resolution."""
+    site: Optional[str] = None
+    last_query: Optional[str] = None
+    last_tool: Optional[str] = None
+    last_result: Optional[str] = None
+
+    def update(
+        self,
+        site: Optional[str] = None,
+        last_query: Optional[str] = None,
+        last_tool: Optional[str] = None,
+        last_result: Optional[str] = None
+    ) -> None:
+        """Update context fields. None means no change."""
+        if site is not None:
+            self.site = site
+        if last_query is not None:
+            self.last_query = last_query
+        if last_tool is not None:
+            self.last_tool = last_tool
+        if last_result is not None:
+            self.last_result = last_result
+
+    def clear(self) -> None:
+        """Reset all context fields."""
+        self.site = None
+        self.last_query = None
+        self.last_tool = None
+        self.last_result = None
+
+    def to_dict(self) -> Dict[str, Optional[str]]:
+        """Convert to dictionary."""
+        return {
+            "site": self.site,
+            "last_query": self.last_query,
+            "last_tool": self.last_tool,
+            "last_result": self.last_result,
+        }
+
+
+@dataclass
+class TaskState:
+    """Tracks the current task execution state."""
+    active: bool = False
+    cancelled: bool = False
+    description: Optional[str] = None
+    total_steps: int = 0
+    current_step: int = 0
+    current_tool: Optional[str] = None
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def start(self, description: str, total_steps: int) -> None:
+        """Start a new task."""
+        with self._lock:
+            self.active = True
+            self.cancelled = False
+            self.description = description
+            self.total_steps = total_steps
+            self.current_step = 0
+            self.current_tool = None
+
+    def update_step(self, step_number: int, tool_name: str) -> None:
+        """Update the current step progress."""
+        with self._lock:
+            self.current_step = step_number
+            self.current_tool = tool_name
+
+    def cancel(self) -> None:
+        """Mark the current task as cancelled."""
+        with self._lock:
+            self.cancelled = True
+
+    def finish(self) -> None:
+        """Mark the current task as finished."""
+        with self._lock:
+            self.active = False
+            self.cancelled = False
+            self.description = None
+            self.total_steps = 0
+            self.current_step = 0
+            self.current_tool = None
+
+    def is_cancelled(self) -> bool:
+        """Check if the task has been cancelled."""
+        with self._lock:
+            return self.cancelled
+
+    def is_active(self) -> bool:
+        """Check if a task is currently active."""
+        with self._lock:
+            return self.active
+
+
+class JarvisState:
+    """Centralized state for JARVIS."""
+
+    def __init__(self) -> None:
+        self.active_context = ActiveContext()
+        self.task_state = TaskState()
+        self.pending_input: Optional[str] = None
+        self.continuous_mode: bool = False
+
+    def reset(self) -> None:
+        """Reset all state."""
+        self.active_context.clear()
+        self.task_state.finish()
+        self.pending_input = None
+        self.continuous_mode = False
+
+===== jarvis_core/orchestrator.py =====
+"""
+JARVIS Conversation Orchestrator - Multi-agent conversation management.
+"""
+import asyncio
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
+from jarvis_core.config.settings import get_settings
+from jarvis_core.utils.logging import get_logger
+from jarvis_core.utils.types import (
+    Agent,
+    Context,
+    Message,
+    MessageRole,
+    Task,
+    TaskStatus,
+    Tool,
+    ToolCall,
+    ToolProvider,
+    ToolResult,
+    ToolResultStatus,
+    get_event_bus,
+)
+
+logger = get_logger(__name__)
+
+
+class AgentRole(str, Enum):
+    PLANNER = "planner"
+    REASONER = "reasoner"
+    PERSONA = "persona"
+    MEMORY = "memory"
+    CRITIC = "critic"
+    EXECUTOR = "executor"
+    SELF_IMPROVEMENT = "self_improvement"
+
+
+@dataclass
+class AgentState:
+    agent: Agent
+    role: AgentRole
+    enabled: bool = True
+    last_active: datetime = field(default_factory=datetime.now)
+    metrics: Dict[str, float] = field(default_factory=dict)
+
+
+class ConversationOrchestrator:
+    def __init__(self):
+        self.agents: Dict[AgentRole, AgentState] = {}
+        self.tool_providers: List[ToolProvider] = []
+        self.tools: Dict[str, Tool] = {}
+        self.context: Optional[Context] = None
+        self.event_bus = get_event_bus()
+        self._running = False
+        self._task_queue: asyncio.Queue = asyncio.Queue()
+        self._response_queue: asyncio.Queue = asyncio.Queue()
+        self._background_tasks: List[asyncio.Task] = []
+
+    async def initialize(self) -> None:
+        logger.info("Initializing Conversation Orchestrator")
+        await self._register_default_agents()
+        await self._register_default_tools()
+        self._running = True
+        self._background_tasks.append(asyncio.create_task(self._process_queue()))
+        logger.info("Conversation Orchestrator initialized")
+
+    async def shutdown(self) -> None:
+        logger.info("Shutting down Conversation Orchestrator")
+        self._running = False
+        for task in self._background_tasks:
+            task.cancel()
+        await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        for provider in self.tool_providers:
+            await provider.shutdown()
+        for state in self.agents.values():
+            await state.agent.shutdown()
+        logger.info("Conversation Orchestrator shutdown complete")
+
+    async def _register_default_agents(self) -> None:
+        from jarvis_core.agents.critic_agent import CriticAgent
+        from jarvis_core.agents.executor_agent import ExecutorAgent
+        from jarvis_core.agents.memory_agent import MemoryAgent
+        from jarvis_core.agents.persona_agent import PersonaAgent
+        from jarvis_core.agents.planner_agent import PlannerAgent
+        from jarvis_core.agents.reasoner_agent import ReasonerAgent
+        from jarvis_core.agents.self_improvement_agent import SelfImprovementAgent
+
+        agents = [
+            (AgentRole.PLANNER, PlannerAgent()),
+            (AgentRole.REASONER, ReasonerAgent()),
+            (AgentRole.PERSONA, PersonaAgent()),
+            (AgentRole.MEMORY, MemoryAgent()),
+            (AgentRole.CRITIC, CriticAgent()),
+            (AgentRole.EXECUTOR, ExecutorAgent()),
+            (AgentRole.SELF_IMPROVEMENT, SelfImprovementAgent()),
+        ]
+
+        for role, agent in agents:
+            await agent.initialize()
+            self.agents[role] = AgentState(agent=agent, role=role)
+            logger.debug(f"Registered agent: {role.value}")
+
+    async def _register_default_tools(self) -> None:
+        from jarvis_core.plugins.code_tools import CodeToolsPlugin
+        from jarvis_core.plugins.file_tools import FileToolsPlugin
+        from jarvis_core.plugins.screen_tools import ScreenToolsPlugin
+        from jarvis_core.plugins.system_tools import SystemToolsPlugin
+        from jarvis_core.plugins.web_tools import WebToolsPlugin
+
+        providers = [
+            FileToolsPlugin(),
+            WebToolsPlugin(),
+            SystemToolsPlugin(),
+            ScreenToolsPlugin(),
+            CodeToolsPlugin(),
+        ]
+
+        for provider in providers:
+            await provider.initialize()
+            self.tool_providers.append(provider)
+            for tool in provider.get_tools():
+                self.tools[tool.name] = tool
+                logger.debug(f"Registered tool: {tool.name}")
+
+    def register_tool(self, tool: Tool) -> None:
+        self.tools[tool.name] = tool
+        logger.debug(f"Registered tool: {tool.name}")
+
+    def register_agent(self, role: AgentRole, agent: Agent) -> None:
+        asyncio.create_task(agent.initialize())
+        self.agents[role] = AgentState(agent=agent, role=role)
+        logger.info(f"Registered custom agent: {role.value}")
+
+    async def trigger_self_evaluation(self) -> Dict[str, Any]:
+        state = self.agents.get(AgentRole.SELF_IMPROVEMENT)
+        if not state or not state.enabled:
+            return {"error": "SelfImprovementAgent not available"}
+        result = await state.agent.process({"action": "evaluate"}, self.context or Context(
+            conversation_id="self-improvement", user_id="system"
+        ))
+        state.last_active = datetime.now()
+        return result
+
+    async def get_self_improvement_status(self) -> Dict[str, Any]:
+        state = self.agents.get(AgentRole.SELF_IMPROVEMENT)
+        if not state or not state.enabled:
+            return {"error": "SelfImprovementAgent not available"}
+        result = await state.agent.process({"action": "status"}, self.context or Context(
+            conversation_id="self-improvement", user_id="system"
+        ))
+        return result
+
+    async def record_user_feedback(self, feedback: str) -> None:
+        """Publish a user_feedback event for the SelfImprovementAgent to collect."""
+        if not feedback:
+            return
+        settings = get_settings()
+        if not settings.self_improvement.feedback_enabled:
+            return
+        await self.event_bus.publish("user_feedback", {"feedback": feedback})
+
+    async def process_message(self, user_input: str, context: Context) -> AsyncGenerator[str, None]:
+        self.context = context
+        corr_id = str(uuid.uuid4())[:8]
+        set_correlation_id(corr_id)
+
+        try:
+            user_message = Message(role=MessageRole.USER, content=user_input)
+            context.recent_messages.append(user_message)
+
+            await self.event_bus.publish("message_received", {"message": user_message.to_dict()})
+
+            plan = await self._plan(user_input, context)
+            if not plan:
+                async for chunk in self._converse(user_input, context):
+                    yield chunk
+                return
+
+            async for chunk in self._execute_plan(plan, context):
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"Error processing message: {e}", exc_info=True)
+            yield f"I encountered an error: {str(e)}"
+        finally:
+            set_correlation_id(None)
+
+    async def _plan(self, user_input: str, context: Context) -> Optional[List[ToolCall]]:
+        planner_state = self.agents.get(AgentRole.PLANNER)
+        if not planner_state or not planner_state.enabled:
+            return None
+
+        try:
+            plan = await planner_state.agent.process({
+                "user_input": user_input,
+                "context": context,
+                "available_tools": {name: tool.description for name, tool in self.tools.items()},
+            }, context)
+
+            if plan and isinstance(plan, list):
+                for step in plan:
+                    planner_state.last_active = datetime.now()
+                return plan
+        except Exception as e:
+            logger.error(f"Planner error: {e}")
+
+        return None
+
+    async def _execute_plan(self, plan: List[ToolCall], context: Context) -> AsyncGenerator[str, None]:
+        executor_state = self.agents.get(AgentRole.EXECUTOR)
+        if not executor_state:
+            yield "Executor agent not available"
+            return
+
+        task = Task(
+            task_id=str(uuid.uuid4()),
+            description=f"Execute plan with {len(plan)} steps",
+            steps=plan,
+            status=TaskStatus.RUNNING,
+        )
+        context.active_task = task
+
+        for i, step in enumerate(plan):
+            if task.status == TaskStatus.CANCELLED:
+                yield "Task cancelled"
+                break
+
+            yield f"Step {i+1}/{len(plan)}: {step.tool_name}"
+
+            tool = self.tools.get(step.tool_name)
+            if not tool:
+                error_result = ToolResult(
+                    call_id=step.call_id,
+                    tool_name=step.tool_name,
+                    status=ToolResultStatus.ERROR,
+                    error=f"Unknown tool: {step.tool_name}",
+                )
+                task.results.append(error_result)
+                continue
+
+            try:
+                result = await tool.execute(step.arguments, context)
+                task.results.append(result)
+                planner_state = self.agents.get(AgentRole.PLANNER)
+                if planner_state:
+                    await planner_state.agent.process({"tool_result": result.to_dict()}, context)
+
+                if result.status == ToolResultStatus.ERROR:
+                    task.status = TaskStatus.FAILED
+                    task.error = result.error
+                    yield f"Step failed: {result.error}"
+                    break
+
+                yield str(result.result) if result.result else "Done"
+
+            except Exception as e:
+                logger.error(f"Tool execution error: {e}")
+                error_result = ToolResult(
+                    call_id=step.call_id,
+                    tool_name=step.tool_name,
+                    status=ToolResultStatus.ERROR,
+                    error=str(e),
+                )
+                task.results.append(error_result)
+
+        task.status = TaskStatus.COMPLETED if task.status != TaskStatus.FAILED else TaskStatus.FAILED
+        task.completed_at = datetime.now()
+        context.active_task = None
+
+        await self.event_bus.publish("task_completed", {"task": task.to_dict()})
+
+    async def _converse(self, user_input: str, context: Context) -> AsyncGenerator[str, None]:
+        reasoner_state = self.agents.get(AgentRole.REASONER)
+        persona_state = self.agents.get(AgentRole.PERSONA)
+        memory_state = self.agents.get(AgentRole.MEMORY)
+        critic_state = self.agents.get(AgentRole.CRITIC)
+
+        memory_context = ""
+        if memory_state:
+            memories = await memory_state.agent.process({"query": user_input}, context)
+            if memories:
+                memory_context = f"\nRelevant memories:\n{memories}"
+
+        system_prompt = self._build_system_prompt(context, memory_context)
+
+        messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
+        messages.extend(context.recent_messages[-10:])
+        messages.append(Message(role=MessageRole.USER, content=user_input))
+
+        full_response = ""
+        if reasoner_state:
+            async for chunk in self._stream_reasoning(reasoner_state, messages, context):
+                full_response += chunk
+                yield chunk
+
+        if critic_state:
+            critique = await critic_state.agent.process({
+                "response": full_response,
+                "context": context,
+            }, context)
+            if critique and critique.get("needs_revision"):
+                revised_messages = messages + [Message(role=MessageRole.ASSISTANT, content=full_response)]
+                full_response = ""
+                async for chunk in self._stream_reasoning(reasoner_state, revised_messages, context):
+                    full_response += chunk
+                    yield chunk
+
+        if persona_state:
+            styled = await persona_state.agent.process({
+                "response": full_response,
+                "context": context,
+            }, context)
+            if styled:
+                full_response = styled
+
+        context.recent_messages.append(Message(role=MessageRole.ASSISTANT, content=full_response))
+
+        await self.event_bus.publish("response_generated", {
+            "response": full_response,
+            "context_id": context.conversation_id,
+        })
+
+    async def _stream_reasoning(
+        self, agent_state: AgentState, messages: List[Message], context: Context
+    ) -> AsyncGenerator[str, None]:
+        try:
+            result = await agent_state.agent.process({
+                "messages": [m.to_dict() for m in messages],
+                "tools": {name: tool.description for name, tool in self.tools.items()},
+            }, context)
+
+            if isinstance(result, dict) and "content" in result:
+                content = result["content"]
+                if isinstance(content, str):
+                    for chunk in self._chunk_text(content):
+                        yield chunk
+                else:
+                    yield str(content)
+            else:
+                yield str(result)
+        except Exception as e:
+            logger.error(f"Reasoning error: {e}")
+            yield f"I encountered an error while thinking: {str(e)}"
+
+    def _chunk_text(self, text: str, chunk_size: int = 50) -> List[str]:
+        words = text.split()
+        chunks = []
+        current = []
+        current_len = 0
+
+        for word in words:
+            if current_len + len(word) + 1 > chunk_size and current:
+                chunks.append(" ".join(current))
+                current = [word]
+                current_len = len(word)
+            else:
+                current.append(word)
+                current_len += len(word) + 1
+
+        if current:
+            chunks.append(" ".join(current))
+        return chunks
+
+    def _build_system_prompt(self, context: Context, memory_context: str) -> str:
+        settings = get_settings()
+        persona = settings.persona
+
+        prompt_parts = [
+            "You are JARVIS, a personal AI assistant and software engineering expert.",
+            f"Persona: {persona.name} (formality: {persona.formality}, verbosity: {persona.verbosity}, humor: {persona.humor})",
+            f"Response style: {persona.response_style}",
+            f"User: {context.user_preferences.get('name', 'User')}",
+        ]
+
+        if memory_context:
+            prompt_parts.append(memory_context)
+
+        if context.active_window:
+            prompt_parts.append(f"Active window: {context.active_window}")
+
+        if context.screen_context:
+            prompt_parts.append(f"Screen context: {context.screen_context}")
+
+        prompt_parts.extend([
+            "Keep answers concise unless the user asks for more detail.",
+            "Address the user naturally when appropriate.",
+            "Use saved memories and recent conversation context when relevant.",
+            "Do not pretend to have completed an action unless a tool actually completed it.",
+            "When a tool has completed an action, treat that result as part of the conversation context.",
+            "You can help with software engineering tasks across multiple languages.",
+        ])
+
+        return "\n\n".join(prompt_parts)
+
+    async def _process_queue(self) -> None:
+        while self._running:
+            try:
+                item = await asyncio.wait_for(self._task_queue.get(), timeout=1.0)
+                await self._handle_queued_task(item)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Queue processing error: {e}")
+
+    async def _handle_queued_task(self, item: Dict[str, Any]) -> None:
+        pass
+
+
+def set_correlation_id(corr_id: Optional[str]) -> None:
+    from jarvis_core.utils.logging import set_correlation_id as _set
+    _set(corr_id)
+
+
+===== jarvis_core/agents/planner_agent.py =====
+"""
+JARVIS Planner Agent - Task decomposition and tool selection.
+"""
+import json
+from typing import Any
+
+from jarvis_core.config.settings import get_settings
+from jarvis_core.utils.logging import get_logger
+from jarvis_core.utils.types import Agent, Context
+
+logger = get_logger(__name__)
+
+
+PLANNER_PROMPT = """
+You are JARVIS's task planner - an expert software engineer and systems architect.
+
+Your job: convert a user request into a list of tool calls.
+
+If the request needs no tool (a question, chit-chat, opinion, or something you'd just answer in conversation), return an empty list.
+
+Available tools:
+{tool_list}
+
+Rules:
+1. Return ONLY JSON. No explanation.
+2. Every step must use exactly one tool name from the list above.
+3. "arguments" must always be an object matching the tool's parameters.
+4. For complex requests, break them into multiple steps.
+5. Never invent a tool name that isn't in the list.
+6. If unsure whether a tool applies, return an empty list instead of guessing.
+7. When generating code, include ALL necessary files.
+8. Prefer single HTML files for web apps (embed CSS/JS).
+9. For multi-file projects, order steps logically (styles before scripts).
+10. Consider dependencies between steps - later steps can reference results from earlier steps using {{step_N.result}}.
+
+Output format:
+{
+  "goal": "brief description of the overall goal",
+  "steps": [
+    {"tool": "tool_name", "arguments": {...}, "description": "what this step does"},
+    ...
+  ]
+}
+
+Examples:
+
+User: "What's the weather in Chicago?"
+Output:
+{
+  "goal": "check weather",
+  "steps": [
+    {"tool": "weather", "arguments": {"location": "Chicago"}, "description": "Get current weather for Chicago"}
+  ]
+}
+
+User: "Create a todo app with HTML, CSS, and JavaScript"
+Output:
+{
+  "goal": "create todo app",
+  "steps": [
+    {"tool": "write_file", "arguments": {"path": "todo.html", "content": "<!DOCTYPE html>..."}, "description": "Create main HTML file"},
+    {"tool": "write_file", "arguments": {"path": "styles.css", "content": "#app { max-width: 400px; }"}, "description": "Create stylesheet"},
+    {"tool": "write_file", "arguments": {"path": "app.js", "content": "const app = ...", "description": "Create JavaScript logic"}
+  ]
+}
+
+User: "Search YouTube for Iron Man trailer"
+Output:
+{
+  "goal": "search youtube",
+  "steps": [
+    {"tool": "search_website", "arguments": {"site": "youtube", "query": "Iron Man trailer"}, "description": "Search YouTube for Iron Man trailer"}
+  ]
+}
+
+User: "Tell me a joke"
+Output:
+{
+  "goal": "conversation",
+  "steps": []
+}
+"""
+
+
+class PlannerAgent(Agent):
+    name = "planner"
+    description = "Task planning and tool selection"
+
+    def __init__(self):
+        self._model = None
+
+    async def initialize(self) -> None:
+        from ollama import AsyncClient
+        settings = get_settings()
+        self._client = AsyncClient(host=settings.models.ollama_host)
+        self._model = settings.models.planner_model
+        logger.debug("PlannerAgent initialized")
+
+    async def shutdown(self) -> None:
+        pass
+
+    async def process(self, input_data: Any, context: Context) -> Any:
+        user_input = input_data.get("user_input", "")
+        available_tools = input_data.get("available_tools", {})
+
+        if not user_input.strip():
+            return []
+
+        tool_list = "\n".join(
+            f"{name}: {desc}"
+            for name, desc in available_tools.items()
+        )
+
+        prompt = PLANNER_PROMPT.format(tool_list=tool_list)
+
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_input},
+        ]
+
+        try:
+            response = await self._client.chat(
+                model=self._model,
+                messages=messages,
+                format="json",
+                options={"temperature": 0.1},
+            )
+
+            content = response.get("message", {}).get("content", "")
+            plan = json.loads(content)
+
+            if not isinstance(plan, dict) or "steps" not in plan:
+                logger.warning(f"Invalid plan format: {plan}")
+                return []
+
+            steps = plan.get("steps", [])
+            validated_steps = []
+
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+
+                tool_name = step.get("tool")
+                arguments = step.get("arguments", {})
+
+                if tool_name not in available_tools:
+                    logger.warning(f"Planner selected unknown tool: {tool_name}")
+                    continue
+
+                validated_steps.append({
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "description": step.get("description", ""),
+                    "call_id": f"call_{i}",
+                })
+
+            return validated_steps
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Planner returned invalid JSON: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Planner error: {e}")
+            return []

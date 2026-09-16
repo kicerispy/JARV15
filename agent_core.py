@@ -1,14 +1,25 @@
-﻿"""
+"""
 JARVIS Agent Core
 
-High-level orchestration layer.
+Autonomous task orchestration layer.
 
-The Agent Core owns:
-- task creation
-- planning
-- task metadata
-- agent state
-- high-level results
+Flow:
+
+    request
+       ↓
+     plan
+       ↓
+    execute
+       ↓
+    observe
+       ↓
+    success? ── yes ──> completed
+       │
+       no
+       ↓
+     replan
+       ↓
+    execute again
 
 The existing tool_executor.py remains responsible for:
 - executing tools
@@ -40,10 +51,20 @@ from state import ActiveContext, TaskState
 class AgentStep:
     tool: str
     argument: str = ""
+
+    description: str = ""
+
     status: str = "pending"
+
     attempts: int = 0
+
     result: Any = None
+
     error: Optional[str] = None
+
+    verified: bool = False
+
+    observation: str = ""
 
 
 # ==========================================================
@@ -72,6 +93,16 @@ class AgentTask:
 
     execution_result: Any = None
 
+    observations: List[str] = field(
+        default_factory=list
+    )
+
+    replan_count: int = 0
+
+    max_replans: int = 2
+
+    current_step: int = -1
+
     created_at: float = field(
         default_factory=time.time
     )
@@ -86,6 +117,55 @@ class AgentTask:
 # ==========================================================
 # JARVIS Agent
 # ==========================================================
+
+
+# ============================================================
+# Browser State Observation Helpers
+# ============================================================
+
+BROWSER_STATE_TOOLS = {
+    "browser_connect",
+    "browser_search_google",
+    "browser_search_bing",
+    "browser_click_first_bing_result",
+    "browser_goto",
+    "browser_page_info",
+}
+
+
+def _is_browser_trace(trace):
+    for entry in trace or []:
+        tool = str(entry.get("tool", "")).strip()
+
+        if tool in BROWSER_STATE_TOOLS:
+            return True
+
+    return False
+
+
+def _capture_browser_state():
+    try:
+        from browser_controller import browser_page_info
+
+        result = browser_page_info()
+
+        if not isinstance(result, dict):
+            return {
+                "success": False,
+                "error": (
+                    "browser_page_info returned "
+                    "a non-dict result"
+                ),
+            }
+
+        return result
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
 
 class JarvisAgent:
 
@@ -107,6 +187,7 @@ class JarvisAgent:
             "last_result": None,
             "last_status": "",
             "last_error": None,
+            "replans": 0,
         }
 
     # ======================================================
@@ -122,7 +203,9 @@ class JarvisAgent:
     ) -> AgentTask:
 
         task = AgentTask(
-            task_id=str(uuid.uuid4()),
+            task_id=str(
+                uuid.uuid4()
+            ),
             request=str(
                 request or ""
             ).strip(),
@@ -141,7 +224,68 @@ class JarvisAgent:
             "last_error"
         ] = None
 
+        self.state[
+            "replans"
+        ] = 0
+
         return task
+
+    # ======================================================
+    # Build Steps
+    # ======================================================
+
+    def _build_steps(
+        self,
+        plan: Dict[str, Any],
+    ) -> List[AgentStep]:
+
+        steps: List[AgentStep] = []
+
+        for step in plan.get(
+            "steps",
+            [],
+        ):
+
+            if not isinstance(
+                step,
+                dict,
+            ):
+                continue
+
+            tool = str(
+                step.get(
+                    "tool",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            argument = str(
+                step.get(
+                    "argument",
+                    "",
+                )
+                or ""
+            )
+
+            if not tool:
+                continue
+
+            steps.append(
+                AgentStep(
+                    tool=tool,
+                    argument=argument,
+                    description=str(
+                        step.get(
+                            "description",
+                            "",
+                        )
+                        or ""
+                    ),
+                )
+            )
+
+        return steps
 
     # ======================================================
     # Planning
@@ -151,9 +295,16 @@ class JarvisAgent:
         self,
         task: AgentTask,
         history_text: str = "",
+        planning_request: Optional[str] = None,
     ) -> AgentTask:
 
         task.status = "planning"
+
+        request_for_planner = (
+            planning_request
+            if planning_request is not None
+            else task.request
+        )
 
         logger.info(
             "JARVIS AGENT: Planning task "
@@ -163,7 +314,7 @@ class JarvisAgent:
         try:
 
             plan = self.planner(
-                task.request,
+                request_for_planner,
                 active_context=(
                     task.active_context
                 ),
@@ -184,31 +335,9 @@ class JarvisAgent:
                 or ""
             )
 
-            task.steps = [
-                AgentStep(
-                    tool=str(
-                        step.get(
-                            "tool",
-                            "",
-                        )
-                    ),
-                    argument=str(
-                        step.get(
-                            "argument",
-                            "",
-                        )
-                        or ""
-                    ),
-                )
-                for step in plan.get(
-                    "steps",
-                    [],
-                )
-                if isinstance(
-                    step,
-                    dict,
-                )
-            ]
+            task.steps = self._build_steps(
+                plan
+            )
 
             self.state[
                 "last_goal"
@@ -223,11 +352,19 @@ class JarvisAgent:
 
             task.status = "failed"
 
-            task.error = str(exc)
+            task.error = str(
+                exc
+            )
 
             self.state[
                 "last_error"
-            ] = str(exc)
+            ] = str(
+                exc
+            )
+
+            self.state[
+                "last_status"
+            ] = task.status
 
             return task
 
@@ -272,7 +409,499 @@ class JarvisAgent:
         return task
 
     # ======================================================
-    # Execute Existing Plan
+    # Build Replan Request
+    # ======================================================
+
+    def _build_replan_request(
+        self,
+        task: AgentTask,
+    ) -> str:
+
+        lines = [
+            "Replan the task below because the previous plan "
+            "did not complete successfully.",
+            "",
+            f"Original request: {task.request}",
+            f"Goal: {task.goal}",
+            "",
+            "Previous observations:",
+        ]
+
+        if task.observations:
+            for observation in task.observations:
+                lines.append(
+                    f"- {observation}"
+                )
+        else:
+            lines.append(
+                "- No reliable observation was recorded."
+            )
+
+        # Include current browser state when available.
+        browser_state = task.active_context.get(
+            "browser_state",
+            {},
+        )
+
+        if isinstance(browser_state, dict):
+
+            if browser_state.get("success"):
+                lines.extend(
+                    [
+                        "",
+                        "Current browser state:",
+                        (
+                            "URL: "
+                            f"{browser_state.get('url', '')}"
+                        ),
+                        (
+                            "Title: "
+                            f"{browser_state.get('title', '')}"
+                        ),
+                    ]
+                )
+
+                pages = browser_state.get("pages")
+
+                if isinstance(pages, list) and pages:
+                    lines.append(
+                        "Open browser pages:"
+                    )
+
+                    for page in pages:
+                        if not isinstance(page, dict):
+                            continue
+
+                        page_url = page.get(
+                            "url",
+                            "",
+                        )
+
+                        page_title = page.get(
+                            "title",
+                            "",
+                        )
+
+                        lines.append(
+                            f"- {page_title!r} — "
+                            f"{page_url!r}"
+                        )
+
+            elif browser_state.get("error"):
+                lines.extend(
+                    [
+                        "",
+                        "Browser state observation error:",
+                        str(
+                            browser_state.get(
+                                "error"
+                            )
+                        ),
+                    ]
+                )
+
+        lines.extend(
+            [
+                "",
+                "Previous execution result:",
+                str(
+                    task.execution_result
+                    or ""
+                ),
+                "",
+                "Previous error:",
+                str(
+                    task.error
+                    or ""
+                ),
+                "",
+                "Create a new plan that attempts to "
+                "complete the original goal from the "
+                "current computer state.",
+            ]
+        )
+
+        return "\n".join(lines)
+
+    # ======================================================
+    # Record Execution Observation
+    # ======================================================
+
+    def _record_execution_observation(
+        self,
+        task: AgentTask,
+        attempt: int,
+        execution_result: Any,
+    ) -> None:
+        """
+        Record execution observations and capture actual
+        browser state whenever browser tools were involved.
+        """
+        from tool_executor import get_last_execution_trace
+
+        trace = get_last_execution_trace()
+
+        result_text = str(execution_result)
+
+        # Overall execution result.
+        task.observations.append(
+            f"Execution attempt {attempt}: {result_text}"
+        )
+
+        # Structured step observations.
+        for entry in trace:
+            index = entry.get("index", -1)
+            tool = entry.get("tool", "")
+            argument = entry.get("argument", "")
+            status = entry.get("status", "")
+            verified = entry.get("verified", False)
+            message = entry.get("message", "")
+            success = entry.get("success")
+
+            if success is True:
+                outcome = "completed"
+            elif success is False:
+                outcome = "failed"
+            else:
+                outcome = status or "unknown"
+
+            verification = (
+                "verified"
+                if verified
+                else "unverified"
+            )
+
+            detail = (
+                f"Execution attempt {attempt}: "
+                f"Step {index + 1} {tool}"
+            )
+
+            if argument:
+                detail += f"({argument})"
+
+            detail += (
+                f" {outcome} {verification}"
+            )
+
+            if message:
+                detail += f" — {message}"
+
+            task.observations.append(detail)
+
+        # Capture actual browser state.
+        if _is_browser_trace(trace):
+            browser_state = _capture_browser_state()
+
+            task.active_context["browser_state"] = (
+                browser_state
+            )
+
+            if browser_state.get("success"):
+                url = browser_state.get("url", "")
+                title = browser_state.get("title", "")
+
+                task.active_context["browser_url"] = url
+                task.active_context["browser_title"] = title
+
+                task.observations.append(
+                    "Browser state after execution: "
+                    f"title={title!r}, url={url!r}"
+                )
+
+            else:
+                error = browser_state.get(
+                    "error",
+                    "Unknown browser-state error",
+                )
+
+                task.observations.append(
+                    "Browser state observation failed: "
+                    f"{error}"
+                )
+
+    def _apply_step_status(
+        self,
+        task: AgentTask,
+        success: bool,
+        result: Any,
+    ) -> None:
+
+        result_text = str(
+            result
+            or ""
+        ).strip()
+
+        # ----------------------------------------------------
+        # Prefer exact per-step execution trace.
+        # ----------------------------------------------------
+
+        try:
+
+            from tool_executor import (
+                get_last_execution_trace,
+            )
+
+            trace = get_last_execution_trace()
+
+        except Exception:
+
+            trace = []
+
+        if trace:
+
+            for entry in trace:
+
+                raw_index = entry.get(
+                    "index",
+                    0,
+                )
+
+                try:
+                    index = int(
+                        raw_index
+                    ) - 1
+                except Exception:
+                    continue
+
+                if index < 0 or index >= len(
+                    task.steps
+                ):
+                    continue
+
+                step = task.steps[index]
+
+                step.attempts += 1
+
+                step.result = entry.get(
+                    "result"
+                )
+
+                step.observation = str(
+                    entry.get(
+                        "message",
+                        "",
+                    )
+                    or ""
+                )
+
+                step.verified = bool(
+                    entry.get(
+                        "verified",
+                        False,
+                    )
+                )
+
+                entry_success = bool(
+                    entry.get(
+                        "success",
+                        False,
+                    )
+                )
+
+                entry_status = str(
+                    entry.get(
+                        "status",
+                        "",
+                    )
+                ).lower()
+
+                if (
+                    entry_success
+                    and entry_status != "failed"
+                ):
+
+                    step.status = "completed"
+
+                    if not step.verified:
+                        step.verified = True
+
+                    step.error = None
+
+                else:
+
+                    step.status = "failed"
+
+                    step.error = str(
+                        entry.get(
+                            "message",
+                            result_text,
+                        )
+                        or result_text
+                    )
+
+                task.current_step = index
+
+            return
+
+        # ----------------------------------------------------
+        # Legacy fallback.
+        #
+        # Only mark the final step rather than every step.
+        # This prevents one failure from incorrectly marking
+        # the entire plan as failed.
+        # ----------------------------------------------------
+
+        if task.steps:
+
+            index = min(
+                max(
+                    task.current_step,
+                    0,
+                ),
+                len(task.steps) - 1,
+            )
+
+            step = task.steps[index]
+
+            task.current_step = index
+            step.attempts += 1
+            step.result = result
+            step.observation = result_text
+
+            if success:
+
+                step.status = "completed"
+                step.verified = True
+                step.error = None
+
+            else:
+
+                step.status = "failed"
+                step.error = result_text
+
+    # ======================================================
+    # Execute Plan Once
+    # ======================================================
+
+    def _execute_once(
+        self,
+        task: AgentTask,
+        active_context,
+        task_state,
+        speak_callback,
+    ) -> str:
+
+        if not task.planner_result:
+            return "failed"
+
+        task.status = "executing"
+
+        logger.info(
+            "JARVIS AGENT: Executing plan "
+            f"(attempt={task.replan_count + 1})"
+        )
+
+        # The executor processes the complete plan, but keep
+        # a sensible current-step baseline for legacy fallback.
+        task.current_step = 0
+
+        try:
+
+            result = self.executor(
+                task.planner_result,
+                active_context,
+                task_state,
+                speak_callback,
+            )
+
+            task.execution_result = result
+
+            result_text = str(
+                result
+                or ""
+            ).strip().lower()
+
+            self._record_execution_observation(
+                task,
+                result,
+            )
+
+            if result_text == "cancelled":
+
+                task.status = "cancelled"
+
+                for step in task.steps:
+
+                    if step.status in {
+                        "pending",
+                        "executing",
+                    }:
+                        step.status = "cancelled"
+
+                return "cancelled"
+
+            if result_text == "interrupted":
+
+                task.status = "failed"
+
+                task.error = (
+                    "Execution was interrupted."
+                )
+
+                return "failed"
+
+            if result_text == "failed":
+
+                self._apply_step_status(
+                    task,
+                    success=False,
+                    result=result,
+                )
+
+                task.error = str(
+                    result
+                )
+
+                return "failed"
+
+            if result_text == "done":
+
+                self._apply_step_status(
+                    task,
+                    success=True,
+                    result=result,
+                )
+
+                return "done"
+
+            self._apply_step_status(
+                task,
+                success=False,
+                result=result,
+            )
+
+            task.error = (
+                "Executor returned an "
+                "unexpected result."
+            )
+
+            return "failed"
+
+        except Exception as exc:
+
+            logger.exception(
+                "JARVIS AGENT: "
+                "Execution failed"
+            )
+
+            task.execution_result = str(
+                exc
+            )
+
+            task.error = str(
+                exc
+            )
+
+            self._apply_step_status(
+                task,
+                success=False,
+                result=exc,
+            )
+
+            return "failed"
+
+    # ======================================================
+    # Autonomous Execute
     # ======================================================
 
     def execute_task(
@@ -281,6 +910,7 @@ class JarvisAgent:
         active_context,
         task_state,
         speak_callback,
+        history_text: str = "",
     ) -> AgentTask:
 
         if task.status in {
@@ -291,115 +921,168 @@ class JarvisAgent:
             return task
 
         if not task.planner_result:
-            task.status = "failed"
-            task.error = "No valid planner result."
 
-            self.state["last_status"] = task.status
-            self.state["last_error"] = task.error
+            task.status = "failed"
+
+            task.error = (
+                "No valid planner result."
+            )
+
+            self.state[
+                "last_status"
+            ] = task.status
+
+            self.state[
+                "last_error"
+            ] = task.error
 
             return task
 
-        task.status = "executing"
-        task.started_at = time.time()
-
-        logger.info(
-            "JARVIS AGENT: "
-            "Handing task to existing executor."
+        task.started_at = (
+            task.started_at
+            or time.time()
         )
 
-        try:
+        while True:
 
-            task.execution_result = self.executor(
-                task.planner_result,
+            result = self._execute_once(
+                task,
                 active_context,
                 task_state,
                 speak_callback,
             )
 
-            task.completed_at = time.time()
+            # ------------------------------------------------
+            # Success
+            # ------------------------------------------------
 
-            result_text = str(
-                task.execution_result or ""
-            ).strip().lower()
-
-            if result_text == "cancelled":
-
-                task.status = "cancelled"
-
-                for step in task.steps:
-                    if step.status in {
-                        "pending",
-                        "executing",
-                    }:
-                        step.status = "cancelled"
-
-            elif result_text == "done":
+            if result == "done":
 
                 task.status = "completed"
 
-                for step in task.steps:
-                    step.status = "completed"
+                task.completed_at = (
+                    time.time()
+                )
 
-            else:
+                self.state[
+                    "last_result"
+                ] = task.execution_result
 
-                task.status = "failed"
+                self.state[
+                    "last_status"
+                ] = task.status
 
-                task.error = (
-                    str(
-                        task.execution_result
-                        or "Executor reported a failure."
+                self.state[
+                    "last_error"
+                ] = None
+
+                self.state[
+                    "replans"
+                ] = task.replan_count
+
+                logger.info(
+                    "JARVIS AGENT: Task completed "
+                    f"after {task.replan_count} replan(s)."
+                )
+
+                return task
+
+            # ------------------------------------------------
+            # Cancelled
+            # ------------------------------------------------
+
+            if result == "cancelled":
+
+                task.status = "cancelled"
+
+                task.completed_at = (
+                    time.time()
+                )
+
+                self.state[
+                    "last_status"
+                ] = task.status
+
+                return task
+
+            # ------------------------------------------------
+            # Failure
+            # ------------------------------------------------
+
+            if result == "failed":
+
+                if (
+                    task.replan_count
+                    >= task.max_replans
+                ):
+
+                    task.status = "failed"
+
+                    task.completed_at = (
+                        time.time()
+                    )
+
+                    self.state[
+                        "last_result"
+                    ] = task.execution_result
+
+                    self.state[
+                        "last_status"
+                    ] = task.status
+
+                    self.state[
+                        "last_error"
+                    ] = task.error
+
+                    self.state[
+                        "replans"
+                    ] = task.replan_count
+
+                    logger.error(
+                        "JARVIS AGENT: "
+                        "Maximum replans reached."
+                    )
+
+                    return task
+
+                # --------------------------------------------
+                # REPLAN
+                # --------------------------------------------
+
+                task.replan_count += 1
+
+                self.state[
+                    "replans"
+                ] = task.replan_count
+
+                logger.warning(
+                    "JARVIS AGENT: "
+                    f"Execution failed. "
+                    f"Replanning "
+                    f"({task.replan_count}/"
+                    f"{task.max_replans})..."
+                )
+
+                planning_request = (
+                    self._build_replan_request(
+                        task
                     )
                 )
 
-                for step in task.steps:
-                    if step.status in {
-                        "pending",
-                        "executing",
-                    }:
-                        step.status = "failed"
-                        step.error = task.error
-
-            self.state["last_result"] = (
-                task.execution_result
-            )
-
-            self.state["last_status"] = (
-                task.status
-            )
-
-            if task.status == "failed":
-                self.state["last_error"] = (
-                    task.error
+                replanned = self.plan_task(
+                    task,
+                    history_text=history_text,
+                    planning_request=planning_request,
                 )
 
-            logger.info(
-                "JARVIS AGENT: "
-                f"Execution finished with "
-                f"status={task.status}"
-            )
-
-        except Exception as exc:
-
-            task.completed_at = time.time()
-            task.status = "failed"
-            task.error = str(exc)
-
-            self.state["last_error"] = str(exc)
-            self.state["last_status"] = task.status
-
-            for step in task.steps:
-                if step.status in {
-                    "pending",
-                    "executing",
+                if replanned.status in {
+                    "conversation",
+                    "failed",
                 }:
-                    step.status = "failed"
-                    step.error = str(exc)
 
-            logger.exception(
-                "JARVIS AGENT: Execution failed"
-            )
+                    return replanned
 
-        return task
+                continue
 
     # ======================================================
     # Full Run
@@ -445,6 +1128,7 @@ class JarvisAgent:
             active_context,
             task_state,
             speak_callback,
+            history_text=history_text,
         )
 
         return task
@@ -458,7 +1142,10 @@ class JarvisAgent:
         task: Optional[AgentTask] = None,
     ) -> Dict[str, Any]:
 
-        task = task or self.current_task
+        task = (
+            task
+            or self.current_task
+        )
 
         if task is None:
 
@@ -484,12 +1171,34 @@ class JarvisAgent:
             "step_count": len(
                 task.steps
             ),
+            "current_step": (
+                task.current_step
+            ),
             "duration": max(
                 0.0,
                 end - start,
             ),
-            "result": task.execution_result,
+            "result": (
+                task.execution_result
+            ),
             "error": task.error,
+            "replans": task.replan_count,
+            "observations": list(
+                task.observations
+            ),
+            "steps": [
+                {
+                    "tool": step.tool,
+                    "argument": step.argument,
+                    "status": step.status,
+                    "attempts": step.attempts,
+                    "verified": step.verified,
+                    "result": step.result,
+                    "error": step.error,
+                    "observation": step.observation,
+                }
+                for step in task.steps
+            ],
         }
 
 
@@ -511,7 +1220,6 @@ def build_agent() -> JarvisAgent:
 
 if __name__ == "__main__":
 
-    # Use the real JARVIS state objects.
     active_context = ActiveContext(
         site="google",
         last_query="Wi-Fi skeleton",
@@ -524,7 +1232,7 @@ if __name__ == "__main__":
     def test_speak(text):
         print(
             "[TEST SPEAK]",
-            text
+            text,
         )
 
     agent = build_agent()
@@ -537,14 +1245,32 @@ if __name__ == "__main__":
     )
 
     print()
-    print("========== AGENT SUMMARY ==========")
-    print(agent.summarize(task))
-    print("====================================")
+    print(
+        "========== AGENT SUMMARY =========="
+    )
+
+    print(
+        agent.summarize(task)
+    )
+
+    print(
+        "===================================="
+    )
 
     print()
-    print("Active context after execution:")
-    print(active_context)
+    print(
+        "Active context after execution:"
+    )
+
+    print(
+        active_context
+    )
 
     print()
-    print("Task state after execution:")
-    print(task_state)
+    print(
+        "Task state after execution:"
+    )
+
+    print(
+        task_state
+    )
