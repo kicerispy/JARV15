@@ -334,21 +334,11 @@ def verify_action_for_task(
     )
 
     if changed:
-
         verified_result["verified"] = True
-
+        verified_result["verification_status"] = "verified"
     else:
-
-        # ----------------------------------------------------
-        # No visible change.
-        #
-        # We do not immediately fail here. Some legitimate
-        # actions do not cause obvious pixel changes.
-        #
-        # The tool itself already reported success.
-        # ----------------------------------------------------
-
         verified_result["verified"] = True
+        verified_result["verification_status"] = "inconclusive"
         verified_result["verification_note"] = (
             "No immediate visible screen change was detected."
         )
