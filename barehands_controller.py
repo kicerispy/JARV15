@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -31,7 +32,15 @@ class BarehandsController:
     ) -> None:
         self.base_url = str(base_url).rstrip("/")
         self.timeout = float(timeout)
-        self.state_dir = Path(state_dir).expanduser() if state_dir else None
+        if state_dir:
+            self.state_dir = Path(state_dir).expanduser()
+        else:
+            barehands_dir = os.getenv("BAREHANDS_DIR")
+            self.state_dir = (
+                Path(barehands_dir).expanduser() / "state"
+                if barehands_dir
+                else None
+            )
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         data = None
