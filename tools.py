@@ -18,6 +18,7 @@ import psutil
 
 from tool_result import ToolResult
 
+import barehands_tools
 import file_tools
 import jarvis_status
 import screen_vision
@@ -1571,6 +1572,16 @@ def system_status():
 # BROWSER / CDP TOOLS
 # ============================================================
 
+BAREHANDS_TOOLS = {
+    "barehands_state",
+    "barehands_present",
+    "barehands_add_card",
+    "barehands_add_image",
+    "barehands_clear",
+    "barehands_board_state",
+}
+
+
 BROWSER_TOOLS = {
     "browser_find_element",
     "browser_click_element",
@@ -1831,6 +1842,9 @@ def _run_tool_raw(
     # --------------------------------------------------------
     # BROWSER / CDP
     # --------------------------------------------------------
+
+    if tool_name in BAREHANDS_TOOLS:
+        return getattr(barehands_tools, tool_name)(argument)
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(

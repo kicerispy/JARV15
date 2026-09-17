@@ -55,6 +55,13 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "verify_screen": "Verify the screen matches an expected state. argument = description of expected state.",
     "type_text": "Type text at the current cursor/focus. argument = the text to type.",
     "press_key": "Press a keyboard key or combo. argument = key name, e.g. 'enter', 'ctrl+c'.",
+
+    "barehands_state": "Set the Barehands ring state. argument = idle, listening, thinking, or speaking.",
+    "barehands_present": "Present a titled message on the Barehands glass board. argument = 'title|||body'.",
+    "barehands_add_card": "Add a card to the Barehands glass board. argument = 'title|||body'.",
+    "barehands_add_image": "Add an image to the Barehands glass board. argument = 'src|||title|||body'.",
+    "barehands_clear": "Clear the Barehands glass board. argument = empty.",
+    "barehands_board_state": "Read the current Barehands glass board state. argument = empty.",
 }
 
 
@@ -82,6 +89,15 @@ Available tools:
 {tool_list}
 
 Rules:
+
+BAREHANDS TOOL SELECTION:
+
+- jarvis_status is for reporting JARVIS's own internal status or uptime.
+- barehands_present is for presenting information on the Barehands glass board.
+- If the user asks to show, display, present, put, or place information
+  on the Barehands display or glass board, use barehands_present.
+- A request to display JARVIS status on Barehands is a display request,
+  not a jarvis_status query; use barehands_present rather than jarvis_status.
 
 GENERIC BROWSER DOM RULES:
 

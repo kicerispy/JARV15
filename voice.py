@@ -66,7 +66,7 @@ SAMPLE_RATE = 16000
 
 
 VOICE_MODEL = os.path.expanduser(
-    r"~/.heed/voices/en_US-libritts_r-medium.onnx"
+    r"~/.heed/voices/en_GB-alan-medium.onnx"
 )
 
 
@@ -76,7 +76,7 @@ VOICE_MODEL = os.path.expanduser(
 
 # Higher = slower.
 
-LENGTH_SCALE = 1.30
+LENGTH_SCALE = 1.05
 
 NOISE_SCALE = 0.45
 
@@ -853,6 +853,8 @@ def clear_interruption():
 
 def speak(text):
 
+    t_total_start = time.perf_counter()
+
     if text is None:
         return
 
@@ -915,6 +917,8 @@ def speak(text):
             # Synthesize
             # ------------------------------------------------
 
+            t_synth_start = time.perf_counter()
+
             audio_chunks = []
 
             sample_rate = None
@@ -936,6 +940,8 @@ def speak(text):
                     chunk.audio_int16_bytes
                 )
 
+            t_synth_end = time.perf_counter()
+
 
             if not audio_chunks:
 
@@ -950,6 +956,8 @@ def speak(text):
             # ------------------------------------------------
             # Convert Piper output
             # ------------------------------------------------
+
+            t_convert_start = time.perf_counter()
 
             audio_bytes = b"".join(
                 audio_chunks
@@ -969,14 +977,28 @@ def speak(text):
                 / 32768.0
             )
 
+            t_convert_end = time.perf_counter()
+
 
             # ------------------------------------------------
             # Process audio
             # ------------------------------------------------
 
+            t_process_start = time.perf_counter()
+
             audio = process_audio(
                 audio,
                 sample_rate
+            )
+
+            t_process_end = time.perf_counter()
+
+
+            print(
+                "JARVIS TTS PERF: "
+                f"synthesis={t_synth_end - t_synth_start:.3f}s | "
+                f"convert={t_convert_end - t_convert_start:.3f}s | "
+                f"process={t_process_end - t_process_start:.3f}s"
             )
 
 
@@ -1019,12 +1041,19 @@ def speak(text):
             )
 
             print(
+                "JARVIS TTS PERF: "
+                f"audio_duration={len(audio) / sample_rate:.3f}s"
+            )
+
+            print(
                 f"JARVIS TTS: OUTPUT_GAIN = {OUTPUT_GAIN}"
             )
 
             # ------------------------------------------------
             # Start playback
             # ------------------------------------------------
+
+            t_playback_start = time.perf_counter()
 
             sd.play(
                 audio,
@@ -1086,6 +1115,13 @@ def speak(text):
                     0.01
                 )
 
+            t_playback_end = time.perf_counter()
+
+            print(
+                "JARVIS TTS PERF: "
+                f"playback={t_playback_end - t_playback_start:.3f}s"
+            )
+
 
             # ------------------------------------------------
             # Tell monitor to stop.
@@ -1131,6 +1167,11 @@ def speak(text):
                     "JARVIS TTS: "
                     "Playback complete."
                 )
+
+            print(
+                "JARVIS TTS PERF: "
+                f"total={time.perf_counter() - t_total_start:.3f}s"
+            )
 
 
         except Exception as e:

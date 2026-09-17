@@ -20,7 +20,7 @@ CHAT_MODEL = os.environ.get(
 
 PLANNER_MODEL = os.environ.get(
     "JARVIS_PLANNER_MODEL",
-    "gemma4:26b",
+    "qwen3.5:9b",
 )
 
 CODING_MODEL = os.environ.get(
