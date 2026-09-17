@@ -6,16 +6,12 @@ anything about the barehands HTTP protocol.
 
 from __future__ import annotations
 
-import os
-
 from barehands_controller import BarehandsController
 from tool_result import ToolResult
 
 
 def _controller() -> BarehandsController:
-    return BarehandsController(
-        state_dir=os.environ.get("BAREHANDS_DIR", "").strip() or None,
-    )
+    return BarehandsController()
 
 
 def barehands_state(argument: str = "") -> ToolResult:
