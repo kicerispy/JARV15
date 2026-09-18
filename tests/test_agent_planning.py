@@ -64,6 +64,44 @@ def test_valid_repair_plan_passes_quality_gate():
     assert issues == []
 
 
+def test_malformed_edit_file_is_rejected_before_execution():
+    issues = assess_plan(
+        "fix the broken Python module",
+        {
+            "goal": "repair module",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "broken_module.py",
+                },
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": "broken_module.py|||old||new",
+                },
+                {
+                    "tool": "code_test",
+                    "argument": (
+                        '{"mode":"compile","path":"broken_module.py"}'
+                    ),
+                },
+            ],
+        },
+    )
+
+    assert any(
+        "filename|||old_text|||new_text" in issue
+        for issue in issues
+    )
+    assert any(
+        "do not use ||" in issue.lower()
+        for issue in issues
+    )
+
+
 class RetryPlanner:
     def __init__(self):
         self.calls = []
