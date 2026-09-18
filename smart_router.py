@@ -92,6 +92,19 @@ _ACTION_WORDS = {
     "check",
     "test",
     "build",
+    "fix",
+    "debug",
+    "repair",
+    "diagnose",
+    "inspect",
+    "investigate",
+    "refactor",
+    "modify",
+    "patch",
+    "resolve",
+    "restore",
+    "verify",
+    "configure",
 }
 
 _CONVERSATION_STARTS = (
@@ -172,7 +185,10 @@ def route_command(command: str) -> RouteDecision:
     if text in _FAST_EXACT or any(text.startswith(prefix) for prefix in _FAST_PREFIXES):
         return RouteDecision("fast", "deterministic command", 0.99)
 
-    if any(text.startswith(prefix) for prefix in _CONVERSATION_STARTS):
+    if (
+        any(text.startswith(prefix) for prefix in _CONVERSATION_STARTS)
+        and not _contains_action_word(text)
+    ):
         return RouteDecision("conversation", "natural conversation/question", 0.95)
 
     if not _contains_action_word(text):
