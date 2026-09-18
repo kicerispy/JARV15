@@ -1275,7 +1275,8 @@ class JarvisAgent:
             "REPAIR PHASE RULES:",
             "1. Do not repeat generic discovery or list the project again.",
             "2. Use the concrete evidence above to identify the defect and target file.",
-            "3. If one small targeted source read is still required, request that specific file/region only.",
+            "3. If source content is not already present in verified read_file evidence, "
+            "include one focused read_file for the verified target before editing.",
             "4. Otherwise create a repair plan with code_checkpoint BEFORE the first modification.",
             "5. Modify the existing target with the smallest safe change.",
             "6. Run code_test AFTER the modification.",
@@ -2243,12 +2244,26 @@ class JarvisAgent:
                 if (
                     is_software_repair_request(task.request)
                     and latest_diagnostic is not None
-                    and self._has_verified_evidence(task, {"read_file"})
-                ):
-                    logger.info(
-                        "JARVIS AGENT: Diagnostic failure captured as repair evidence; "
-                        "switching directly to focused repair planning."
+                    and self._has_verified_evidence(
+                        task,
+                        {"code_search", "read_file"},
                     )
+                ):
+                    has_source_read = self._has_verified_evidence(
+                        task,
+                        {"read_file"},
+                    )
+
+                    if has_source_read:
+                        logger.info(
+                            "JARVIS AGENT: Diagnostic failure captured as repair evidence; "
+                            "switching directly to focused repair planning."
+                        )
+                    else:
+                        logger.info(
+                            "JARVIS AGENT: Diagnostic failure captured with target discovery; "
+                            "repair planner must read the verified source before editing."
+                        )
 
                     self.state["replans"] = task.replan_count
 
@@ -2261,6 +2276,7 @@ class JarvisAgent:
                         history_text=history_text,
                         planning_request=planning_request,
                         require_repair_plan=True,
+                        require_code_read=not has_source_read,
                     )
 
                     if replanned.status not in {
