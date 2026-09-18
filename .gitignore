@@ -58,6 +58,9 @@ input.wav
 *.log
 *.tmp
 
+# JARVIS autonomous repair checkpoints
+.jarvis_checkpoints/
+
 # Historical backup files
 *.before_*
 *.backup
