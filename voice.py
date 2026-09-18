@@ -28,7 +28,7 @@ try:
         )
 
         print(
-            "JARVIS TTS: Added CUDA DLL directory:"
+            "JARVIS TTS: Added Torch DLL directory:"
         )
 
         print(
@@ -49,6 +49,7 @@ except Exception as e:
 
 import numpy as np
 import sounddevice as sd
+import onnxruntime as ort
 
 from scipy import signal
 
@@ -214,60 +215,46 @@ try:
             f"{VOICE_MODEL}"
         )
 
+    try:
+        _available_onnx_providers = (
+            ort.get_available_providers()
+        )
+    except Exception:
+        _available_onnx_providers = []
+
+    _using_cuda = (
+        "CUDAExecutionProvider"
+        in _available_onnx_providers
+    )
+
+    print(
+        "JARVIS TTS: ONNX Runtime providers = "
+        + ", ".join(_available_onnx_providers or ["unknown"])
+    )
 
     _voice = PiperVoice.load(
         VOICE_MODEL,
-        use_cuda=True
+        use_cuda=_using_cuda
     )
 
-    _using_cuda = True
-
     print(
-        "JARVIS TTS: Piper voice loaded with CUDA."
+        "JARVIS TTS: Piper inference provider = "
+        + ("CUDA" if _using_cuda else "CPU")
     )
 
 
 except Exception as e:
 
     print(
-        "JARVIS TTS: CUDA Piper load failed:"
+        "JARVIS TTS: Piper load failed:"
     )
 
     print(
         e
     )
 
-    print(
-        "JARVIS TTS: Falling back to CPU."
-    )
-
-
-    try:
-
-        _voice = PiperVoice.load(
-            VOICE_MODEL,
-            use_cuda=False
-        )
-
-        _using_cuda = False
-
-        print(
-            "JARVIS TTS: Piper voice loaded on CPU."
-        )
-
-
-    except Exception as cpu_error:
-
-        print(
-            "JARVIS TTS: Piper failed to load:"
-        )
-
-        print(
-            cpu_error
-        )
-
-        _voice = None
-        _using_cuda = False
+    _voice = None
+    _using_cuda = False
 
 
 # ============================================================
@@ -1003,7 +990,7 @@ def speak(text):
 
 
             print(
-                "JARVIS TTS: Playback mode = "
+                "JARVIS TTS: Piper inference = "
                 + (
                     "CUDA"
                     if _using_cuda
