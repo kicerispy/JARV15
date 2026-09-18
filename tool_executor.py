@@ -5,6 +5,7 @@ Optimized for low latency while preserving reliable execution
 for multi-step computer-control tasks.
 """
 
+import time
 from typing import Any, Dict
 
 from logger import logger
@@ -75,6 +76,14 @@ def _execute_browser_with_fallback(
 
     try:
         unsuccessful = isinstance(result, ToolResult) and not result.success
+
+        if unsuccessful and isinstance(result, ToolResult) and result.retryable:
+            time.sleep(0.20)
+            retry_result = run_browser_tool(tool_name, argument)
+            if isinstance(retry_result, ToolResult) and retry_result.success:
+                return retry_result
+            result = retry_result
+            unsuccessful = isinstance(result, ToolResult) and not result.success
         if isinstance(result, dict):
             unsuccessful = not bool(result.get("success", False))
 
