@@ -13,6 +13,7 @@ class ModelManagerTests(unittest.TestCase):
         self.assertEqual(manager.planner_model, "qwen3.5:9b")
         self.assertEqual(manager.coding_model, "qwen2.5-coder:14b")
         self.assertEqual(manager.coding_fallback_model, "gemma4:26b")
+        self.assertEqual(manager.coding_num_ctx, 8192)
 
     def test_chat_generation_defaults_are_centralized(self):
         from model_manager import ModelManager
@@ -48,7 +49,7 @@ class ModelManagerTests(unittest.TestCase):
             {
                 "temperature": 0,
                 "num_predict": 1,
-                "num_ctx": 1024,
+                "num_ctx": ModelManager().coding_num_ctx,
             },
         )
         self.assertEqual(
