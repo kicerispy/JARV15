@@ -635,6 +635,10 @@ class JarvisAgent:
                 require_modification=require_repair_plan,
                 require_code_read=require_code_read,
                 require_code_test=require_code_test,
+                allow_prior_evidence=(
+                    bool(task.evidence)
+                    and require_repair_plan
+                ),
             )
 
             if plan_issues:
