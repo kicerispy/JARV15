@@ -2009,7 +2009,7 @@ class JarvisAgent:
 
                             if report_progress:
                                 self._announce(
-                                    "The browser automation passed its diagnostic test, so I couldn't reproduce a failure and made no code changes.",
+                                    "The diagnostic passed, so I couldn't reproduce a failure and made no code changes.",
                                     speak_callback,
                                 )
 
