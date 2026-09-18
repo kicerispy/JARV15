@@ -149,6 +149,12 @@ BROWSER_STATE_TOOLS = {
     "browser_goto",
     "browser_page_info",
     "browser_click_first_result",
+    "browser_find_element",
+    "browser_click_element",
+    "browser_fill_element",
+    "browser_press_key",
+    "browser_wait_for_element",
+    "browser_extract_text",
 }
 
 
