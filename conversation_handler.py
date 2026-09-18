@@ -52,6 +52,16 @@ def build_conversation_messages(
     active_site = active_context.site or "none"
     active_query = active_context.last_query or "none"
     active_tool = active_context.last_tool or "none"
+    page_url = active_context.page_url or "none"
+    page_title = active_context.page_title or "none"
+    last_result_title = active_context.last_result_title or "none"
+    last_element = active_context.last_element or "none"
+
+    try:
+        from task_memory import format_recent
+        recent_tasks = format_recent(3)
+    except Exception:
+        recent_tasks = "Recent task memory unavailable."
 
     active_task_text = f"""
 Current active task context:
@@ -61,6 +71,17 @@ Website: {active_site}
 Search query: {active_query}
 
 Last tool: {active_tool}
+
+Current page URL: {page_url}
+
+Current page title: {page_title}
+
+Last selected result: {last_result_title}
+
+Last browser element: {last_element}
+
+Recent JARVIS tasks:
+{recent_tasks}
 """
 
     messages = [
