@@ -376,3 +376,46 @@ def test_repair_phase_can_require_source_read_without_forcing_an_edit():
     )
 
     assert issues == []
+
+
+
+def test_repair_task_can_require_a_diagnostic_test_phase():
+    issues = assess_plan(
+        "inspect the browser automation, find the problem, fix it, and test it",
+        {
+            "goal": "diagnostic validation",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_read=True,
+        require_code_test=True,
+    )
+
+    assert any("code_test" in issue.lower() for issue in issues)
+
+    issues = assess_plan(
+        "inspect the browser automation, find the problem, fix it, and test it",
+        {
+            "goal": "diagnostic validation",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                },
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_read=True,
+        require_code_test=True,
+    )
+
+    assert issues == []
