@@ -14,7 +14,7 @@ def test_clean_for_speech_removes_parentheses_and_urls():
 def test_split_for_speech_preserves_sentences():
     chunks = response_pipeline.split_for_speech(
         "First sentence. Second sentence. Third sentence.",
-        max_chars=40,
+        max_chars=20,
     )
     assert chunks == ["First sentence.", "Second sentence.", "Third sentence."]
 
@@ -24,7 +24,7 @@ def test_speak_response_speaks_all_chunks():
     interrupted = response_pipeline.speak_response(
         "One sentence. Two sentence. Three sentence.",
         lambda text: spoken.append(text) or False,
-        max_chars=40,
+        max_chars=20,
     )
     assert interrupted is False
     assert spoken == ["One sentence.", "Two sentence.", "Three sentence."]
