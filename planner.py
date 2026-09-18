@@ -1351,6 +1351,8 @@ diagnostic evidence from the real project.
 Available tools:
 {repair_tool_list}
 
+REPAIR HANDOFF MODE — HIGH PRIORITY:
+
 Rules:
 - Make ONE evidence-supported repair; do not rediscover the project.
 - Use the existing verified target file.
