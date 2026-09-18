@@ -1578,7 +1578,7 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
         agent = JarvisAgent(planner=planner, executor=executor)
 
         task = agent.create_task(
-            "diagnose and repair the broken module",
+            "diagnose and repair the malformed Python component",
         )
 
         planned = agent.plan_task(task)
