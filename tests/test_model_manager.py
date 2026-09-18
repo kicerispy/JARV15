@@ -24,7 +24,6 @@ class ModelManagerTests(unittest.TestCase):
         self.assertEqual(manager.chat_num_gpu, 40)
         self.assertEqual(manager.chat_num_predict, 220)
 
-
     def test_chat_generation_routes_through_manager(self):
         from model_manager import ModelManager
         import model_manager
@@ -43,16 +42,20 @@ class ModelManagerTests(unittest.TestCase):
                     chat_num_gpu=2,
                     chat_num_predict=33,
                 )
-                result = manager.chat([{"role": "user", "content": "hello"}])
+                result = manager.chat(
+                    [{"role": "user", "content": "hello"}]
+                )
 
         self.assertEqual(result["message"]["content"], "hello")
         self.assertEqual(captured["model"], "test-chat")
-        self.assertEqual(captured["options"], {"num_gpu": 2, "num_predict": 33})
+        self.assertEqual(
+            captured["options"],
+            {"num_gpu": 2, "num_predict": 33},
+        )
         self.assertFalse(captured["think"])
 
     def test_planner_generation_uses_planner_role(self):
         from model_manager import ModelManager
-        import model_manager
 
         captured = {}
 
@@ -62,10 +65,137 @@ class ModelManagerTests(unittest.TestCase):
 
         with mock.patch("ollama.chat", side_effect=fake_chat):
             manager = ModelManager(planner_model="test-planner")
-            manager.planner([{"role": "user", "content": "plan"}])
+            manager.planner(
+                [{"role": "user", "content": "plan"}]
+            )
 
         self.assertEqual(captured["model"], "test-planner")
         self.assertEqual(captured["format"], "json")
+
+    def test_recovery_generation_uses_chat_role(self):
+        from model_manager import ModelManager
+
+        captured = {}
+
+        def fake_chat(**kwargs):
+            captured.update(kwargs)
+            return {"message": {"content": "{}"}}
+
+        with mock.patch("ollama.chat", side_effect=fake_chat):
+            manager = ModelManager(
+                chat_model="test-recovery",
+                chat_num_gpu=3,
+            )
+            manager.recovery(
+                [{"role": "user", "content": "recover"}]
+            )
+
+        self.assertEqual(captured["model"], "test-recovery")
+        self.assertEqual(
+            captured["options"],
+            {
+                "temperature": 0.0,
+                "num_gpu": 3,
+                "num_predict": 180,
+            },
+        )
+        self.assertFalse(captured["think"])
+        self.assertEqual(captured["format"], "json")
+
+    def test_transient_generation_failure_retries_once(self):
+        from model_manager import ModelManager
+
+        captured = {"calls": 0}
+
+        def fake_chat(**kwargs):
+            captured["calls"] += 1
+            if captured["calls"] == 1:
+                raise ConnectionError("temporary connection reset")
+            return {"message": {"content": "recovered"}}
+
+        with mock.patch("ollama.chat", side_effect=fake_chat):
+            manager = ModelManager(
+                generation_max_attempts=2,
+                generation_retry_delay=0,
+            )
+            result = manager.chat(
+                [{"role": "user", "content": "hello"}]
+            )
+
+        self.assertEqual(captured["calls"], 2)
+        self.assertEqual(
+            result["message"]["content"],
+            "recovered",
+        )
+
+    def test_empty_generation_response_retries_once(self):
+        from model_manager import ModelManager
+
+        captured = {"calls": 0}
+
+        def fake_chat(**kwargs):
+            captured["calls"] += 1
+            if captured["calls"] == 1:
+                return {"message": {"content": ""}}
+            return {"message": {"content": "usable"}}
+
+        with mock.patch("ollama.chat", side_effect=fake_chat):
+            manager = ModelManager(
+                generation_max_attempts=2,
+                generation_retry_delay=0,
+            )
+            result = manager.planner(
+                [{"role": "user", "content": "plan"}]
+            )
+
+        self.assertEqual(captured["calls"], 2)
+        self.assertEqual(
+            result["message"]["content"],
+            "usable",
+        )
+
+    def test_persistent_transient_failure_raises_after_budget(self):
+        from model_manager import ModelGenerationError, ModelManager
+
+        def fake_chat(**kwargs):
+            raise TimeoutError("ollama timed out")
+
+        with mock.patch("ollama.chat", side_effect=fake_chat):
+            manager = ModelManager(
+                generation_max_attempts=2,
+                generation_retry_delay=0,
+            )
+
+            with self.assertRaises(ModelGenerationError) as ctx:
+                manager.chat(
+                    [{"role": "user", "content": "hello"}]
+                )
+
+        self.assertEqual(ctx.exception.attempts, 2)
+        self.assertTrue(ctx.exception.retryable)
+
+    def test_non_transient_failure_is_not_retried(self):
+        from model_manager import ModelGenerationError, ModelManager
+
+        captured = {"calls": 0}
+
+        def fake_chat(**kwargs):
+            captured["calls"] += 1
+            raise ValueError("invalid request")
+
+        with mock.patch("ollama.chat", side_effect=fake_chat):
+            manager = ModelManager(
+                generation_max_attempts=2,
+                generation_retry_delay=0,
+            )
+
+            with self.assertRaises(ModelGenerationError) as ctx:
+                manager.chat(
+                    [{"role": "user", "content": "hello"}]
+                )
+
+        self.assertEqual(captured["calls"], 1)
+        self.assertFalse(ctx.exception.retryable)
 
     def test_warmup_coding_model_uses_tiny_generation(self):
         from model_manager import ModelManager
@@ -85,7 +215,10 @@ class ModelManagerTests(unittest.TestCase):
         finally:
             model_manager.config.PRELOAD_CODING_MODEL = original
 
-        self.assertEqual(captured.get("model"), ModelManager().coding_model)
+        self.assertEqual(
+            captured.get("model"),
+            ModelManager().coding_model,
+        )
         self.assertEqual(
             captured.get("options"),
             {
@@ -106,7 +239,9 @@ class ModelManagerTests(unittest.TestCase):
         original = model_manager.config.PRELOAD_CODING_MODEL
         model_manager.config.PRELOAD_CODING_MODEL = False
         try:
-            self.assertFalse(ModelManager().warmup_coding_model())
+            self.assertFalse(
+                ModelManager().warmup_coding_model()
+            )
         finally:
             model_manager.config.PRELOAD_CODING_MODEL = original
 
