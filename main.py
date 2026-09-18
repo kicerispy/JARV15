@@ -1249,22 +1249,11 @@ def process_command(
 
         if task_controller is not None:
 
-            def background_conversation_fallback(worker_speak):
-                return handle_normal_conversation(
-                    planning_input,
-                    state.active_context,
-                    system_prompt,
-                    worker_speak,
-                )
-
             started = task_controller.start_planning(
                 agent_task,
                 state.active_context,
                 state.task_state,
                 history_text=history_text,
-                fallback_callback=(
-                    background_conversation_fallback
-                ),
             )
 
             logger.info(
