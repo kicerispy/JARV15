@@ -281,10 +281,10 @@ class JarvisAgent:
             "investigate",
             "inspect",
         )
-        return (
-            len(task.steps) > 1
-            or any(term in request for term in progress_terms)
-        )
+        # Keep the initial acknowledgement, but reserve spoken milestone
+        # updates for genuinely complex plans. This prevents simple repairs
+        # from turning into a stream of 4-5 second TTS messages.
+        return len(task.steps) > 3
 
     # ======================================================
     # Build Steps
@@ -1825,12 +1825,14 @@ class JarvisAgent:
                     speak_callback,
                 )
             )
+        else:
+            task_state.set_progress_callback(None)
 
-            if not task.initial_acknowledged:
-                self._announce(
-                    "I'm on it. I'll keep you updated and let you know when it's finished.",
-                    speak_callback,
-                )
+        if not task.initial_acknowledged:
+            self._announce(
+                "On it.",
+                speak_callback,
+            )
         else:
             task_state.set_progress_callback(None)
 
