@@ -1270,11 +1270,25 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
                 for entry in tool_executor.LAST_EXECUTION_TRACE
             ) else "done"
 
-    planner = DiagnosticThenRepairPlanner()
-    executor = DiagnosticFailingExecutor()
-    agent = JarvisAgent(planner=planner, executor=executor)
+    import os
+    from pathlib import Path
 
-    task = agent.create_task(
+    test_root = Path(os.getcwd()) / ".pytest_autonomous_repair_fixture"
+    test_root.mkdir(exist_ok=True)
+    (test_root / "broken_module.py").write_text(
+        "def broken(:\n    pass\n",
+        encoding="utf-8",
+    )
+
+    original_cwd = Path.cwd()
+    os.chdir(test_root)
+
+    try:
+        planner = DiagnosticThenRepairPlanner()
+        executor = DiagnosticFailingExecutor()
+        agent = JarvisAgent(planner=planner, executor=executor)
+
+        task = agent.create_task(
         "diagnose and repair broken_module.py",
     )
 
@@ -1286,7 +1300,11 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
         lambda message: False,
     )
 
-    assert completed.status == "completed"
-    assert len(planner.calls) == 2
-    assert len(executor.calls) == 2
-    assert executor.calls[1]["steps"][0]["tool"] == "code_checkpoint"
+        assert completed.status == "completed"
+        assert len(planner.calls) == 2
+        assert len(executor.calls) == 2
+        assert executor.calls[1]["steps"][0]["tool"] == "code_checkpoint"
+    finally:
+        os.chdir(original_cwd)
+        import shutil
+        shutil.rmtree(test_root, ignore_errors=True)
