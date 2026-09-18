@@ -552,7 +552,11 @@ def assess_plan(
         else []
     )
 
-    if not is_software_diagnostic_request(user_command):
+    if not (
+        is_software_diagnostic_request(user_command)
+        or is_software_change_request(user_command)
+        or is_software_repair_request(user_command)
+    ):
         return []
 
     if require_modification is None:
