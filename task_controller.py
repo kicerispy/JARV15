@@ -126,6 +126,23 @@ class BackgroundTaskController:
 
             return True
 
+    @staticmethod
+    def _background_speak(speak_callback: Any, message: str) -> bool:
+        """Speak from a worker without converting TTS barge-in into task failure."""
+        if not speak_callback:
+            return False
+
+        try:
+            speak_callback(message)
+        except Exception as exc:
+            logger.debug(
+                f"JARVIS TASK CONTROLLER: Background speech skipped: {exc}"
+            )
+
+        # A speech interruption only stops the spoken response. It does not
+        # invalidate the underlying tool action.
+        return False
+
     def _run(
         self,
         task: Any,
@@ -145,7 +162,10 @@ class BackgroundTaskController:
                 task,
                 active_context,
                 task_state,
-                speak_callback,
+                lambda message: self._background_speak(
+                    speak_callback,
+                    message,
+                ),
                 history_text=history_text,
             )
 
@@ -168,10 +188,10 @@ class BackgroundTaskController:
                 pass
 
             try:
-                if speak_callback:
-                    speak_callback(
-                        "I wasn't able to complete the task."
-                    )
+                self._background_speak(
+                    speak_callback,
+                    "I wasn't able to complete the task.",
+                )
             except Exception:
                 pass
 
