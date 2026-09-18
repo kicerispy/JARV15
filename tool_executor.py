@@ -106,7 +106,11 @@ def _execute_browser_with_fallback(
                 )
             else:
                 index = payload.get("index", 1)
-                ordinal = "last" if int(index) < 0 else str(index)
+                try:
+                    is_last = str(index).strip().lower() in {"last", "final"} or int(index) < 0
+                except Exception:
+                    is_last = False
+                ordinal = "last" if is_last else str(index)
                 target = f"{ordinal} search result"
                 if payload.get("site"):
                     target += f" on {payload['site']}"
