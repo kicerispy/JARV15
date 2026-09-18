@@ -1465,7 +1465,7 @@ class JarvisAgent:
                     limit=6000,
                 )
 
-            elif tool in {"code_test", "code_diagnose"}:
+            elif tool in {"code_test", "code_diagnose", "dev_command"}:
                 if isinstance(data, dict):
                     parts = [
                         str(
@@ -1511,6 +1511,17 @@ class JarvisAgent:
                         data,
                         limit=5000,
                     )
+
+                if tool == "dev_command" and isinstance(data, dict):
+                    command = str(data.get("command") or "").strip()
+                    stdout = str(data.get("stdout") or "").strip()
+                    stderr = str(data.get("stderr") or "").strip()
+                    evidence["detail"] = "\n".join([
+                        "Developer command: " + command,
+                        "Status: " + str(data.get("message") or ""),
+                        "stdout: " + self._compact_text(stdout, limit=3500),
+                        "stderr: " + self._compact_text(stderr, limit=3500),
+                    ])
 
                 if tool == "code_diagnose" and isinstance(data, dict):
                     failures = data.get("failures")
