@@ -172,6 +172,7 @@ class BackgroundTaskController:
 
         task.status = "planning"
         task.started_at = None
+        task.initial_acknowledged = True
 
         if hasattr(task_state, "prepare"):
             task_state.prepare(
