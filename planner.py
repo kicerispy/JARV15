@@ -190,7 +190,7 @@ present, it is authoritative and overrides generic planning preferences:
   Return a minimal diagnostic plan containing code_diagnose for the verified
   target. Do not use code_test instead. Do not edit files. Prefer a narrow
   targeted diagnostic argument such as:
-  {"path":"target.py","run_tests":false,"run_lint":false,"run_types":false}
+  {{"path":"target.py","run_tests":false,"run_lint":false,"run_types":false}}
 
 - [JARVIS_INTERNAL_PHASE:REPAIR]
   Use the verified evidence supplied in the request. Return the smallest safe
