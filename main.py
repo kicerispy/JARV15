@@ -7,6 +7,7 @@ tool execution, and response generation.
 """
 
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -38,6 +39,7 @@ from conversation_handler import (
     run_memory_analysis_background,
 )
 from logger import logger
+from model_manager import ModelManager
 from smart_router import route_command
 from memory import create_memory
 from planner import create_plan
@@ -1754,6 +1756,30 @@ def main():
         "Welcome back. "
         "JARVIS is online."
     )
+
+    # --------------------------------------------------
+    # Warm the coding model in the background. This keeps
+    # the first autonomous repair from paying the full
+    # Ollama model-load cost on the critical path.
+    # --------------------------------------------------
+    def warm_coding_model_background():
+        try:
+            warmup_start = perf_now()
+            ModelManager().warmup_coding_model()
+            logger.info(
+                "PERF: coding model background warm-up: "
+                f"{perf_now() - warmup_start:.3f}s"
+            )
+        except Exception as exc:
+            logger.warning(
+                f"JARVIS: Coding model background warm-up failed: {exc}"
+            )
+
+    threading.Thread(
+        target=warm_coding_model_background,
+        name="JARVIS-CodingModelWarmup",
+        daemon=True,
+    ).start()
 
     # ==================================================
     # MAIN STATE MACHINE
