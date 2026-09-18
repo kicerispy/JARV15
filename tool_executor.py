@@ -373,7 +373,7 @@ def _report_tool_progress(
         "read_file": "I've found the relevant file. I'm inspecting it now.",
         "edit_file": "I'm applying the change.",
         "write_file": "I'm writing the updated code.",
-        "code_test": "The change is in place. I'm testing it now.",
+        "code_test": "I'm running the validation now.",
         "browser_connect": "I'm connecting to the browser.",
         "browser_find_element": "I'm locating the browser element.",
         "browser_click_element": "I'm interacting with the browser element.",
