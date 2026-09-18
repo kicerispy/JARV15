@@ -1272,6 +1272,7 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
 
     import os
     from pathlib import Path
+    import shutil
 
     test_root = Path(os.getcwd()) / ".pytest_autonomous_repair_fixture"
     test_root.mkdir(exist_ok=True)
@@ -1289,16 +1290,16 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
         agent = JarvisAgent(planner=planner, executor=executor)
 
         task = agent.create_task(
-        "diagnose and repair broken_module.py",
-    )
+            "diagnose and repair broken_module.py",
+        )
 
-    planned = agent.plan_task(task)
-    completed = agent.execute_task(
-        planned,
-        {},
-        TaskState(),
-        lambda message: False,
-    )
+        planned = agent.plan_task(task)
+        completed = agent.execute_task(
+            planned,
+            {},
+            TaskState(),
+            lambda message: False,
+        )
 
         assert completed.status == "completed"
         assert len(planner.calls) == 2
@@ -1306,5 +1307,5 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
         assert executor.calls[1]["steps"][0]["tool"] == "code_checkpoint"
     finally:
         os.chdir(original_cwd)
-        import shutil
         shutil.rmtree(test_root, ignore_errors=True)
+
