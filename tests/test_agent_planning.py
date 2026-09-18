@@ -325,6 +325,51 @@ class EvidenceAwareDiagnosticFallbackPlanner:
         }
 
 
+
+def test_browser_diagnostic_requires_behavioral_smoke_test():
+    issues = assess_plan(
+        "inspect the browser automation and fix the problem",
+        {
+            "goal": "diagnostic validation",
+            "steps": [
+                {
+                    "tool": "code_test",
+                    "argument": (
+                        '{"mode": "compile", '
+                        '"path": "browser_controller.py"}'
+                    ),
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_test=True,
+    )
+
+    assert any("browser_smoke" in issue.lower() for issue in issues)
+
+
+def test_browser_diagnostic_accepts_browser_smoke_test():
+    issues = assess_plan(
+        "inspect the browser automation and fix the problem",
+        {
+            "goal": "browser runtime diagnostic",
+            "steps": [
+                {
+                    "tool": "code_test",
+                    "argument": (
+                        '{"mode": "browser_smoke", '
+                        '"path": "browser_controller.py"}'
+                    ),
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_test=True,
+    )
+
+    assert issues == []
+
+
 def test_required_diagnostic_phase_falls_back_to_verified_source_target():
     planner = EvidenceAwareDiagnosticFallbackPlanner()
     agent = JarvisAgent(planner=planner)
