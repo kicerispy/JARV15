@@ -8,6 +8,7 @@ from planner import (
 )
 from tools import code_diagnose
 from file_tools import find_file
+from tools import code_search
 
 
 def test_code_diagnose_returns_structured_success(monkeypatch):
@@ -182,3 +183,28 @@ def test_find_file_resolves_spoken_filename_without_underscores(tmp_path, monkey
     result = find_file("Jarvis autonomous test target.py")
 
     assert "jarvis_autonomous_test_target.py" in result
+
+
+
+def test_code_search_accepts_structured_query_argument(monkeypatch, tmp_path):
+    target = tmp_path / "sample_module.py"
+    target.write_text("def target_function():\\n    return 1\\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = code_search("{'query': 'target_function'}")
+
+    assert "target_function" in result
+
+
+def test_code_diagnose_resolves_voice_transcribed_target(tmp_path, monkeypatch):
+    target = tmp_path / "jarvis_autonomous_test_target.py"
+    target.write_text("def add_numbers(a, b):\\n    return a + b\\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = code_diagnose(
+        "{'path': 'Jarvis Autonomous Test target.py', 'run_tests': False, 'run_lint': False}"
+    )
+
+    assert result["success"] is True
+    assert result["verified"] is True
+    assert result["path"] == "Jarvis Autonomous Test target.py"
