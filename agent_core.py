@@ -229,17 +229,26 @@ class JarvisAgent:
         ] = None,
     ) -> AgentTask:
 
+        normalized_request = str(
+            request or ""
+        ).strip()
+
         task = AgentTask(
             task_id=str(
                 uuid.uuid4()
             ),
-            request=str(
-                request or ""
-            ).strip(),
+            request=normalized_request,
             active_context=dict(
                 active_context or {}
             ),
         )
+
+        # Give software repair work a larger bounded recovery budget while
+        # preserving the existing budget for ordinary assistant tasks.
+        if is_software_repair_request(normalized_request):
+            task.max_replans = 5
+        elif is_software_diagnostic_request(normalized_request):
+            task.max_replans = 3
 
         self.current_task = task
 
@@ -703,7 +712,7 @@ class JarvisAgent:
 
             if (
                 str(evidence.get("tool", "") or "").strip()
-                != "code_test"
+                not in {"code_test", "code_diagnose"}
             ):
                 continue
 
@@ -1409,7 +1418,7 @@ class JarvisAgent:
                     limit=6000,
                 )
 
-            elif tool == "code_test":
+            elif tool in {"code_test", "code_diagnose"}:
                 if isinstance(data, dict):
                     parts = [
                         str(
@@ -1455,6 +1464,17 @@ class JarvisAgent:
                         data,
                         limit=5000,
                     )
+
+                if tool == "code_diagnose" and isinstance(data, dict):
+                    failures = data.get("failures")
+                    if isinstance(failures, list) and failures:
+                        evidence["detail"] += (
+                            "\nActionable failures:\n"
+                            + self._compact_text(
+                                "\n".join(str(item) for item in failures),
+                                limit=5000,
+                            )
+                        )
 
             else:
                 evidence["detail"] = self._compact_text(
@@ -1874,7 +1894,7 @@ class JarvisAgent:
                     has_code_test = (
                         self._has_verified_evidence(
                             task,
-                            {"code_test"},
+                            {"code_test", "code_diagnose"},
                         )
                     )
 
