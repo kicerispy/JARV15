@@ -1768,6 +1768,7 @@ BROWSER_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "browser_click_first_result",
     "browser_connect",
     "browser_search_google",
     "browser_search_bing",
@@ -1894,6 +1895,7 @@ def run_browser_tool(
         browser_search_google,
         browser_search_bing,
         browser_click_first_bing_result,
+        browser_click_first_result,
         browser_goto,
         browser_page_info,
     )
@@ -1915,6 +1917,25 @@ def run_browser_tool(
     if tool_name == "browser_click_first_bing_result":
         query = argument if argument else None
         return normalize(browser_click_first_bing_result(query))
+
+    if tool_name == "browser_click_first_result":
+        payload = {}
+        if argument:
+            try:
+                payload = json.loads(argument)
+            except json.JSONDecodeError as exc:
+                return ToolResult(
+                    success=False,
+                    tool=tool_name,
+                    error=f"First-result browser argument must be valid JSON: {exc}",
+                )
+
+        return normalize(
+            browser_click_first_result(
+                site=payload.get("site", ""),
+                query=payload.get("query", ""),
+            )
+        )
 
     if tool_name == "browser_goto":
         return normalize(browser_goto(argument))
