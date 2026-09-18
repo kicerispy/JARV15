@@ -867,7 +867,12 @@ class EvidencePhasePlanner:
         if len(self.calls) == 2:
             return {
                 "goal": "diagnostic validation",
-                "steps": [],
+                "steps": [
+                    {
+                        "tool": "code_test",
+                        "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                    },
+                ],
             }
 
         return valid_repair_plan()
