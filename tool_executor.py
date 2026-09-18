@@ -1174,30 +1174,105 @@ def _spoken_execution_summary(
     message: str,
 ) -> str:
     """
-    Keep internal inspection data out of speech while preserving it in
-    execution traces and task observations.
+    Convert internal tool results into concise, natural JARVIS speech.
+
+    Detailed execution messages remain in logs/evidence; TTS should describe
+    the outcome rather than narrate the implementation or repeat URLs.
     """
     text = str(message or "").strip()
+    tool = str(tool_name or "").strip().lower()
+    lowered = text.lower()
 
-    if tool_name == "read_file":
-        return "I inspected the relevant source file."
+    # Source/code inspection should stay intentionally brief.
+    concise = {
+        "read_file": "I inspected the relevant source file.",
+        "code_search": "I searched the project code for relevant matches.",
+        "find_file": "I located the relevant project file.",
+        "list_files": "I inspected the project file list.",
+        "code_checkpoint": "I created a safety checkpoint.",
+        "code_restore_checkpoint": "I restored the latest safety checkpoint.",
+        "create_folder": "The folder is ready.",
+        "open_folder": "The folder is open.",
+        "write_file": "The file is written.",
+        "edit_file": "The file is updated.",
+        "delete_file": "The file is deleted.",
+        "open_program": "The application is open.",
+        "browser_connect": "The browser is connected.",
+        "browser_search_google": "Google search complete.",
+        "browser_search_bing": "Bing search complete.",
+        "browser_click_first_result": "I opened the first result.",
+        "browser_click_first_bing_result": "I opened the first Bing result.",
+        "browser_back": "I went back in the browser.",
+        "barehands_state": "The JARVIS display state is updated.",
+        "barehands_present": "I put that on the JARVIS display.",
+        "barehands_add_card": "I added that to the JARVIS display.",
+        "barehands_add_image": "I added the image to the JARVIS display.",
+        "barehands_clear": "The JARVIS display is clear.",
+    }
 
-    if tool_name == "code_search":
-        return "I searched the project code for relevant matches."
+    if tool in concise:
+        return concise[tool]
 
-    if tool_name == "find_file":
-        return "I located the relevant project file."
+    if tool == "search_website":
+        if "google" in lowered:
+            return "Google search complete."
+        if "youtube" in lowered:
+            return "YouTube search complete."
+        if "bing" in lowered:
+            return "Bing search complete."
+        return "Search complete."
 
-    if tool_name == "list_files":
-        return "I inspected the project file list."
+    if tool in {"open_website", "browser_goto"}:
+        return "The website is open." if tool == "open_website" else "Navigation complete."
 
-    if tool_name in {
-        "code_checkpoint",
-        "code_restore_checkpoint",
+    if tool in {
+        "browser_find_element",
+        "browser_click_element",
+        "browser_fill_element",
+        "browser_press_key",
+        "browser_wait_for_element",
+        "browser_extract_text",
+        "browser_click_result",
     }:
-        return text
+        return text or "Browser action complete."
 
-    return text
+    if tool == "weather":
+        return text or "The weather information is ready."
+
+    if tool == "current_time":
+        return text or "The current time is ready."
+
+    if tool == "current_date":
+        return text or "Today's date is ready."
+
+    if tool == "system_status":
+        return text or "System status is ready."
+
+    if tool == "startup_status":
+        return text or "Startup status is ready."
+
+    if tool in {"enable_startup", "disable_startup"}:
+        return text or "Windows startup settings are updated."
+
+    if tool == "task_history":
+        return text or "Task history is ready."
+
+    if tool in {"code_test", "verify_screen"}:
+        return text or "Validation complete."
+
+    if text in {"Tool completed.", "Browser action completed."}:
+        return "Done."
+
+    # Avoid narrating raw search-result or URL metadata when a generic
+    # completion is enough. Preserve other genuinely useful responses.
+    if lowered.startswith("searching google for "):
+        return "Google search complete."
+    if lowered.startswith("searching youtube for "):
+        return "YouTube search complete."
+    if lowered.startswith("searching bing for "):
+        return "Bing search complete."
+
+    return text or "Done."
 
 
 def speak_result(
