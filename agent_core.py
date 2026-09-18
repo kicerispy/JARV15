@@ -155,6 +155,8 @@ BROWSER_STATE_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "browser_click_result",
+    "browser_back",
 }
 
 
