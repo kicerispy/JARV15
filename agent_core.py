@@ -992,6 +992,7 @@ class JarvisAgent:
                         require_repair_plan
                         or require_code_read
                         or require_code_test
+                        or require_code_diagnose
                     )
                     else False
                 ),
