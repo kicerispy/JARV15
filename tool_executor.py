@@ -203,6 +203,37 @@ def _update_browser_active_context(
         active_context.last_result_title = str(raw.get("result_title"))
     if raw.get("result_url"):
         active_context.last_result_url = str(raw.get("result_url"))
+
+    page_url = str(
+        raw.get("after_url")
+        or raw.get("url")
+        or active_context.page_url
+        or ""
+    )
+    lowered_url = page_url.lower()
+
+    if raw.get("site"):
+        active_context.site = str(raw.get("site")).strip().lower()
+    elif "youtube.com" in lowered_url:
+        active_context.site = "youtube"
+    elif "google." in lowered_url:
+        active_context.site = "google"
+    elif "bing.com" in lowered_url:
+        active_context.site = "bing"
+
+    if raw.get("query"):
+        active_context.last_query = str(raw.get("query"))
+
+    try:
+        from urllib.parse import parse_qs, urlparse
+        parsed_query = parse_qs(urlparse(page_url).query)
+        if active_context.site == "google" and parsed_query.get("q"):
+            active_context.last_query = parsed_query["q"][0]
+        elif active_context.site == "youtube" and parsed_query.get("search_query"):
+            active_context.last_query = parsed_query["search_query"][0]
+    except Exception:
+        pass
+
     if raw.get("element_text"):
         active_context.last_element = str(raw.get("element_text"))
     elif raw.get("text") and tool_name == "browser_extract_text":
