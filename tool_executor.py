@@ -24,6 +24,7 @@ BROWSER_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "browser_click_first_result",
     "browser_connect",
     "browser_search_google",
     "browser_search_bing",
