@@ -158,6 +158,14 @@ def test_background_planning_does_not_block_caller():
     assert controller.has_active_task() is True
     assert controller.status_message() == "I'm getting the task underway."
 
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 1
+    assert spoken == [
+        "I'm on it. I'll keep you updated and let you know when it's finished."
+    ]
+
     agent.release_planning.set()
     assert agent.executed.wait(timeout=1)
     assert controller.wait_for_current(timeout=1) is True
