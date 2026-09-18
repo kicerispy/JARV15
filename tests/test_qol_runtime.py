@@ -330,3 +330,19 @@ def test_tts_status_exposes_runtime_provider():
 
     assert '"provider": "CUDA" if _using_cuda else "CPU"' in source
     assert '"onnx_providers"' in source
+
+def test_background_memory_analysis_skips_software_tasks():
+    import main
+
+    assert main.should_run_background_memory_analysis(
+        "diagnose and repair the bug in browser_controller.py"
+    ) is False
+
+    assert main.should_run_background_memory_analysis(
+        "add a new feature to JARVIS"
+    ) is False
+
+    assert main.should_run_background_memory_analysis(
+        "what is the weather today?"
+    ) is True
+
