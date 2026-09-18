@@ -391,6 +391,7 @@ def is_software_diagnostic_request(text: str) -> bool:
 def assess_plan(
     user_command: str,
     plan: Dict[str, Any],
+    require_modification: Optional[bool] = None,
 ) -> List[str]:
     """
     Return planner-quality issues for code/automation repair tasks.
@@ -406,6 +407,11 @@ def assess_plan(
 
     if not is_software_diagnostic_request(user_command):
         return []
+
+    if require_modification is None:
+        require_modification = is_software_repair_request(
+            user_command
+        )
 
     tool_names = [
         str(
@@ -454,7 +460,7 @@ def assess_plan(
             "before attempting to fix it."
         )
 
-    requires_modification = is_software_repair_request(user_command)
+    requires_modification = bool(require_modification)
 
     if requires_modification and not mutation_indices:
         issues.append(
