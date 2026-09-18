@@ -1,6 +1,7 @@
 """
 JARVIS task planner - converts user requests into tool calls.
 """
+import ast
 import json
 from typing import Any, Dict, List, Optional
 
@@ -76,6 +77,19 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "barehands_add_image": "Add an image to the Barehands glass board. argument = 'src|||title|||body'.",
     "barehands_clear": "Clear the Barehands glass board. argument = empty.",
     "barehands_board_state": "Read the current Barehands glass board state. argument = empty.",
+}
+
+
+# Browser tools whose arguments are JSON objects encoded as strings.
+JSON_ARGUMENT_TOOLS = {
+    "browser_click_result",
+    "browser_click_first_result",
+    "browser_find_element",
+    "browser_click_element",
+    "browser_fill_element",
+    "browser_press_key",
+    "browser_wait_for_element",
+    "browser_extract_text",
 }
 
 
@@ -700,6 +714,40 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
         normalized_argument = (
             str(argument) if argument is not None else ""
         )
+
+        # LLMs occasionally emit Python-literal dictionaries such as
+        # {'role': 'button'} instead of strict JSON. Canonicalize browser
+        # object arguments at the planner boundary so every downstream
+        # browser dispatcher receives one stable JSON representation.
+        if tool in JSON_ARGUMENT_TOOLS and normalized_argument.strip():
+            raw_argument = normalized_argument.strip()
+            try:
+                payload = json.loads(raw_argument)
+            except json.JSONDecodeError as json_exc:
+                try:
+                    payload = ast.literal_eval(raw_argument)
+                except (ValueError, SyntaxError):
+                    logger.warning(
+                        f"Rejected invalid browser argument for {tool}: {json_exc}"
+                    )
+                    continue
+
+            if not isinstance(payload, dict):
+                logger.warning(
+                    f"Rejected non-object browser argument for {tool}"
+                )
+                continue
+
+            try:
+                normalized_argument = json.dumps(
+                    payload,
+                    separators=(",", ":"),
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    f"Rejected non-JSON browser argument for {tool}: {exc}"
+                )
+                continue
 
         # Discard hallucinated source-read steps before execution when the
         # planner also supplied other usable steps. A bad read target should
