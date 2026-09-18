@@ -769,7 +769,7 @@ class JarvisAgent:
         )
 
         # Whisper frequently transcribes ".py" as "dot py". Normalize that
-        # spelling before comparing against real project filenames.
+        # spelling before extracting the explicitly requested filename.
         normalized_text = re.sub(
             rf"\bdot\s+({extension_pattern})\b",
             lambda match: "." + match.group(1).lower(),
@@ -777,14 +777,49 @@ class JarvisAgent:
             flags=re.IGNORECASE,
         )
 
+        # Prefer an explicit filename from the user's request. This preserves
+        # spaces, hyphens, and casing instead of replacing the user's spelling
+        # with a differently formatted physical filename found on disk.
+        direct_match = re.search(
+            rf"\b(?:diagnose\s+and\s+repair|repair|fix)\s+"
+            rf"(?:the\s+)?(?:intentional\s+bug\s+in\s+)?"
+            rf"(.+?\.{extension_pattern})",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
+        if direct_match:
+            candidate = " ".join(
+                str(direct_match.group(1)).strip().split()
+            )
+            candidate = candidate.rstrip(".,!?;:")
+            if candidate:
+                return candidate
+
+        # Also support requests where the filename follows "target", "file",
+        # or similar wording instead of a repair verb.
+        command_match = re.search(
+            rf"(?:target|file)\s+"
+            rf"(.+?\.{extension_pattern})",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
+        if command_match:
+            candidate = " ".join(
+                str(command_match.group(1)).strip().split()
+            ).rstrip(".,!?;:")
+            if candidate:
+                return candidate
+
         def normalized_key(value: str) -> str:
             return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
         request_key = normalized_key(normalized_text)
 
-        # First, match against real project files. This safely handles
-        # underscores, spaces, hyphens, casing, and voice transcription
-        # artifacts without asking the LLM to guess a path.
+        # If the request did not contain a clean explicit filename, match
+        # against real project files. This handles underscores, spaces,
+        # hyphens, casing, and voice transcription artifacts safely.
         ignored_parts = {
             ".git",
             "__pycache__",
@@ -825,38 +860,6 @@ class JarvisAgent:
 
         if len(matches) == 1:
             return matches[0]
-
-        # Conservative fallback for a newly mentioned file that does not
-        # exist yet. Prefer the text directly following a repair/fix phrase.
-        direct_match = re.search(
-            rf"\b(?:repair|fix)\s+"
-            rf"(?:the\s+)?"
-            rf"(.+?\.{extension_pattern})"
-            rf"(?=$|[.,!?])",
-            normalized_text,
-            flags=re.IGNORECASE,
-        )
-
-        if direct_match:
-            candidate = " ".join(
-                str(direct_match.group(1)).strip().split()
-            )
-            if candidate:
-                return candidate.rstrip(".,!?")
-
-        # Support the common "diagnose and repair X.py" phrasing.
-        command_match = re.search(
-            rf"\bdiagnose\s+and\s+repair\s+"
-            rf"([A-Za-z0-9][A-Za-z0-9 _-]*\.{extension_pattern})"
-            rf"(?=$|[.,!?])",
-            normalized_text,
-            flags=re.IGNORECASE,
-        )
-
-        if command_match:
-            return " ".join(
-                str(command_match.group(1)).strip().split()
-            ).rstrip(".,!?")
 
         return None
 
