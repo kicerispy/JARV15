@@ -231,10 +231,8 @@ def click_screen_target(target: str) -> dict[str, Any]:
     if not target:
         return {"success": False, "error": "Screen target cannot be empty."}
 
-    dom = _dom_click_fallback(target)
-    if dom is not None:
-        return dom
-
+    # This is the genuine desktop fallback. Browser DOM interactions are
+    # handled by tool_executor before this layer is reached.
     return _desktop_click(target)
 
 
