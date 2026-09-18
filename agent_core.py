@@ -933,7 +933,10 @@ class JarvisAgent:
             enforce_change_workflow = (
                 require_repair_plan
                 or (
-                    is_software_change_request(task.request)
+                    (
+                        is_software_change_request(task.request)
+                        or is_software_repair_request(task.request)
+                    )
                     and candidate_has_mutation
                 )
             )
