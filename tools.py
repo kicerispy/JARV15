@@ -2404,9 +2404,22 @@ def code_diagnose(argument=""):
                 "stderr": "Target is not a Python file.",
             })
     elif python_files:
+        # Compile only the source files discovered above. Using "." here
+        # would recurse into JARVIS's runtime checkpoint directory and let
+        # stale/broken checkpoint copies masquerade as real project bugs.
+        compile_targets = [
+            str(path.relative_to(base))
+            for path in python_files
+        ]
         run_check(
             "compile_all",
-            [sys.executable, "-m", "compileall", "-q", "."],
+            [
+                sys.executable,
+                "-m",
+                "compileall",
+                "-q",
+                *compile_targets,
+            ],
         )
     else:
         checks.append({
@@ -2464,11 +2477,36 @@ def code_diagnose(argument=""):
             text=True,
         )
         if probe.returncode == 0:
-            run_check(
-                "ruff",
-                [sys.executable, "-m", "ruff", "check", target or "."],
-                required=False,
+            lint_targets = (
+                [str(target_path)]
+                if target_path is not None
+                else [
+                    str(path.relative_to(base))
+                    for path in python_files
+                ]
             )
+
+            if lint_targets:
+                run_check(
+                    "ruff",
+                    [
+                        sys.executable,
+                        "-m",
+                        "ruff",
+                        "check",
+                        *lint_targets,
+                    ],
+                    required=False,
+                )
+            else:
+                checks.append({
+                    "name": "ruff",
+                    "status": "skipped",
+                    "required": False,
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": "No Python source files were discovered.",
+                })
         else:
             checks.append({
                 "name": "ruff",
@@ -2487,11 +2525,35 @@ def code_diagnose(argument=""):
             text=True,
         )
         if probe.returncode == 0:
-            run_check(
-                "mypy",
-                [sys.executable, "-m", "mypy", target or "."],
-                required=False,
+            type_targets = (
+                [str(target_path)]
+                if target_path is not None
+                else [
+                    str(path.relative_to(base))
+                    for path in python_files
+                ]
             )
+
+            if type_targets:
+                run_check(
+                    "mypy",
+                    [
+                        sys.executable,
+                        "-m",
+                        "mypy",
+                        *type_targets,
+                    ],
+                    required=False,
+                )
+            else:
+                checks.append({
+                    "name": "mypy",
+                    "status": "skipped",
+                    "required": False,
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": "No Python source files were discovered.",
+                })
         else:
             checks.append({
                 "name": "mypy",
