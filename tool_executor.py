@@ -1571,40 +1571,36 @@ def execute_plan(
                     result,
                 )
 
-                if isinstance(
-                    result,
-                    dict,
-                ):
+                if isinstance(result, ToolResult):
+                    data = result.data
+                    if isinstance(data, dict):
+                        data = dict(data)
+                        data["message"] = browser_message
+                    else:
+                        data = {
+                            "message": browser_message,
+                            "result": data,
+                        }
+
+                    if isinstance(data, dict) and "verified" not in data:
+                        data["verified"] = bool(result.success)
 
                     result = ToolResult(
                         success=result.success,
                         tool=result.tool,
-                        data=(
-                            {
-                                **result.data,
-                                "message": browser_message,
-                            }
-                            if isinstance(result.data, dict)
-                            else {
-                                "message": browser_message,
-                                "result": result.data,
-                            }
-                        ),
+                        data=data,
                         error=result.error,
                         retryable=result.retryable,
                         observation=result.observation,
                     )
 
-                    # A browser controller reporting success is
-                    # considered verified unless it explicitly
-                    # says otherwise.
-                    if "verified" not in result:
-                        result["verified"] = bool(
-                            result.get(
-                                "success",
-                                False,
-                            )
-                        )
+                elif isinstance(result, dict):
+                    result = dict(result)
+                    result["message"] = browser_message
+                    result.setdefault(
+                        "verified",
+                        bool(result.get("success", False)),
+                    )
 
             # =================================================
             # OPTIONAL SCREEN VERIFICATION
