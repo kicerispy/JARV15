@@ -1547,6 +1547,185 @@ def open_program(program):
 
 
 # ============================================================
+# CODE INSPECTION / VALIDATION
+# ============================================================
+
+def code_search(argument=""):
+    """Search project text files for a symbol, string, or error message."""
+    query = str(argument or "").strip()
+
+    if not query:
+        return "Code search query cannot be empty."
+
+    base = __import__("pathlib").Path.cwd().resolve()
+    ignored = {
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        "jarvis_cuda",
+        "venv",
+        ".venv",
+        "node_modules",
+        "build",
+        "dist",
+    }
+
+    matches = []
+    query_lower = query.lower()
+
+    try:
+        for path in base.rglob("*"):
+            if len(matches) >= 50:
+                break
+
+            if not path.is_file():
+                continue
+
+            if any(part in ignored for part in path.parts):
+                continue
+
+            try:
+                text = path.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except OSError:
+                continue
+
+            for line_number, line in enumerate(text.splitlines(), 1):
+                if query_lower in line.lower():
+                    relative = path.relative_to(base)
+                    matches.append(
+                        f"{relative}:{line_number}: {line.strip()}"
+                    )
+
+                    if len(matches) >= 50:
+                        break
+
+        if not matches:
+            return f"No matches found for '{query}'."
+
+        header = (
+            f"Found {len(matches)} match(es) for "
+            f"'{query}':"
+        )
+
+        return header + "\n" + "\n".join(matches)
+
+    except Exception as e:
+        return f"Code search failed: {e}"
+
+
+def code_test(argument=""):
+    """Run a safe Python compile check or pytest command inside the project."""
+    import json
+    import sys
+
+    raw = str(argument or "").strip()
+    payload = {}
+
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = {
+                "mode": "compile",
+                "path": raw,
+            }
+
+    mode = str(
+        payload.get("mode", "compile")
+    ).strip().lower()
+
+    target = str(
+        payload.get("path", "")
+    ).strip()
+
+    base = __import__("pathlib").Path.cwd().resolve()
+
+    if target:
+        target_path = (base / target).resolve()
+
+        try:
+            target_path.relative_to(base)
+        except ValueError:
+            return "Code test refused: target is outside the project."
+
+        if not target_path.exists():
+            return f"Code test target not found: {target}"
+
+        target_arg = str(target_path)
+    else:
+        target_arg = ""
+
+    if mode == "compile":
+        if not target_arg:
+            return "Compile mode requires a Python file path."
+
+        if not target_arg.lower().endswith(".py"):
+            return "Compile mode requires a .py file."
+
+        command = [
+            sys.executable,
+            "-m",
+            "py_compile",
+            target_arg,
+        ]
+
+    elif mode == "pytest":
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+        ]
+
+        if target_arg:
+            command.append(target_arg)
+
+        command.append("-q")
+
+    else:
+        return "Unsupported code test mode. Use 'compile' or 'pytest'."
+
+    timeout = int(payload.get("timeout", 120))
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+            timeout=max(5, min(timeout, 300)),
+        )
+
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+
+        output_parts = [
+            f"Exit code: {completed.returncode}"
+        ]
+
+        if stdout:
+            output_parts.append(
+                f"STDOUT:\n{stdout[:6000]}"
+            )
+
+        if stderr:
+            output_parts.append(
+                f"STDERR:\n{stderr[:6000]}"
+            )
+
+        return "\n\n".join(output_parts)
+
+    except subprocess.TimeoutExpired:
+        return f"Code test timed out after {timeout} seconds."
+
+    except Exception as e:
+        return f"Code test failed to start: {e}"
+
+
+# ============================================================
 # SYSTEM STATUS
 # ============================================================
 
