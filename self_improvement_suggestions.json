@@ -1,6 +1,6 @@
 [
   {
-    "id": "sugg-20260914103405-0",
+    "id": "sugg-20260918120604-0",
     "category": "persona",
     "change_type": "adjust",
     "target": "persona.formality",
@@ -9,6 +9,6 @@
     "confidence": 0.5,
     "rationale": "Low confidence test",
     "auto_applicable": true,
-    "timestamp": "2026-09-14T10:34:05.246513"
+    "timestamp": "2026-09-18T12:06:04.794271"
   }
 ]
