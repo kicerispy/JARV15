@@ -117,6 +117,83 @@ class ToolExecutorFailureTests(unittest.TestCase):
         self.assertEqual(trace[0]["attempts"], 2)
         self.assertEqual(trace[0]["recovery_count"], 1)
 
+    def test_safe_retry_resumes_existing_multi_step_plan(self):
+        import tool_executor
+        from state import ActiveContext, TaskState
+        from tool_result import ToolResult
+
+        task_state = TaskState()
+        calls = []
+        current_time_attempts = {"count": 0}
+
+        def fake_run_tool(tool_name, argument):
+            calls.append(tool_name)
+
+            if tool_name == "current_time":
+                current_time_attempts["count"] += 1
+                if current_time_attempts["count"] == 1:
+                    return ToolResult(
+                        success=False,
+                        tool=tool_name,
+                        error="temporary time service failure",
+                        retryable=True,
+                    )
+
+                return ToolResult(
+                    success=True,
+                    tool=tool_name,
+                    data="12:00 PM",
+                )
+
+            return ToolResult(
+                success=True,
+                tool=tool_name,
+                data=f"{tool_name} completed",
+            )
+
+        with mock.patch.object(
+            tool_executor,
+            "run_tool",
+            side_effect=fake_run_tool,
+        ):
+            result = tool_executor.execute_plan(
+                {
+                    "goal": "resume after safe retry",
+                    "steps": [
+                        {"tool": "weather", "argument": "Chicago"},
+                        {"tool": "current_time", "argument": "Chicago"},
+                        {"tool": "current_date", "argument": ""},
+                    ],
+                },
+                ActiveContext(),
+                task_state,
+                lambda message: None,
+            )
+
+        self.assertEqual(result, "done")
+        self.assertEqual(
+            calls,
+            [
+                "weather",
+                "current_time",
+                "current_time",
+                "current_date",
+            ],
+        )
+        self.assertEqual(task_state.attempts, 1)
+        self.assertEqual(task_state.recovery_count, 1)
+
+        trace = tool_executor.get_last_execution_trace()
+        self.assertEqual(len(trace), 3)
+        self.assertEqual(trace[0]["tool"], "weather")
+        self.assertEqual(trace[1]["tool"], "current_time")
+        self.assertEqual(trace[1]["attempts"], 2)
+        self.assertEqual(trace[1]["recovery_count"], 1)
+        self.assertEqual(trace[1]["status"], "completed")
+        self.assertEqual(trace[2]["tool"], "current_date")
+        self.assertEqual(trace[2]["status"], "completed")
+
+
     def test_non_retryable_safe_tool_runs_only_once(self):
         import tool_executor
         from state import ActiveContext, TaskState
