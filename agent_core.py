@@ -771,7 +771,7 @@ class JarvisAgent:
         # Whisper frequently transcribes ".py" as "dot py". Normalize that
         # spelling before extracting the explicitly requested filename.
         normalized_text = re.sub(
-            rf"\bdot\s+({extension_pattern})\b",
+            rf"\s+\bdot\s+({extension_pattern})\b",
             lambda match: "." + match.group(1).lower(),
             text,
             flags=re.IGNORECASE,
