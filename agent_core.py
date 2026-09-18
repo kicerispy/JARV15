@@ -345,19 +345,124 @@ class JarvisAgent:
             f"{task.task_id}"
         )
 
-        try:
+        # Give an incomplete software-repair plan one corrective
+        # planning pass before allowing execution to begin.
+        max_plan_repairs = 1
 
-            plan = self.planner(
-                request_for_planner,
-                active_context=(
-                    task.active_context
-                ),
-                history_text=history_text,
+        for planning_attempt in range(
+            max_plan_repairs + 1
+        ):
+
+            try:
+
+                plan = self.planner(
+                    request_for_planner,
+                    active_context=(
+                        task.active_context
+                    ),
+                    history_text=history_text,
+                )
+
+                plan = validate_plan(
+                    plan
+                )
+
+            except Exception as exc:
+
+                logger.exception(
+                    "JARVIS AGENT: "
+                    "Planning failed"
+                )
+
+                task.status = "failed"
+
+                task.error = str(
+                    exc
+                )
+
+                self.state[
+                    "last_error"
+                ] = str(
+                    exc
+                )
+
+                self.state[
+                    "last_status"
+                ] = task.status
+
+                return task
+
+            plan_issues = assess_plan(
+                task.request,
+                plan,
             )
 
-            plan = validate_plan(
-                plan
-            )
+            if plan_issues:
+
+                logger.warning(
+                    "JARVIS AGENT: Planner quality gate rejected "
+                    f"attempt {planning_attempt + 1}: "
+                    + " | ".join(plan_issues)
+                )
+
+                task.observations.extend(
+                    [
+                        "Planner quality gate: "
+                        + issue
+                        for issue in plan_issues
+                    ]
+                )
+
+                if planning_attempt < max_plan_repairs:
+
+                    correction_lines = [
+                        "The previous planner output was incomplete.",
+                        "Do not execute the previous plan.",
+                        "",
+                        f"Original request: {task.request}",
+                        "",
+                        "Planner quality problems:",
+                    ]
+
+                    correction_lines.extend(
+                        f"- {issue}"
+                        for issue in plan_issues
+                    )
+
+                    correction_lines.extend(
+                        [
+                            "",
+                            "Previous candidate plan:",
+                            str(plan),
+                            "",
+                            "Produce a corrected plan as JSON.",
+                            "For software repair tasks, inspect first, "
+                            "checkpoint before changes, modify only what is "
+                            "needed, and run code_test after changes.",
+                        ]
+                    )
+
+                    request_for_planner = "\n".join(
+                        correction_lines
+                    )
+
+                    continue
+
+                task.status = "failed"
+                task.error = (
+                    "Planner quality validation failed: "
+                    + " ".join(plan_issues)
+                )
+
+                self.state[
+                    "last_error"
+                ] = task.error
+
+                self.state[
+                    "last_status"
+                ] = task.status
+
+                return task
 
             task.planner_result = plan
 
@@ -377,30 +482,7 @@ class JarvisAgent:
                 "last_goal"
             ] = task.goal
 
-        except Exception as exc:
-
-            logger.exception(
-                "JARVIS AGENT: "
-                "Planning failed"
-            )
-
-            task.status = "failed"
-
-            task.error = str(
-                exc
-            )
-
-            self.state[
-                "last_error"
-            ] = str(
-                exc
-            )
-
-            self.state[
-                "last_status"
-            ] = task.status
-
-            return task
+            break
 
         if not task.steps:
 
