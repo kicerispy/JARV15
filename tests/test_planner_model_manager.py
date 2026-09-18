@@ -26,6 +26,66 @@ class PlannerModelManagerTests(unittest.TestCase):
             "planner must use the centralized ModelManager planner model",
         )
 
+    def test_source_read_phase_uses_general_planner_model(self):
+        import planner
+
+        captured = {}
+
+        def fake_chat(**kwargs):
+            captured.update(kwargs)
+            return {
+                "message": {
+                    "content": '{"goal":"read source","steps":[{"tool":"read_file","argument":"browser_controller.py"}]}'
+                }
+            }
+
+        request = (
+            "[JARVIS_INTERNAL_PHASE:SOURCE_READ]\n"
+            "Read the verified browser_controller.py source."
+        )
+
+        with patch.object(planner, "chat", side_effect=fake_chat):
+            result = planner.create_plan(request)
+
+        self.assertEqual(result.get("goal"), "read source")
+        self.assertEqual(
+            captured.get("model"),
+            planner.ModelManager().planner_model,
+        )
+        system = captured.get("messages", [{}])[0].get("content", "")
+        self.assertIn("focused source-inspection planner", system)
+        self.assertNotIn("REPAIR HANDOFF MODE", system)
+
+    def test_diagnostic_test_phase_uses_general_planner_model(self):
+        import planner
+
+        captured = {}
+
+        def fake_chat(**kwargs):
+            captured.update(kwargs)
+            return {
+                "message": {
+                    "content": '{"goal":"runtime diagnostic","steps":[{"tool":"code_test","argument":"{\"mode\":\"browser_smoke\",\"path\":\"browser_controller.py\"}"}]}'
+                }
+            }
+
+        request = (
+            "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]\n"
+            "Run the verified browser runtime diagnostic."
+        )
+
+        with patch.object(planner, "chat", side_effect=fake_chat):
+            result = planner.create_plan(request)
+
+        self.assertEqual(result.get("goal"), "runtime diagnostic")
+        self.assertEqual(
+            captured.get("model"),
+            planner.ModelManager().planner_model,
+        )
+        system = captured.get("messages", [{}])[0].get("content", "")
+        self.assertIn("focused diagnostic test planner", system)
+        self.assertNotIn("REPAIR HANDOFF MODE", system)
+
     def test_repair_handoff_mode_does_not_require_external_planning_request(self):
         import planner
 
