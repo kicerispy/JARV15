@@ -1033,13 +1033,12 @@ def cleanup_browser():
         _page = None
         _skipper_task = None
 
-        if loop_to_close and not loop_to_close.is_closed():
-            try:
-                loop_to_close.close()
-            except Exception:
-                pass
-
-        _loop = None
+        # Do not close the shared Windows Proactor loop here. Playwright's
+        # subprocess transports may still need one final loop turn during
+        # interpreter shutdown, and closing it early produces noisy
+        # unclosed-pipe warnings. The process is exiting, so retaining the
+        # already-cleaned loop is safer than tearing it down underneath
+        # asyncio transport destructors.
 
 
 atexit.register(cleanup_browser)
