@@ -419,3 +419,104 @@ def test_repair_task_can_require_a_diagnostic_test_phase():
     )
 
     assert issues == []
+
+
+
+def test_source_results_become_bounded_repair_evidence():
+    import tool_executor
+    from tool_result import ToolResult
+
+    source = "\n".join(
+        [
+            "from pathlib import Path",
+            "",
+            "def browser_connect():",
+            "    return True",
+            "",
+            "def browser_goto(url):",
+            "    return url",
+        ]
+        + ["unused = 1"] * 1200
+    )
+
+    tool_executor.LAST_EXECUTION_TRACE = [
+        {
+            "index": 1,
+            "tool": "read_file",
+            "argument": "browser_controller.py",
+            "status": "completed",
+            "success": True,
+            "verified": True,
+            "result": ToolResult(
+                success=True,
+                tool="read_file",
+                data=source,
+            ),
+            "message": source,
+        }
+    ]
+
+    agent = JarvisAgent()
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+
+    agent._record_execution_observation(
+        task,
+        attempt=1,
+        execution_result="done",
+    )
+
+    assert any(
+        "Source inspection completed." in observation
+        for observation in task.observations
+    )
+
+    assert not any(
+        "unused = 1" in observation
+        for observation in task.observations
+    )
+
+    assert task.evidence
+    evidence = task.evidence[-1]
+
+    assert evidence["tool"] == "read_file"
+    assert evidence["target"] == "browser_controller.py"
+    assert "browser_connect" in evidence["detail"]
+    assert "[evidence truncated by JARVIS]" not in evidence["detail"]
+
+    packet = agent._build_evidence_packet(task)
+
+    assert "browser_controller.py" in packet
+    assert "browser_connect" in packet
+    assert len(packet) < 18000
+
+
+def test_repair_handoff_tells_planner_to_use_evidence_and_stop_generic_discovery():
+    agent = JarvisAgent()
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+    task.goal = "repair browser automation"
+    task.evidence = [
+        {
+            "attempt": 1,
+            "tool": "read_file",
+            "target": "browser_controller.py",
+            "success": True,
+            "verified": True,
+            "detail": (
+                "Source excerpt with line numbers:\n"
+                "10: def browser_connect():"
+            ),
+        }
+    ]
+
+    request = agent._build_repair_request_after_discovery(task)
+
+    assert "You are now handing evidence to the repair planner." in request
+    assert "Do not repeat generic discovery" in request
+    assert "browser_controller.py" in request
+    assert "code_checkpoint BEFORE" in request
+    assert "code_test AFTER" in request
+    assert "Do not invent filenames" in request
