@@ -751,6 +751,20 @@ def assess_plan(
     from pathlib import Path
 
     base = Path.cwd().resolve()
+    protected_parts = {
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "jarvis_cuda",
+        "venv",
+        ".venv",
+        "node_modules",
+        "build",
+        "dist",
+        ".jarvis_checkpoints",
+    }
 
     for step in steps:
         if not isinstance(step, dict):
@@ -780,10 +794,20 @@ def assess_plan(
         candidate = (base / target).resolve()
 
         try:
-            candidate.relative_to(base)
+            relative_candidate = candidate.relative_to(base)
         except ValueError:
             issues.append(
                 f"The {tool} target must stay inside the project: {target}"
+            )
+            continue
+
+        if any(
+            part.lower() in protected_parts
+            for part in relative_candidate.parts
+        ):
+            issues.append(
+                f"The {tool} target points to an internal/generated path: "
+                f"{target}. Use the actual project source file instead."
             )
             continue
 
