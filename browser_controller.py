@@ -967,15 +967,16 @@ def click_at_coords(x: int, y: int) -> None:
 
 def cleanup_browser():
     global _playwright, _context, _page, _skipper_task, _loop
+
+    loop_to_close = _loop
+
     try:
-        if _loop and not _loop.is_closed():
+        if loop_to_close and not loop_to_close.is_closed():
             async def _close():
                 current_task = asyncio.current_task()
-                pending = []
 
-                if _skipper_task:
+                if _skipper_task and not _skipper_task.done():
                     _skipper_task.cancel()
-                    pending.append(_skipper_task)
 
                 if _context:
                     await _context.close()
@@ -983,25 +984,30 @@ def cleanup_browser():
                 if _playwright:
                     await _playwright.stop()
 
-                # Playwright owns an internal connection task. Await any
-                # remaining tasks before the event loop is released so Python
-                # does not report "Task was destroyed but it is pending!".
-                for task in asyncio.all_tasks():
+                # Playwright owns an internal connection task. Give the
+                # connection one loop turn to finish before cancelling any
+                # leftovers so shutdown does not destroy pending tasks.
+                await asyncio.sleep(0)
+
+                pending = [
+                    task
+                    for task in asyncio.all_tasks()
                     if (
                         task is not current_task
                         and not task.done()
-                        and task not in pending
-                    ):
-                        task.cancel()
-                        pending.append(task)
+                    )
+                ]
 
                 if pending:
+                    for task in pending:
+                        task.cancel()
+
                     await asyncio.gather(
                         *pending,
                         return_exceptions=True,
                     )
 
-            _loop.run_until_complete(_close())
+            loop_to_close.run_until_complete(_close())
     except Exception as exc:
         logging.debug(f"Browser cleanup exception: {exc}")
     finally:
@@ -1009,6 +1015,14 @@ def cleanup_browser():
         _context = None
         _page = None
         _skipper_task = None
+
+        if loop_to_close and not loop_to_close.is_closed():
+            try:
+                loop_to_close.close()
+            except Exception:
+                pass
+
+        _loop = None
 
 
 atexit.register(cleanup_browser)
