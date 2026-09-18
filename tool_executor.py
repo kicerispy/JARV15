@@ -2019,6 +2019,14 @@ def execute_plan(
                 trace_entry["message"] = error_message
                 trace_entry["status"] = "failed"
                 trace_entry["failure_type"] = "exception"
+                trace_entry["attempts"] = max(
+                    1,
+                    int(task_state.attempts or 1),
+                )
+                trace_entry["recovery_count"] = max(
+                    0,
+                    int(task_state.recovery_count or 0),
+                )
 
             if tool_name in BROWSER_TOOLS:
                 # Preserve browser state for replanning. The failed action may
