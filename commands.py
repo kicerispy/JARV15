@@ -1679,9 +1679,6 @@ CONTEXTUAL_PHRASES = (
 REFERENCE_WORDS = (
     "it",
     "that",
-    "this",
-    "one",
-    "there",
 )
 
 # ==================================================
