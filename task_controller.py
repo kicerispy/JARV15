@@ -208,9 +208,7 @@ class BackgroundTaskController:
                 task_state,
                 history_text,
             ),
-            initial_message=(
-                "I'm on it. I'll keep you updated and let you know when it's finished."
-            ),
+            initial_message="",
         )
 
     def _queue_speech(self, message: str) -> bool:
@@ -449,6 +447,21 @@ class BackgroundTaskController:
                 self._task_state = None
 
             self._thread = None
+
+        try:
+            from task_memory import record_task
+            record_task(
+                request=getattr(task, "request", ""),
+                goal=getattr(task, "goal", ""),
+                status=getattr(task, "status", ""),
+                result=getattr(task, "execution_result", ""),
+                error=getattr(task, "error", ""),
+                replans=getattr(task, "replan_count", 0),
+            )
+        except Exception as exc:
+            logger.debug(
+                f"JARVIS TASK CONTROLLER: Task memory skipped: {exc}"
+            )
 
         logger.info(
             "JARVIS TASK CONTROLLER: "
