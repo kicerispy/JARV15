@@ -149,3 +149,25 @@ def test_dev_command_rejects_shell_operators_as_invalid_arguments():
     assert result["verified"] is False
     assert result["retryable"] is False
     assert "Shell operators are not allowed" in result["message"]
+
+
+def test_validate_plan_resolves_voice_transcribed_filename(tmp_path, monkeypatch):
+    target = tmp_path / "jarvis_autonomous_test_target.py"
+    target.write_text("def add_numbers(a, b):\\n    return a + b\\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    plan = validate_plan(
+        {
+            "goal": "repair test target",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "jarvisautonomoustesttarget.py",
+                }
+            ],
+        }
+    )
+
+    assert plan["steps"][0]["tool"] == "read_file"
+    assert plan["steps"][0]["argument"] == "jarvis_autonomous_test_target.py"
+\n
