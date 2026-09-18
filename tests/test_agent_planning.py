@@ -1045,6 +1045,7 @@ def test_initial_repair_plan_recovers_named_target_after_planner_failure():
     assert planned.steps[0].argument == (
         "Jarvis Autonomous Test Target.py"
     )
+    assert len(agent.planner.calls) == 1
 
 
 def test_voice_dotted_filename_is_recovered_for_initial_repair():
@@ -1070,6 +1071,47 @@ def test_voice_dotted_filename_is_recovered_for_initial_repair():
     assert planned.steps[0].argument == (
         "Jarvis Autonomous Test Target.py"
     )
+
+
+def test_verified_find_file_target_feeds_deterministic_source_phase():
+    agent = JarvisAgent(
+        planner=lambda *args, **kwargs: {"steps": []},
+        executor=lambda *args, **kwargs: "done",
+    )
+    task = agent.create_task(
+        "diagnose and repair Jarvis Autonomous Test Target.py",
+    )
+    task.evidence = [
+        {
+            "tool": "find_file",
+            "target": "Jarvis Autonomous Test Target.py",
+            "success": True,
+            "verified": True,
+            "detail": (
+                "Found: C:\\project\\jarvis_autonomous_test_target.py"
+            ),
+        }
+    ]
+
+    assert (
+        agent._latest_verified_source_target(task)
+        == "Jarvis Autonomous Test Target.py"
+    )
+
+    phase_plan = agent._build_phase_fallback_plan(
+        task,
+        require_code_read=True,
+    )
+
+    assert phase_plan == {
+        "goal": "inspect verified target source",
+        "steps": [
+            {
+                "tool": "read_file",
+                "argument": "Jarvis Autonomous Test Target.py",
+            }
+        ],
+    }
 
 
 def test_required_source_read_rejects_empty_plan_and_recovers_target_from_discovery():
@@ -1280,7 +1322,7 @@ def test_clean_diagnostic_does_not_trigger_speculative_repair():
     )
 
     assert completed.status == "completed"
-    assert len(planner.calls) == 2
+    assert len(planner.calls) == 1
     assert len(executor.calls) == 2
     assert all(
         step["tool"] != "edit_file"
@@ -1311,7 +1353,7 @@ def test_verified_evidence_prevents_redundant_source_phase():
     )
 
     assert completed.status == "completed"
-    assert len(planner.calls) == 2
+    assert len(planner.calls) == 1
     assert len(executor.calls) == 2
     assert executor.calls[1]["steps"][0]["tool"] == "code_diagnose"
     assert (
