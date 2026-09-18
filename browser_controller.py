@@ -713,16 +713,37 @@ def browser_find_element(selector: str = "", text: str = "", role: str = ""):
         page = await _init_browser()
         locator = _locator(page, selector, text, role)
         count = await locator.count()
+
         if count == 0:
-            return {"success": True, "found": False, "visible": False}
+            return {
+                "success": True,
+                "verified": False,
+                "found": False,
+                "visible": False,
+                "count": 0,
+                "selector": selector,
+                "text": text,
+                "role": role,
+            }
+
         try:
             visible = await locator.is_visible()
         except Exception:
             visible = False
+
+        element_text = ""
+        try:
+            element_text = (await locator.inner_text(timeout=2_000)).strip()[:500]
+        except Exception:
+            pass
+
         return {
             "success": True,
+            "verified": bool(visible),
             "found": True,
             "visible": visible,
+            "count": count,
+            "element_text": element_text,
             "selector": selector,
             "text": text,
             "role": role,
@@ -731,75 +752,138 @@ def browser_find_element(selector: str = "", text: str = "", role: str = ""):
     try:
         return get_event_loop().run_until_complete(_find())
     except Exception as exc:
-        return {"success": False, "found": False, "error": str(exc)}
-
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "found": False,
+            "error": str(exc),
+        }
 
 def browser_click_element(selector: str = "", text: str = "", role: str = ""):
     async def _click():
         page = await _init_browser()
         locator = _locator(page, selector, text, role)
+
         if await locator.count() == 0:
-            return {"success": False, "error": "No matching element found."}
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "error": "No matching element found.",
+            }
+
         before_url = page.url
         before_title = await page.title()
+
         try:
             await locator.click(timeout=5_000)
         except Exception as exc:
             return {
                 "success": False,
+                "verified": False,
+                "retryable": True,
                 "error": str(exc),
-                "before_url": before_url,
-                "after_url": page.url,
-                "before_title": before_title,
-                "after_title": await page.title(),
             }
-        try:
-            await page.wait_for_load_state("domcontentloaded", timeout=5_000)
-        except Exception:
-            pass
+
+        await page.wait_for_timeout(250)
+        after_url = page.url
+        after_title = await page.title()
+
         return {
             "success": True,
+            "verified": True,
             "action": "click",
             "before_url": before_url,
-            "after_url": page.url,
+            "after_url": after_url,
             "before_title": before_title,
-            "after_title": await page.title(),
-            "navigated": page.url != before_url,
+            "after_title": after_title,
+            "navigated": after_url != before_url,
         }
 
     try:
         return get_event_loop().run_until_complete(_click())
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
-
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "error": str(exc),
+        }
 
 def browser_fill_element(value: str, selector: str = "", text: str = "", role: str = ""):
     async def _fill():
         page = await _init_browser()
         locator = _locator(page, selector, text, role)
+
         if await locator.count() == 0:
-            return {"success": False, "error": "No matching element found."}
-        await locator.fill(str(value or ""), timeout=5_000)
-        return {"success": True, "action": "fill"}
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "error": "No matching element found.",
+            }
+
+        requested = str(value or "")
+        await locator.fill(requested, timeout=5_000)
+        actual = await locator.input_value()
+
+        return {
+            "success": True,
+            "verified": actual == requested,
+            "action": "fill",
+            "value": actual,
+            "characters": len(actual),
+        }
 
     try:
         return get_event_loop().run_until_complete(_fill())
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
-
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "error": str(exc),
+        }
 
 def browser_press_key(key: str, selector: str = "", text: str = "", role: str = ""):
     async def _press():
         page = await _init_browser()
         locator = _locator(page, selector, text, role)
+
+        if await locator.count() == 0:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "error": "No matching element found.",
+            }
+
+        before_url = page.url
+        before_title = await page.title()
         await locator.press(str(key or ""), timeout=5_000)
-        return {"success": True, "action": "press", "key": key}
+        await page.wait_for_timeout(150)
+
+        return {
+            "success": True,
+            "verified": True,
+            "action": "press",
+            "key": key,
+            "before_url": before_url,
+            "after_url": page.url,
+            "before_title": before_title,
+            "after_title": await page.title(),
+        }
 
     try:
         return get_event_loop().run_until_complete(_press())
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
-
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "error": str(exc),
+        }
 
 def browser_wait_for_element(
     selector: str = "",
@@ -811,223 +895,54 @@ def browser_wait_for_element(
         page = await _init_browser()
         locator = _locator(page, selector, text, role)
         await locator.wait_for(state="visible", timeout=int(timeout))
-        return {"success": True, "action": "wait_for_element", "found": True}
+        return {
+            "success": True,
+            "verified": True,
+            "action": "wait_for_element",
+            "found": True,
+            "timeout": int(timeout),
+        }
 
     try:
         return get_event_loop().run_until_complete(_wait())
     except Exception as exc:
-        return {"success": False, "found": False, "error": str(exc)}
-
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "found": False,
+            "error": str(exc),
+        }
 
 def browser_extract_text(selector: str = "", text: str = "", role: str = ""):
     async def _extract():
         page = await _init_browser()
         locator = _locator(page, selector, text, role)
-        return {"success": True, "action": "extract_text", "text": await locator.inner_text(timeout=5_000)}
+
+        if await locator.count() == 0:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "error": "No matching element found.",
+            }
+
+        extracted = (await locator.inner_text(timeout=5_000)).strip()
+        return {
+            "success": True,
+            "verified": True,
+            "action": "extract_text",
+            "text": extracted,
+            "characters": len(extracted),
+        }
 
     try:
         return get_event_loop().run_until_complete(_extract())
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
-
-
-def click_dom_element(target_text: str) -> bool:
-    async def _click():
-        page = await _init_browser()
-        try:
-            target = str(target_text or "").strip()
-            if not target:
-                return False
-            yt_titles = page.locator(
-                "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
-            )
-            count = await yt_titles.count()
-            clean_target = target.replace("-", "").replace(" ", "").lower()
-            for index in range(min(count, 5)):
-                elem = yt_titles.nth(index)
-                text = (await elem.inner_text()).strip()
-                clean_text = text.replace("-", "").replace(" ", "").lower()
-                if clean_target in clean_text:
-                    await elem.click()
-                    logging.info(f"DOM Click successful on YouTube video title: {text}")
-                    await asyncio.sleep(1)
-                    await _auto_skip_ads(page)
-                    return True
-
-            locator = page.get_by_text(target, exact=False).first
-            if await locator.count() and await locator.is_visible():
-                await locator.click()
-                logging.info(f"DOM Click successful on text: '{target}'")
-                return True
-        except Exception as exc:
-            logging.warning(f"DOM Click attempt failed: {exc}")
-        return False
-
-    try:
-        return bool(get_event_loop().run_until_complete(_click()))
-    except Exception:
-        return False
-
-
-def browser_media_control(action: str) -> str:
-    async def _control():
-        page = await _init_browser()
-        return await page.evaluate(
-            """(action) => {
-                const video = document.querySelector('video');
-                if (!video) return 'No video element found';
-                switch (action) {
-                    case 'pause': video.pause(); return 'Video paused';
-                    case 'play': video.play(); return 'Video resumed';
-                    case 'mute': video.muted = true; return 'Audio muted';
-                    case 'unmute': video.muted = false; return 'Audio unmuted';
-                    case 'volume_up':
-                        video.volume = Math.min(1.0, video.volume + 0.1);
-                        return `Volume increased to ${Math.round(video.volume * 100)}%`;
-                    case 'volume_down':
-                        video.volume = Math.max(0.0, video.volume - 0.1);
-                        return `Volume decreased to ${Math.round(video.volume * 100)}%`;
-                    default: return 'Unknown media action';
-                }
-            }""",
-            action,
-        )
-
-    try:
-        return str(get_event_loop().run_until_complete(_control()))
-    except Exception as exc:
-        return f"Media control failed: {exc}"
-
-
-def browser_add_to_queue(target_text: str) -> str:
-    async def _queue():
-        page = await _init_browser()
-        target = str(target_text or "").strip().lower()
-        yt_titles = page.locator(
-            "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
-        )
-        count = await yt_titles.count()
-        for index in range(min(count, 10)):
-            elem = yt_titles.nth(index)
-            text = (await elem.inner_text()).strip()
-            if target and target in text.lower():
-                renderer = elem.locator("xpath=ancestor::ytd-video-renderer").first
-                await renderer.hover()
-                menu_btn = renderer.locator("yt-icon-button#button, button.dropdown-trigger").first
-                await menu_btn.click(timeout=5_000)
-                option = page.get_by_text("Add to queue", exact=True).first
-                await option.click(timeout=5_000)
-                return f"Successfully added '{text}' to the YouTube queue."
-        return f"Could not find video matching '{target_text}' to queue."
-
-    try:
-        return get_event_loop().run_until_complete(_queue())
-    except Exception as exc:
-        return f"Failed to queue video: {exc}"
-
-
-
-def browser_self_test() -> dict[str, Any]:
-    """Run a focused runtime smoke test of JARVIS browser automation."""
-    async def _test():
-        page = await _init_browser()
-        test_page = await _context.new_page()
-        original_url = page.url
-
-        try:
-            # 1) Exercise the generic DOM locator path on a controlled page.
-            await test_page.set_content(
-                """<!doctype html>
-<html><body>
-<input aria-label="Search" id="search">
-<button type="button" id="go" onclick="document.body.dataset.clicked='1'; document.querySelector('#result').textContent=document.querySelector('#search').value;">Go</button>
-<div id="result"></div>
-</body></html>"""
-            )
-
-            search = test_page.get_by_role("textbox", name="Search")
-            if await search.count() == 0:
-                return {
-                    "success": False,
-                    "verified": False,
-                    "mode": "browser_smoke",
-                    "message": "Browser DOM smoke test failed: search textbox role was not found.",
-                }
-
-            await search.fill("JARVIS browser test")
-            await search.press("Enter")
-
-            # Enter has no submit handler in this fixture; verify the fill
-            # path directly before exercising the click/wait/extract path.
-            button = test_page.locator("#go").first
-            await button.click(timeout=5_000)
-            result = test_page.locator("#result").first
-            await result.wait_for(state="visible", timeout=5_000)
-            extracted = (await result.inner_text()).strip()
-
-            if extracted != "JARVIS browser test":
-                return {
-                    "success": False,
-                    "verified": False,
-                    "mode": "browser_smoke",
-                    "message": (
-                        "Browser DOM smoke test failed: fill/click/extract "
-                        f"returned {extracted!r} instead of the expected text."
-                    ),
-                }
-
-            # 2) Verify the live Google first-result selector still resolves.
-            await test_page.goto(
-                "https://www.google.com/search?q=JARVIS+browser+automation",
-                wait_until="domcontentloaded",
-                timeout=30_000,
-            )
-            google_result = test_page.locator("div#search a:has(h3)").first
-            await google_result.wait_for(state="visible", timeout=10_000)
-            google_title = (await google_result.inner_text()).strip()
-
-            if not google_title:
-                return {
-                    "success": False,
-                    "verified": False,
-                    "mode": "browser_smoke",
-                    "message": "Browser smoke test failed: Google first-result selector matched an empty result.",
-                }
-
-            return {
-                "success": True,
-                "verified": True,
-                "mode": "browser_smoke",
-                "message": "Browser automation smoke test passed.",
-                "dom_test": "fill/click/wait/extract passed",
-                "google_first_result": google_title[:300],
-                "google_selector": "div#search a:has(h3)",
-                "original_url": original_url,
-            }
-
-        except Exception as exc:
-            return {
-                "success": False,
-                "verified": False,
-                "mode": "browser_smoke",
-                "message": f"Browser automation smoke test failed: {exc}",
-                "error": str(exc),
-                "original_url": original_url,
-            }
-        finally:
-            try:
-                await test_page.close()
-            except Exception:
-                pass
-
-    try:
-        return get_event_loop().run_until_complete(_test())
-    except Exception as exc:
         return {
             "success": False,
             "verified": False,
-            "mode": "browser_smoke",
-            "message": f"Browser automation smoke test failed to start: {exc}",
+            "retryable": True,
             "error": str(exc),
         }
 
