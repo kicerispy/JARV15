@@ -18,11 +18,11 @@ def test_latest_release_question_uses_web_search_without_full_planner():
 
 
 def test_current_weather_question_uses_weather_tool():
-    plan = fast_plan_for_request("What's the current weather in Chicago?")
+    plan = fast_plan_for_request("What's the current weather in Belvidere, IL?")
 
     assert plan is not None
     assert _tools(plan) == ["weather"]
-    assert plan["steps"][0]["argument"] == "Chicago"
+    assert plan["steps"][0]["argument"] == "Belvidere, IL"
 
 
 def test_local_current_project_request_stays_out_of_online_fast_path():
