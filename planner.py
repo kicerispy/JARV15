@@ -6,8 +6,6 @@ import json
 from typing import Any, Dict, List, Optional
 
 import config
-from ollama import chat
-
 from model_manager import ModelManager
 from logger import logger
 
@@ -1559,13 +1557,15 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
             else None
         )
 
-        response = chat(
-            model=planner_model,
-            messages=messages,
-            format="json",
-            options=repair_options,
-            keep_alive=config.CODING_MODEL_KEEP_ALIVE if is_repair_phase else None,
-        )
+        if is_repair_phase:
+            response = MODEL_MANAGER.coding(
+                messages,
+                format="json",
+                options=repair_options,
+                model=planner_model,
+            )
+        else:
+            response = MODEL_MANAGER.planner(messages, format="json")
 
         elapsed = time.perf_counter() - planner_start
 
@@ -1635,16 +1635,15 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                     f"falling back to {fallback_model}"
                 )
                 try:
-                    fallback_response = chat(
-                        model=fallback_model,
-                        messages=messages,
+                    fallback_response = MODEL_MANAGER.coding(
+                        messages,
                         format="json",
                         options={
                             "temperature": 0,
                             "num_predict": 240,
                             "num_ctx": config.CODING_NUM_CTX,
                         },
-                        keep_alive=config.CODING_MODEL_KEEP_ALIVE,
+                        model=fallback_model,
                     )
                     fallback_content = (
                         fallback_response
