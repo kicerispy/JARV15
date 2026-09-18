@@ -296,6 +296,10 @@ def test_background_task_completion_signal_is_set_and_consumed():
 
     assert controller.completion_event.is_set() is False
 
+    wait_event, already_completed = controller.prepare_followup_wait()
+    assert wait_event is None
+    assert already_completed is False
+
     assert controller.start(
         task,
         {},
@@ -308,7 +312,9 @@ def test_background_task_completion_signal_is_set_and_consumed():
     assert controller.wait_for_current(timeout=1) is True
 
     assert controller.completion_event.is_set() is True
-    assert controller.consume_completion_signal() is True
+    wait_event, already_completed = controller.prepare_followup_wait()
+    assert wait_event is None
+    assert already_completed is True
     assert controller.consume_completion_signal() is False
 
 
