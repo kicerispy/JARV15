@@ -342,6 +342,12 @@ def process_command(
         f"USER: {user_input}"
     )
 
+    task_controller = getattr(
+        state,
+        "task_controller",
+        None,
+    )
+
     # ========================================================
     # CONTEXTUAL YOUTUBE FOLLOW-UP
     # ========================================================
@@ -481,12 +487,6 @@ def process_command(
     # ==================================================
     # BACKGROUND TASK STATUS
     # ==================================================
-
-    task_controller = getattr(
-        state,
-        "task_controller",
-        None,
-    )
 
     if (
         task_controller is not None
