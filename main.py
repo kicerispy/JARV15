@@ -187,8 +187,8 @@ def build_system_prompt(
     if formality > 0.7:
 
         tone_parts.append(
-            "You are formally polite, addressing the user by name "
-            "and maintaining a composed demeanor."
+            "You are formally polite and maintain a composed demeanor. "
+            "Use the user's name sparingly, only when it adds warmth or clarity."
         )
 
     if technical_depth > 0.6:
