@@ -44,6 +44,7 @@ from logger import logger
 from planner import (
     assess_plan,
     create_plan,
+    is_explicit_self_repair_request,
     is_software_change_request,
     is_software_diagnostic_request,
     is_software_repair_request,
@@ -1104,8 +1105,7 @@ class JarvisAgent:
         # will take over.
         if (
             planning_request is None
-            and is_software_repair_request(task.request)
-            and is_software_diagnostic_request(task.request)
+            and is_explicit_self_repair_request(task.request)
             and not (
                 require_repair_plan
                 or require_code_read
