@@ -439,7 +439,7 @@ def test_required_diagnostic_phase_falls_back_to_verified_source_target():
 
     planned = agent.plan_task(
         task,
-        require_code_test=True,
+        require_code_diagnose=True,
     )
 
     assert planned.status == "ready"
@@ -1028,8 +1028,12 @@ class EvidencePhasePlanner:
                 "goal": "diagnostic validation",
                 "steps": [
                     {
-                        "tool": "code_test",
-                        "argument": '{"mode":"browser_smoke","path":"browser_controller.py"}',
+                        "tool": "code_diagnose",
+                        "argument": (
+                            '{"path":"browser_controller.py",'
+                            '"run_tests":false,"run_lint":false,'
+                            '"run_types":false}'
+                        ),
                     },
                 ],
             }
@@ -1082,13 +1086,21 @@ class EvidencePhaseExecutor:
                     tool=tool,
                     data="from pathlib import Path\\n\\ndef browser_connect():\\n    return True\\n",
                 )
-            elif tool == "code_test":
+            elif tool in {"code_test", "code_diagnose"}:
                 result = ToolResult(
                     success=True,
                     tool=tool,
                     data={
-                        "message": "Code validation passed.",
-                        "mode": "compile",
+                        "message": (
+                            "Project diagnostic passed."
+                            if tool == "code_diagnose"
+                            else "Code validation passed."
+                        ),
+                        "mode": (
+                            "diagnose"
+                            if tool == "code_diagnose"
+                            else "compile"
+                        ),
                         "path": "browser_controller.py",
                     },
                 )
@@ -1112,10 +1124,15 @@ class EvidencePhaseExecutor:
                         "Source inspection completed."
                         if tool == "read_file"
                         else
-                        "Code validation passed."
-                        if tool == "code_test"
-                        else
-                        "Discovery completed."
+                        (
+                            "Project diagnostic passed."
+                            if tool == "code_diagnose"
+                            else
+                            "Code validation passed."
+                            if tool == "code_test"
+                            else
+                            "Discovery completed."
+                        )
                     ),
                 }
             )
@@ -1178,7 +1195,7 @@ def test_verified_evidence_prevents_redundant_source_phase():
     assert completed.status == "completed"
     assert len(planner.calls) == 2
     assert len(executor.calls) == 2
-    assert executor.calls[1]["steps"][0]["tool"] == "code_test"
+    assert executor.calls[1]["steps"][0]["tool"] == "code_diagnose"
     assert (
         completed.execution_result
         == "Diagnostic validation passed; no reproducible defect was found, so no code change was made."
