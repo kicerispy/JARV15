@@ -8,7 +8,7 @@ for multi-step computer-control tasks.
 import ast
 import json
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from logger import logger
 from state import ActiveContext, TaskState
