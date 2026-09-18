@@ -53,6 +53,9 @@ class JarvisContext:
             ".tox",
             ".nox",
             ".cache",
+            "playwright_profile",
+            "chrome_automation",
+            "se-framework",
         }
 
         ignored_file_tokens = (
@@ -70,6 +73,7 @@ class JarvisContext:
             "conversation_history.json",
             "jarvis_history.json",
             "task_state.json",
+            "task_memory.json",
         }
 
         def should_include(path: Path) -> bool:
