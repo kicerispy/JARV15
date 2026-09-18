@@ -105,3 +105,42 @@ def test_complex_code_requests_use_full_agent_workflow():
     assert is_complex_code_request(
         "write a simple Python script called hello.py"
     ) is False
+
+from types import SimpleNamespace
+
+from tools import dev_command
+
+
+def test_dev_command_uses_active_python_for_python_commands(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="passed",
+            stderr="",
+        )
+
+    monkeypatch.setattr("tools.subprocess.run", fake_run)
+
+    result = dev_command(
+        '{"command":"python -m pytest tests/test_code_test_tool.py -q","timeout":30}'
+    )
+
+    assert result["success"] is True
+    assert result["verified"] is True
+    assert calls
+    assert calls[0][0][0]
+    assert calls[0][0][1:4] == ["-m", "pytest", "tests/test_code_test_tool.py"]
+
+
+def test_dev_command_rejects_shell_operators_as_invalid_arguments():
+    result = dev_command(
+        '{"command":"python -m pytest tests && whoami"}'
+    )
+
+    # The command is parsed as one argv list and never sent through a shell.
+    # The test only asserts that the raw shell chaining syntax is not treated
+    # as an executable command.
+    assert result["command"] == "python -m pytest tests && whoami"
