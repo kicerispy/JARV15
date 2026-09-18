@@ -1,5 +1,10 @@
 from agent_core import JarvisAgent
-from planner import assess_plan, is_software_repair_request, validate_plan
+from planner import (
+    assess_plan,
+    is_software_diagnostic_request,
+    is_software_repair_request,
+    validate_plan,
+)
 from state import TaskState
 
 
@@ -1134,3 +1139,22 @@ def test_verified_evidence_prevents_redundant_source_phase():
         == "Diagnostic validation passed; no reproducible defect was found, so no code change was made."
     )
 
+
+
+def test_self_repair_requests_get_extended_bounded_budget():
+    agent = JarvisAgent(
+        planner=lambda *args, **kwargs: {"steps": []},
+        executor=lambda *args, **kwargs: "done",
+    )
+
+    task = agent.create_task(
+        "diagnose yourself and fix your own code",
+    )
+
+    assert is_software_repair_request(
+        "diagnose yourself and fix your own code"
+    ) is True
+    assert is_software_diagnostic_request(
+        "diagnose your own code"
+    ) is True
+    assert task.max_replans == 5
