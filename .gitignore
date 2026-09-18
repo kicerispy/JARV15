@@ -27,6 +27,7 @@ profile.json
 voice_model/
 
 # Runtime/generated data
+task_memory.json
 *.wav
 *.db
 *.db-shm
