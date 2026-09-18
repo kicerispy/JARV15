@@ -992,6 +992,24 @@ class MalformedRequiredReadPlanner:
         }
 
 
+def test_requested_file_target_extractor_preserves_multi_word_names():
+    from agent_core import JarvisAgent
+
+    assert (
+        JarvisAgent._infer_requested_file_target(
+            "diagnose and repair Jarvis Autonomous Test Target.py"
+        )
+        == "Jarvis Autonomous Test Target.py"
+    )
+
+    assert (
+        JarvisAgent._infer_requested_file_target(
+            "diagnose and repair Jarvis Autonomous Test Target dot py"
+        )
+        == "Jarvis Autonomous Test Target.py"
+    )
+
+
 def test_initial_repair_plan_recovers_named_target_after_planner_failure():
     class EmptyPlanner:
         def __init__(self):
