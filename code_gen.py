@@ -1,12 +1,16 @@
 """
 JARVIS code generation handler - intercepts coding requests and generates files directly.
 """
+import ast
 import re
+import shutil
+import subprocess
+import sys
 from typing import Optional, Tuple
 
 from ollama import chat
 
-from config import CHAT_MODEL
+from config import CODING_MODEL, CODING_TEMPERATURE
 from logger import logger
 
 # Patterns that indicate a code generation request
@@ -125,9 +129,9 @@ Generate the code now:"""
 
     try:
         response = chat(
-            model=CHAT_MODEL,
+            model=CODING_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.3}
+            options={"temperature": CODING_TEMPERATURE},
         )
 
         code = response.get("message", {}).get("content", "").strip()
@@ -148,15 +152,180 @@ Generate the code now:"""
         return None
 
 
+def _clean_generated_code(code: str) -> str:
+    """Normalize model output before validation/writing."""
+    code = str(code or "").strip()
+    code = re.sub(
+        r"^\`\`\`(?:html|javascript|python|js|lua|css|typescript|ts)?\\n",
+        "",
+        code,
+        flags=re.IGNORECASE,
+    )
+    code = re.sub(r"\\n\`\`\`$", "", code)
+    return code.strip()
+
+
+def _validate_generated_file(filename: str, code: str) -> Tuple[bool, str]:
+    """Validate generated source without executing arbitrary generated code."""
+    suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+
+    if not code.strip():
+        return False, "Generated code is empty."
+
+    if suffix == "py":
+        try:
+            ast.parse(code, filename=filename)
+        except SyntaxError as exc:
+            return False, (
+                f"Python syntax error at line {exc.lineno}: "
+                f"{exc.msg}"
+            )
+
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "py_compile", filename],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception as exc:
+            return False, f"Python compile check could not start: {exc}"
+
+        if completed.returncode != 0:
+            return False, (
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or "Python compilation failed."
+            )
+
+        return True, "Python syntax and compilation checks passed."
+
+    if suffix in {"js", "mjs", "cjs"}:
+        node = shutil.which("node")
+        if not node:
+            return True, "JavaScript generated; Node.js syntax validation unavailable."
+
+        try:
+            completed = subprocess.run(
+                [node, "--check", filename],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception as exc:
+            return False, f"JavaScript syntax check could not start: {exc}"
+
+        if completed.returncode != 0:
+            return False, (
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or "JavaScript syntax validation failed."
+            )
+
+        return True, "JavaScript syntax validation passed."
+
+    if suffix == "html":
+        lowered = code.lower()
+        required = ("<html", "<body", "</html>")
+        missing = [tag for tag in required if tag not in lowered]
+        if missing:
+            return False, (
+                "HTML structure check failed; missing: "
+                + ", ".join(missing)
+            )
+
+        return True, "HTML structure validation passed."
+
+    if suffix == "lua":
+        lua = shutil.which("luac") or shutil.which("lua")
+        if not lua:
+            return True, "Lua generated; Lua syntax validation unavailable."
+
+        command = (
+            [lua, "-p", filename]
+            if lua.lower().endswith("luac.exe")
+            or lua.lower().endswith("luac")
+            else [lua, "-e", f"assert(loadfile({filename!r}))"]
+        )
+
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception as exc:
+            return False, f"Lua syntax check could not start: {exc}"
+
+        if completed.returncode != 0:
+            return False, (
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or "Lua syntax validation failed."
+            )
+
+        return True, "Lua syntax validation passed."
+
+    return True, "No language-specific executable validation was available."
+
+
+def _repair_generated_code(
+    user_request: str,
+    filename: str,
+    code: str,
+    failure: str,
+) -> Optional[str]:
+    """Ask the dedicated coding model to repair generated source from evidence."""
+    prompt = f"""You are JARVIS's coding specialist.
+
+A generated implementation failed validation.
+
+User request:
+{user_request}
+
+Target file:
+{filename}
+
+Validation failure:
+{failure}
+
+Current implementation:
+---BEGIN CURRENT CODE---
+{code}
+---END CURRENT CODE---
+
+Repair the implementation so it directly satisfies the original request.
+Preserve correct existing behavior. Do not invent external files unless
+the request requires them. Return ONLY the complete replacement contents
+of {filename}; no markdown fences and no explanation.
+"""
+
+    try:
+        response = chat(
+            model=CODING_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": min(float(CODING_TEMPERATURE), 0.2)},
+        )
+
+        repaired = _clean_generated_code(
+            response.get("message", {}).get("content", "")
+        )
+
+        return repaired or None
+
+    except Exception as exc:
+        logger.error(f"Code repair generation failed: {exc}")
+        return None
+
+
 def handle_code_generation(user_input: str) -> str:
     """
     Handle a code generation request end-to-end.
-    
-    Args:
-        user_input: The user's coding request.
-    
-    Returns:
-        Status message.
+
+    Generated source gets a bounded validation/repair loop before JARVIS
+    reports the request complete. Existing successful behavior and public
+    return strings are preserved.
     """
     logger.info(f"Generating code for: {user_input}")
 
@@ -165,13 +334,104 @@ def handle_code_generation(user_input: str) -> str:
         return "I couldn't generate the code. Please try rephrasing your request."
 
     filename, code = result
+    code = _clean_generated_code(code)
     is_roblox = "roblox" in user_input.lower() or filename.endswith(".lua")
 
-    # Write the file
     from file_tools import write_file
-    write_result = write_file(filename, code, overwrite=True)
 
-    if is_roblox:
-        return f"{write_result} For Roblox Studio: Insert the script into a Script object inside a Part, or use it as a ModuleScript/LocalScript as needed."
+    original_exists = False
+    original_content = ""
 
-    return f"{write_result} You can open {filename} to see your new {'game' if any(g in user_input.lower() for g in ['flappy', 'snake', 'pong', 'game']) else 'code'}."
+    try:
+        from pathlib import Path
+
+        target = Path.cwd() / filename
+        if target.exists() and target.is_file():
+            original_exists = True
+            original_content = target.read_text(encoding="utf-8")
+    except Exception:
+        pass
+
+    max_repair_attempts = 3
+    last_failure = ""
+
+    for attempt in range(max_repair_attempts + 1):
+        write_result = write_file(
+            filename,
+            code,
+            overwrite=True,
+        )
+
+        if str(write_result).startswith(
+            ("I couldn't", "File not found", "Invalid", "Error")
+        ):
+            last_failure = str(write_result)
+        else:
+            valid, diagnostic = _validate_generated_file(
+                filename,
+                code,
+            )
+
+            logger.info(
+                "Generated code validation attempt %s/%s for %s: %s",
+                attempt + 1,
+                max_repair_attempts + 1,
+                filename,
+                diagnostic,
+            )
+
+            if valid:
+                if is_roblox:
+                    return (
+                        f"{write_result} "
+                        "For Roblox Studio: Insert the script into a Script "
+                        "object inside a Part, or use it as a "
+                        "ModuleScript/LocalScript as needed."
+                    )
+
+                return (
+                    f"{write_result} "
+                    f"You can open {filename} to see your new "
+                    f"{'game' if any(g in user_input.lower() for g in ['flappy', 'snake', 'pong', 'game']) else 'code'}."
+                )
+
+            last_failure = diagnostic
+
+        if attempt >= max_repair_attempts:
+            break
+
+        repaired = _repair_generated_code(
+            user_input,
+            filename,
+            code,
+            last_failure,
+        )
+
+        if not repaired:
+            break
+
+        code = repaired
+
+    # Never leave a previously working file replaced by an unvalidated
+    # generated implementation after all repair attempts fail.
+    if original_exists:
+        try:
+            write_file(
+                filename,
+                original_content,
+                overwrite=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Could not restore original {filename}: {exc}"
+            )
+        return (
+            f"I generated {filename}, but validation failed after "
+            f"{max_repair_attempts} repair attempts. "
+            "The previous file was preserved."
+        )
+
+    return (
+        f"I generated {filename}, but validation failed after "
+        f"{max_repair_attempts} repair attempts: {last_failure}"
+    )
