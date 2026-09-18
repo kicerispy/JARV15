@@ -40,7 +40,7 @@ def test_speak_response_stops_on_interrupt():
     interrupted = response_pipeline.speak_response(
         "One. Two. Three.",
         fake_speak,
-        max_chars=40,
+        max_chars=10,
     )
     assert interrupted is True
     assert spoken == ["One.", "Two."]
