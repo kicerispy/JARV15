@@ -63,6 +63,7 @@ class TaskState:
     attempts: int = 0
     recovery_count: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _progress_callback: Any = field(default=None, repr=False, compare=False)
 
     def start(self, description: str, total_steps: int) -> None:
         """Start a new task."""
@@ -85,6 +86,25 @@ class TaskState:
             self.current_step = step_number
             self.current_tool = tool_name
             self.attempts = 0
+
+    def set_progress_callback(self, callback: Any) -> None:
+        """Set a callback used for user-facing task milestone updates."""
+        with self._lock:
+            self._progress_callback = callback
+
+    def report_progress(self, message: str) -> None:
+        """Report a concise progress update without failing the task."""
+        if not message:
+            return
+
+        with self._lock:
+            callback = self._progress_callback
+
+        if callback is not None:
+            try:
+                callback(str(message))
+            except Exception:
+                pass
 
     def record_result(self, result: Any) -> None:
         """Record the latest tool result."""
