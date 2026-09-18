@@ -826,6 +826,86 @@ def assess_plan(
 
 
 # ==========================================================
+# Project File Target Resolution
+# ==========================================================
+
+def _normalized_filename_key(value: str) -> str:
+    """Normalize a filename so voice-transcribed punctuation is ignored."""
+    import re
+
+    text = str(value or "").strip().lower()
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def _resolve_project_file_target(target: str, base) -> Optional[str]:
+    """Resolve an existing project file when punctuation/underscores were lost.
+
+    Resolution is conservative: a correction is returned only when exactly one
+    project file has the same normalized filename (or normalized relative path).
+    """
+    from pathlib import Path
+
+    raw = str(target or "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+
+    base = Path(base).resolve()
+    direct = (base / raw).resolve()
+    try:
+        direct.relative_to(base)
+    except ValueError:
+        return None
+
+    if direct.exists() and direct.is_file():
+        return direct.relative_to(base).as_posix()
+
+    ignored = {
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "jarvis_cuda",
+        "venv",
+        ".venv",
+        "node_modules",
+        "build",
+        "dist",
+    }
+
+    target_key = _normalized_filename_key(raw)
+    target_parts = [
+        _normalized_filename_key(part)
+        for part in Path(raw).parts
+        if part not in {".", ""}
+    ]
+
+    matches = []
+    try:
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in ignored for part in path.parts):
+                continue
+
+            relative = path.relative_to(base)
+            name_key = _normalized_filename_key(path.name)
+            relative_parts = [
+                _normalized_filename_key(part)
+                for part in relative.parts
+            ]
+
+            if name_key == target_key or relative_parts == target_parts:
+                matches.append(relative.as_posix())
+                if len(matches) > 1:
+                    break
+    except OSError:
+        return None
+
+    return matches[0] if len(matches) == 1 else None
+
+
+# ==========================================================
 # Plan Validation
 # ==========================================================
 
@@ -905,10 +985,21 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
                 continue
 
             if not candidate.exists():
-                logger.warning(
-                    f"Rejected nonexistent read_file target: {normalized_argument}"
+                resolved = _resolve_project_file_target(
+                    normalized_argument,
+                    Path.cwd().resolve(),
                 )
-                continue
+                if resolved:
+                    logger.info(
+                        "Resolved probable voice-transcribed file path "
+                        f"{normalized_argument!r} -> {resolved!r}"
+                    )
+                    normalized_argument = resolved
+                else:
+                    logger.warning(
+                        f"Rejected nonexistent read_file target: {normalized_argument}"
+                    )
+                    continue
 
         clean.append({
             "tool": str(tool),
