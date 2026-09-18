@@ -2419,12 +2419,33 @@ def code_diagnose(argument=""):
         })
 
     tests_dir = base / "tests"
-    if run_tests and tests_dir.exists() and tests_dir.is_dir():
+    target_is_test_file = (
+        target_path is not None
+        and target_path.is_file()
+        and (
+            target_path.name.startswith("test_")
+            or target_path.name.endswith("_test.py")
+            or "tests" in target_path.relative_to(base).parts
+        )
+    )
+
+    if run_tests and tests_dir.exists() and tests_dir.is_dir() and (
+        target_path is None or target_is_test_file
+    ):
         test_target = str(target_path) if target_path is not None else "tests"
         run_check(
             "pytest",
             [sys.executable, "-m", "pytest", test_target, "-q"],
         )
+    elif run_tests and target_path is not None and not target_is_test_file:
+        checks.append({
+            "name": "pytest",
+            "status": "skipped",
+            "required": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "Skipped: targeted diagnostic is for an implementation file, not a test file.",
+        })
     elif run_tests:
         checks.append({
             "name": "pytest",
@@ -2490,18 +2511,25 @@ def code_diagnose(argument=""):
 
     success = bool(required_checks) and not failures
 
+    summary = (
+        "Project diagnostic passed."
+        if success
+        else "Project diagnostic found actionable issues."
+        if failures
+        else "Project diagnostic completed without required checks."
+    )
+
+    message = summary
+    if failures:
+        message += " " + str(failures[0])
+
     return {
         "success": success,
         "verified": success,
         "mode": "diagnose",
         "path": target or ".",
-        "summary": (
-            "Project diagnostic passed."
-            if success
-            else "Project diagnostic found actionable issues."
-            if failures
-            else "Project diagnostic completed without required checks."
-        ),
+        "summary": summary,
+        "message": message,
         "checks": checks,
         "failures": failures[:20],
         "check_count": len(checks),
