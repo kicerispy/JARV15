@@ -59,6 +59,71 @@ def test_validate_plan_preserves_internal_phase_metadata():
     ]
 
 
+def test_agent_install_phase_reasserts_internal_phase_metadata():
+    agent = JarvisAgent(planner=lambda *args, **kwargs: {})
+    task = agent.create_task("inspect the browser automation")
+
+    installed = agent._install_phase_plan(
+        task,
+        {
+            "goal": "targeted diagnostic",
+            "jarvis_internal_phase": True,
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                }
+            ],
+        },
+    )
+
+    assert installed.planner_result.get("jarvis_internal_phase") is True
+
+
+def test_internal_executor_phase_does_not_speak():
+    import tool_executor
+
+    original_run_tool = tool_executor.run_tool
+    spoken = []
+
+    def fake_run_tool(tool_name, argument=""):
+        assert tool_name == "code_diagnose"
+        return {
+            "success": True,
+            "verified": True,
+            "message": "Diagnostic passed.",
+            "path": "browser_controller.py",
+        }
+
+    try:
+        tool_executor.run_tool = fake_run_tool
+
+        result = tool_executor.execute_plan(
+            {
+                "goal": "targeted diagnostic",
+                "jarvis_internal_phase": True,
+                "steps": [
+                    {
+                        "tool": "code_diagnose",
+                        "argument": (
+                            '{"path":"browser_controller.py",'
+                            '"run_tests":false,"run_lint":false,'
+                            '"run_types":false}'
+                        ),
+                    }
+                ],
+            },
+            {},
+            TaskState(),
+            lambda message: spoken.append(message) or False,
+        )
+    finally:
+        tool_executor.run_tool = original_run_tool
+
+    assert result == "done"
+    assert spoken == []
+
+
 def test_repair_plan_requires_inspection_checkpoint_and_test():
     issues = assess_plan(
         "inspect the browser automation and fix the problem",
