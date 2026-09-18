@@ -713,7 +713,7 @@ class JarvisAgent:
             if target:
                 return target
 
-        inferred = self._infer_source_target_from_evidence(task)
+        inferred = JarvisAgent._infer_source_target_from_evidence(task)
 
         if inferred:
             return inferred
