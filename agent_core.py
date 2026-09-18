@@ -32,6 +32,7 @@ The existing tool_executor.py remains responsible for:
 
 from __future__ import annotations
 
+import json
 import re
 import time
 import uuid
@@ -559,6 +560,75 @@ class JarvisAgent:
     # Planning
     # ======================================================
 
+    @staticmethod
+    def _latest_verified_source_target(
+        task: AgentTask,
+    ) -> Optional[str]:
+        """Return the latest verified read_file target from task evidence."""
+        for evidence in reversed(task.evidence):
+            if not isinstance(evidence, dict):
+                continue
+
+            if (
+                str(evidence.get("tool", "") or "").strip()
+                != "read_file"
+            ):
+                continue
+
+            if not (
+                evidence.get("success")
+                and evidence.get("verified")
+            ):
+                continue
+
+            target = str(
+                evidence.get("target", "")
+                or ""
+            ).strip()
+
+            if target:
+                return target
+
+        return None
+
+    def _build_phase_fallback_plan(
+        self,
+        task: AgentTask,
+        require_code_read: bool = False,
+        require_code_test: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Build a deterministic minimal plan when a required phase dead-ends."""
+        target = self._latest_verified_source_target(task)
+
+        if require_code_test and target:
+            return {
+                "goal": "diagnostic validation",
+                "steps": [
+                    {
+                        "tool": "code_test",
+                        "argument": json.dumps(
+                            {
+                                "mode": "compile",
+                                "path": target,
+                            }
+                        ),
+                    }
+                ],
+            }
+
+        if require_code_read and target:
+            return {
+                "goal": "inspect verified target source",
+                "steps": [
+                    {
+                        "tool": "read_file",
+                        "argument": target,
+                    }
+                ],
+            }
+
+        return None
+
     def plan_task(
         self,
         task: AgentTask,
@@ -637,7 +707,11 @@ class JarvisAgent:
                 require_code_test=require_code_test,
                 allow_prior_evidence=(
                     bool(task.evidence)
-                    and require_repair_plan
+                    and (
+                        require_repair_plan
+                        or require_code_read
+                        or require_code_test
+                    )
                 ),
             )
 
@@ -696,19 +770,25 @@ class JarvisAgent:
                                 "files yet."
                             ),
                             (
-                                "Read the actual target source file with "
-                                "read_file before selecting the fix."
+                                "The corrected plan must include the "
+                                "required read_file step before proceeding."
                                 if require_code_read
                                 else
-                                "Use the observed code and do not invent "
-                                "filenames."
+                                (
+                                    "The corrected plan must include "
+                                    "code_test before proceeding."
+                                    if require_code_test
+                                    else
+                                    "Use the observed code and do not "
+                                    "invent filenames."
+                                )
                             ),
                             "Do not invent filenames. Discover the actual "
                             "target file before editing.",
                         ]
                     )
 
-                    if require_repair_plan and task.evidence:
+                    if task.evidence:
                         correction_lines.extend(
                             [
                                 "",
@@ -729,6 +809,44 @@ class JarvisAgent:
                     )
 
                     continue
+
+                fallback_plan = self._build_phase_fallback_plan(
+                    task,
+                    require_code_read=require_code_read,
+                    require_code_test=require_code_test,
+                )
+
+                if fallback_plan is not None:
+                    fallback_plan = validate_plan(fallback_plan)
+                    fallback_issues = assess_plan(
+                        task.request,
+                        fallback_plan,
+                        require_modification=require_repair_plan,
+                        require_code_read=require_code_read,
+                        require_code_test=require_code_test,
+                        allow_prior_evidence=bool(task.evidence),
+                    )
+
+                    if not fallback_issues:
+                        logger.info(
+                            "JARVIS AGENT: Using deterministic fallback "
+                            "for the required planning phase."
+                        )
+                        task.observations.append(
+                            "Planner fallback: generated a deterministic "
+                            "required-phase validation step from verified "
+                            "evidence."
+                        )
+                        task.planner_result = fallback_plan
+                        task.goal = str(
+                            fallback_plan.get("goal", "") or ""
+                        )
+                        task.steps = self._build_steps(
+                            fallback_plan
+                        )
+                        self.state["last_goal"] = task.goal
+                        self.state["last_status"] = "ready"
+                        return task
 
                 task.status = "failed"
                 task.error = (
