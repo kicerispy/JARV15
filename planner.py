@@ -520,7 +520,30 @@ def is_software_repair_request(text: str) -> bool:
         )
     )
 
-    return explicit_self_repair or (
+    explicit_self_diagnostic_repair = (
+        any(
+            phrase in normalized
+            for phrase in (
+                "diagnose yourself",
+                "self diagnose",
+                "self-diagnose",
+                "run a full diagnostic on yourself",
+                "run a full diagnostic on your own code",
+                "audit yourself",
+                "audit your own code",
+                "check yourself for bugs",
+                "check your own code",
+                "inspect your own code",
+                "find bugs in your own code",
+            )
+        )
+        and any(
+            term in normalized
+            for term in CODE_REPAIR_TERMS
+        )
+    )
+
+    return explicit_self_repair or explicit_self_diagnostic_repair or (
         any(term in normalized for term in CODE_REPAIR_TERMS)
         and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
     )
