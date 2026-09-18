@@ -1321,7 +1321,22 @@ If a targeted reread is truly necessary, use read_file on the specific file,
 then return the mutation plan on the next planning attempt. Do not repeat
 project-wide discovery.
 
-Return ONLY valid JSON with goal and steps. Every argument must be a string.
+REPAIR PLAN SCHEMA — REQUIRED:
+{
+  "goal": "brief repair goal",
+  "steps": [
+    {"tool": "code_checkpoint", "argument": ""},
+    {"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"},
+    {"tool": "code_test", "argument": "{\"mode\":\"compile\",\"path\":\"existing_file.py\"}"}
+  ]
+}
+
+The steps array MUST contain actual tool objects with a non-empty "tool"
+field. Do not emit null tools, prose, markdown, commentary, or alternative
+schemas. For an existing Python file, copy the exact failing source text
+from the verified evidence into edit_file.old_text and change only what is
+required to repair the documented failure. The final step MUST validate the
+same file. Return ONLY that JSON object.
 """
     elif is_source_read_phase:
         system_content = f"""You are JARVIS's focused source-inspection planner.
@@ -1392,7 +1407,12 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         response = chat(
             model=planner_model,
             messages=messages,
-            format="json"
+            format="json",
+            options=(
+                {"temperature": 0}
+                if is_repair_phase
+                else None
+            ),
         )
 
         print(
