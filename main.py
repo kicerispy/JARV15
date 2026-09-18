@@ -1992,6 +1992,15 @@ def main():
 
             if result == "shutdown":
 
+                if (
+                    state.task_controller is not None
+                    and state.task_controller.has_active_task()
+                ):
+                    state.task_controller.cancel_current()
+                    state.task_controller.wait_for_current()
+                else:
+                    state.task_state.finish()
+
                 break
 
     except KeyboardInterrupt:
@@ -2015,5 +2024,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    try:
+        from browser_controller import cleanup_browser
+        cleanup_browser()
+    except Exception as exc:
+        logger.debug(f"Browser cleanup after main exit failed: {exc}")
 
 
