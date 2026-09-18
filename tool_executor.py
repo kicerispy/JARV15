@@ -1038,12 +1038,20 @@ def execute_plan(
     # Start task state
     # --------------------------------------------------------
 
-    task_state.start(
+    started = task_state.start(
         description=planning_input,
         total_steps=len(
             executable_steps
         ),
     )
+
+    if not started:
+        logger.info(
+            "JARVIS: Task was cancelled before execution started."
+        )
+        active_context.clear()
+        task_state.finish()
+        return "cancelled"
 
     logger.info(
         f"Task started: "
