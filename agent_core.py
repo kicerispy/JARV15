@@ -1224,7 +1224,9 @@ class JarvisAgent:
                     ]
                 )
 
-                pages = browser_state.get("pages")
+                pages = browser_state.get("open_pages")
+                if not isinstance(pages, list):
+                    pages = browser_state.get("pages")
 
                 if isinstance(pages, list) and pages:
                     lines.append(
