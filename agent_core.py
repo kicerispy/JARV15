@@ -673,6 +673,7 @@ class JarvisAgent:
                     or ".bak" in lowered
                     or "backup" in lowered
                     or "__pycache__" in lowered
+                    or ".jarvis_checkpoints" in lowered
                 ):
                     continue
 
