@@ -208,7 +208,7 @@ class BackgroundTaskController:
                 task_state,
                 history_text,
             ),
-            initial_message="",
+            initial_message="On it.",
         )
 
     def _queue_speech(self, message: str) -> bool:
