@@ -157,3 +157,127 @@ def test_diagnostic_only_request_does_not_require_modification():
     )
 
     assert issues == []
+
+
+def test_discovery_plan_is_allowed_before_repair_phase():
+    issues = assess_plan(
+        "inspect the browser automation and fix the problem",
+        {
+            "goal": "inspect browser automation",
+            "steps": [
+                {"tool": "list_files", "argument": ""},
+                {
+                    "tool": "find_file",
+                    "argument": "browser_controller.py",
+                },
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                },
+            ],
+        },
+        require_modification=False,
+    )
+
+    assert issues == []
+
+
+def test_repair_phase_requires_modification_and_validation():
+    issues = assess_plan(
+        "inspect the browser automation and fix the problem",
+        {
+            "goal": "inspect browser automation",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                },
+            ],
+        },
+        require_modification=True,
+    )
+
+    assert any("modification" in issue.lower() for issue in issues)
+    assert any("code_test" in issue.lower() for issue in issues)
+
+
+class DiscoveryThenRepairPlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        if len(self.calls) == 1:
+            return {
+                "goal": "inspect browser automation",
+                "steps": [
+                    {"tool": "list_files", "argument": ""},
+                    {
+                        "tool": "find_file",
+                        "argument": "browser_controller.py",
+                    },
+                    {
+                        "tool": "read_file",
+                        "argument": "browser_controller.py",
+                    },
+                ],
+            }
+
+        return valid_repair_plan()
+
+
+class RecordingExecutor:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        plan,
+        active_context,
+        task_state,
+        speak_callback,
+    ):
+        import tool_executor
+
+        tool_executor.LAST_EXECUTION_TRACE = []
+        self.calls.append(plan)
+        return "done"
+
+
+def test_successful_discovery_transitions_into_repair_phase():
+    planner = DiscoveryThenRepairPlanner()
+    executor = RecordingExecutor()
+    agent = JarvisAgent(
+        planner=planner,
+        executor=executor,
+    )
+
+    task = agent.create_task(
+        "inspect the browser automation, find the problem, fix it, and test it"
+    )
+
+    planned = agent.plan_task(task)
+    assert planned.status == "ready"
+    assert [step.tool for step in planned.steps] == [
+        "list_files",
+        "find_file",
+        "read_file",
+    ]
+
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner.calls) == 2
+    assert len(executor.calls) == 2
+    assert executor.calls[1]["steps"][-1]["tool"] == "code_test"
