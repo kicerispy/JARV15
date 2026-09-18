@@ -632,9 +632,35 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
             logger.warning(f"Rejected unknown tool: {tool}")
             continue
 
+        normalized_argument = (
+            str(argument) if argument is not None else ""
+        )
+
+        # Discard hallucinated source-read steps before execution when the
+        # planner also supplied other usable steps. A bad read target should
+        # never be allowed to turn a valid investigation into a tool failure.
+        if tool == "read_file" and normalized_argument.strip():
+            from pathlib import Path
+
+            candidate = (Path.cwd().resolve() / normalized_argument.strip()).resolve()
+
+            try:
+                candidate.relative_to(Path.cwd().resolve())
+            except ValueError:
+                logger.warning(
+                    f"Rejected read_file target outside project: {normalized_argument}"
+                )
+                continue
+
+            if not candidate.exists():
+                logger.warning(
+                    f"Rejected nonexistent read_file target: {normalized_argument}"
+                )
+                continue
+
         clean.append({
             "tool": str(tool),
-            "argument": str(argument) if argument is not None else ""
+            "argument": normalized_argument,
         })
 
     return {
