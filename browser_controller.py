@@ -213,11 +213,7 @@ def _locator(
     text: str = "",
     role: str = "",
 ):
-    """Build a Playwright locator from one explicit targeting strategy.
-
-    JARVIS should never silently target the entire page when no target was
-    supplied. Callers must provide selector, text, or role.
-    """
+    """Build a Playwright locator from one explicit targeting strategy."""
     selector = str(selector or "").strip()
     text = str(text or "").strip()
     role = str(role or "").strip()
@@ -288,6 +284,534 @@ def _dom_target_args(
     }
 
 
+
+async def browser_page_info_async(page) -> dict[str, Any]:
+    open_pages = []
+    if _context:
+        for opened_page in _context.pages:
+            try:
+                open_pages.append({
+                    "url": opened_page.url,
+                    "title": await opened_page.title(),
+                })
+            except Exception:
+                open_pages.append({
+                    "url": getattr(opened_page, "url", ""),
+                    "title": "",
+                })
+
+    return {
+        "success": True,
+        "url": page.url,
+        "title": await page.title(),
+        "pages": len(open_pages),
+        "open_pages": open_pages,
+    }
+
+
+def browser_status() -> dict[str, Any]:
+    """Return browser state without starting a new browser session."""
+    try:
+        if _context is None:
+            return {
+                "success": True,
+                "connected": False,
+                "pages": [],
+                "message": "Browser is not connected.",
+            }
+
+        open_pages = []
+        for opened_page in _context.pages:
+            try:
+                open_pages.append({
+                    "url": opened_page.url,
+                    "title": "",
+                })
+            except Exception:
+                pass
+
+        return {
+            "success": True,
+            "connected": True,
+            "pages": open_pages,
+            "message": "Browser is connected.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "connected": False,
+            "error": str(exc),
+        }
+
+
+def browser_page_info() -> dict[str, Any]:
+    try:
+        page = get_event_loop().run_until_complete(_init_browser())
+        return get_event_loop().run_until_complete(browser_page_info_async(page))
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def browser_search_google(query: str) -> dict[str, Any]:
+    return browser_goto("https://www.google.com/search?q=" + quote_plus(str(query or "").strip()))
+
+
+def browser_search_bing(query: str) -> dict[str, Any]:
+    return browser_goto("https://www.bing.com/search?q=" + quote_plus(str(query or "").strip()))
+
+
+def decode_bing_href(href: str) -> str:
+    if not href:
+        return ""
+    try:
+        parsed = urlparse(href)
+        encoded_u = parse_qs(parsed.query).get("u", [None])[0]
+        if not encoded_u:
+            return href
+        value = unquote(encoded_u)
+        if value.startswith("a1"):
+            encoded = value[2:]
+            try:
+                decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode(
+                    "utf-8", errors="ignore"
+                )
+                if decoded.startswith(("http://", "https://")):
+                    return decoded
+            except Exception:
+                pass
+        return value if value.startswith(("http://", "https://")) else href
+    except Exception:
+        return href
+
+
+async def _get_bing_results_async(page) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    containers = page.locator("li.b_algo")
+    count = await containers.count()
+    for index in range(count):
+        try:
+            container = containers.nth(index)
+            link = container.locator("h2 a").first
+            if await link.count() == 0:
+                continue
+            title = (await link.inner_text()).strip()
+            href = (await link.get_attribute("href") or "").strip()
+            if not title or not href:
+                continue
+            results.append(
+                {
+                    "index": index,
+                    "title": title,
+                    "href": href,
+                    "url": decode_bing_href(href),
+                }
+            )
+        except Exception:
+            continue
+    return results
+
+
+def browser_click_first_bing_result(query: Optional[str] = None) -> dict[str, Any]:
+    async def _click():
+        page = await _init_browser()
+        if query:
+            await page.goto(
+                "https://www.bing.com/search?q=" + quote_plus(query),
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+        results = await _get_bing_results_async(page)
+        if not results:
+            return {
+                "success": False,
+                "action": "click_first_bing_result",
+                "query": query,
+                "reason": "No Bing organic results were found in the DOM.",
+                "url": page.url,
+                "title": await page.title(),
+            }
+
+        first = results[0]
+        before_url = page.url
+        link = page.locator("li.b_algo").nth(first["index"]).locator("h2 a").first
+
+        try:
+            await link.scroll_into_view_if_needed(timeout=5_000)
+            await link.click(timeout=5_000)
+        except Exception:
+            target = first["url"]
+            if target.startswith(("http://", "https://")):
+                await page.goto(target, wait_until="domcontentloaded", timeout=30_000)
+            else:
+                raise
+
+        await page.wait_for_timeout(750)
+        return {
+            "success": page.url != before_url,
+            "action": "click_first_bing_result",
+            "query": query,
+            "result_title": first["title"],
+            "result_url": first["url"],
+            "before_url": before_url,
+            "after_url": page.url,
+            "title": await page.title(),
+            "navigated": page.url != before_url,
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_click())
+    except Exception as exc:
+        return {
+            "success": False,
+            "action": "click_first_bing_result",
+            "query": query,
+            "error": str(exc),
+        }
+
+
+def _infer_site(site: str, page_url: str) -> str:
+    site = str(site or "").strip().lower()
+    if site:
+        return site
+    lowered = str(page_url or "").lower()
+    if "youtube.com" in lowered:
+        return "youtube"
+    if "google." in lowered:
+        return "google"
+    return ""
+
+
+def browser_back() -> dict[str, Any]:
+    """Navigate the current browser page back and verify the URL changed."""
+    async def _back():
+        page = await _init_browser()
+        before_url = page.url
+        before_title = await page.title()
+        try:
+            response = await page.go_back(
+                wait_until="domcontentloaded",
+                timeout=15_000,
+            )
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "error": str(exc),
+                "before_url": before_url,
+                "before_title": before_title,
+            }
+
+        await page.wait_for_timeout(300)
+        after_url = page.url
+        after_title = await page.title()
+
+        return {
+            "success": response is not None or after_url != before_url,
+            "verified": after_url != before_url,
+            "action": "browser_back",
+            "before_url": before_url,
+            "after_url": after_url,
+            "before_title": before_title,
+            "after_title": after_title,
+            "url": after_url,
+            "title": after_title,
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_back())
+    except Exception as exc:
+        return {"success": False, "verified": False, "error": str(exc)}
+
+
+def browser_click_result(
+    index: int = 1,
+    site: str = "",
+    query: str = "",
+) -> dict[str, Any]:
+    """Click an ordinal Google or YouTube result through the DOM."""
+    if isinstance(index, str) and index.strip().lower() in {"last", "final"}:
+        index = -1
+    else:
+        try:
+            index = int(index)
+        except Exception:
+            index = 1
+
+    async def _click():
+        page = await _init_browser()
+
+        if query:
+            inferred = _infer_site(site, page.url)
+            if inferred == "youtube":
+                await page.goto(
+                    "https://www.youtube.com/results?search_query=" + quote_plus(query),
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
+            elif inferred == "google":
+                await page.goto(
+                    "https://www.google.com/search?q=" + quote_plus(query),
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
+            else:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "error": f"Unsupported result site: {inferred or site}",
+                }
+
+        resolved_site = _infer_site(site, page.url)
+        if resolved_site == "youtube":
+            results = page.locator(
+                "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
+            )
+        elif resolved_site == "google":
+            results = page.locator("div#search a:has(h3)")
+        else:
+            return {
+                "success": False,
+                "verified": False,
+                "error": f"Unsupported result site: {resolved_site or site}",
+                "url": page.url,
+            }
+
+        count = await results.count()
+        if count == 0:
+            return {
+                "success": False,
+                "verified": False,
+                "error": "No organic browser results were found.",
+                "url": page.url,
+            }
+
+        selected_index = count - 1 if index < 0 else index - 1
+        if selected_index < 0 or selected_index >= count:
+            return {
+                "success": False,
+                "verified": False,
+                "error": f"Result number {index} is out of range; {count} result(s) are available.",
+                "url": page.url,
+            }
+
+        locator = results.nth(selected_index)
+        await locator.wait_for(state="visible", timeout=10_000)
+
+        before_url = page.url
+        before_title = await page.title()
+        result_title = ""
+        try:
+            heading = locator.locator("h3").first
+            if await heading.count():
+                result_title = (await heading.inner_text()).strip()
+        except Exception:
+            pass
+
+        if not result_title:
+            result_title = (await locator.inner_text()).strip()
+
+        result_url = (await locator.get_attribute("href") or "").strip()
+
+        try:
+            await locator.scroll_into_view_if_needed(timeout=5_000)
+            await locator.click(timeout=5_000)
+        except Exception:
+            if result_url.startswith(("http://", "https://")):
+                await page.goto(
+                    result_url,
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
+            else:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "error": "DOM click failed and the result had no usable URL.",
+                    "before_url": before_url,
+                    "before_title": before_title,
+                }
+
+        try:
+            await page.wait_for_load_state(
+                "domcontentloaded",
+                timeout=5_000,
+            )
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(500)
+        after_url = page.url
+        after_title = await page.title()
+
+        verified = after_url != before_url
+        if resolved_site == "youtube":
+            verified = verified and "/watch" in after_url
+
+        return {
+            "success": bool(after_url != before_url),
+            "verified": bool(verified),
+            "action": "browser_click_result",
+            "site": resolved_site,
+            "index": index,
+            "query": query,
+            "result_title": result_title,
+            "result_url": result_url,
+            "before_url": before_url,
+            "after_url": after_url,
+            "before_title": before_title,
+            "after_title": after_title,
+            "navigated": after_url != before_url,
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_click())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "action": "browser_click_result",
+            "index": index,
+            "site": site,
+            "query": query,
+            "error": str(exc),
+        }
+
+
+def browser_click_first_result(site: str = "", query: str = "") -> dict[str, Any]:
+    """Click the first organic result using Playwright DOM controls."""
+    site = str(site or "").strip().lower()
+    query = str(query or "").strip()
+
+    async def _click():
+        page = await _init_browser()
+
+        if query:
+            if site == "youtube":
+                target_url = "https://www.youtube.com/results?search_query=" + quote_plus(query)
+            elif site == "google":
+                target_url = "https://www.google.com/search?q=" + quote_plus(query)
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unsupported first-result site: {site}",
+                }
+
+            await page.goto(
+                target_url,
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+
+        if site == "youtube":
+            locator = page.locator(
+                "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
+            ).first
+        elif site == "google":
+            locator = page.locator("div#search a:has(h3)").first
+        else:
+            return {
+                "success": False,
+                "error": f"Unsupported first-result site: {site}",
+                "url": page.url,
+            }
+
+        try:
+            await locator.wait_for(
+                state="visible",
+                timeout=10_000,
+            )
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": f"First organic result was not found in the DOM: {exc}",
+                "url": page.url,
+                "title": await page.title(),
+            }
+
+        before_url = page.url
+        before_title = await page.title()
+
+        result_title = ""
+        try:
+            result_title = (await locator.inner_text()).strip()
+        except Exception:
+            result_title = ""
+
+        result_url = (await locator.get_attribute("href") or "").strip()
+
+        try:
+            await locator.scroll_into_view_if_needed(timeout=5_000)
+            await locator.click(timeout=5_000)
+        except Exception:
+            if result_url.startswith(("http://", "https://")):
+                await page.goto(
+                    result_url,
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
+            else:
+                return {
+                    "success": False,
+                    "error": "DOM click failed and the result had no usable URL.",
+                    "before_url": before_url,
+                    "before_title": before_title,
+                }
+
+        try:
+            await page.wait_for_load_state(
+                "domcontentloaded",
+                timeout=5_000,
+            )
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(750)
+
+        after_url = page.url
+        after_title = await page.title()
+
+        expected_navigation = (
+            after_url != before_url
+            and (
+                site != "youtube"
+                or "/watch" in after_url
+                or "youtube.com/watch" in after_url
+            )
+        )
+
+        return {
+            "success": bool(after_url != before_url),
+            "verified": bool(expected_navigation),
+            "action": "click_first_result",
+            "site": site,
+            "query": query,
+            "result_title": result_title,
+            "result_url": result_url,
+            "before_url": before_url,
+            "after_url": after_url,
+            "before_title": before_title,
+            "after_title": after_title,
+            "navigated": after_url != before_url,
+            "dom_control": True,
+            "verification_status": (
+                "verified"
+                if expected_navigation
+                else "failed"
+            ),
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_click())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "error": str(exc),
+            "site": site,
+            "query": query,
+        }
+
+
 def browser_find_element(
     selector: str = "",
     text: str = "",
@@ -343,7 +867,17 @@ def browser_click_element(
         before_url = page.url
         before_title = await page.title()
 
-        await locator.first.click(timeout=5_000)
+        try:
+            await locator.first.click(timeout=5_000)
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "action": "click",
+                "error": str(exc),
+                **_dom_target_args(selector, text, role),
+            }
 
         await page.wait_for_timeout(350)
 
@@ -487,7 +1021,18 @@ def browser_press_key(
         before_url = page.url
         before_title = await page.title()
 
-        await locator.first.press(requested_key, timeout=5_000)
+        try:
+            await locator.first.press(requested_key, timeout=5_000)
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "action": "press",
+                "error": str(exc),
+                **_dom_target_args(selector, text, role),
+            }
+
         await page.wait_for_timeout(250)
 
         after_url = page.url
@@ -608,6 +1153,7 @@ def browser_extract_text(
             "error": str(exc),
             **_dom_target_args(selector, text, role),
         }
+
 
 def capture_screenshot() -> bytes:
     async def _shot():
