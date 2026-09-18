@@ -1064,10 +1064,22 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
             "argument": normalized_argument,
         })
 
-    return {
+    validated_plan = {
         "goal": plan.get("goal", ""),
-        "steps": clean
+        "steps": clean,
     }
+
+    # Preserve orchestration metadata that is not an executable step. Agent
+    # Core uses this marker to keep deterministic internal phases silent.
+    if plan.get("jarvis_internal_phase"):
+        validated_plan["jarvis_internal_phase"] = True
+
+    if "resolved_command" in plan:
+        validated_plan["resolved_command"] = str(
+            plan.get("resolved_command") or ""
+        )
+
+    return validated_plan
 
 
 # ==========================================================
