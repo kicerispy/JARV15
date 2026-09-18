@@ -120,6 +120,11 @@ refactor, modify, patch, or test software:
 6. Before modifying project code, create a code_checkpoint.
 7. Use code_test after changes. Prefer py_compile for individual Python files,
    and pytest for relevant automated tests.
+12. For browser automation in this project, browser_controller.py is the
+   primary browser implementation file. Do not invent a filename such as
+   browser_automation.py when browser_controller.py is the relevant module.
+13. Do not invent file paths. When the target file is uncertain, discover it
+   with code_search, list_files, or find_file before reading or modifying it.
 8. Do not claim a fix is complete until validation succeeds.
 9. If validation fails, inspect the failure, revise the change, and test again.
 10. If repeated repair attempts are unsuccessful, use code_restore_checkpoint
@@ -314,12 +319,19 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
 
 CODE_REPAIR_TERMS = (
     "fix",
-    "debug",
     "repair",
     "refactor",
     "modify",
     "patch",
     "resolve",
+)
+
+CODE_DIAGNOSTIC_TERMS = (
+    "debug",
+    "diagnose",
+    "inspect",
+    "investigate",
+    "test",
 )
 
 SOFTWARE_DOMAIN_TERMS = (
@@ -368,6 +380,14 @@ def is_software_repair_request(text: str) -> bool:
     )
 
 
+def is_software_diagnostic_request(text: str) -> bool:
+    normalized = _normalized_words(text)
+    return (
+        any(term in normalized for term in CODE_DIAGNOSTIC_TERMS)
+        and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
+    )
+
+
 def assess_plan(
     user_command: str,
     plan: Dict[str, Any],
@@ -384,7 +404,7 @@ def assess_plan(
         else []
     )
 
-    if not is_software_repair_request(user_command):
+    if not is_software_diagnostic_request(user_command):
         return []
 
     tool_names = [
@@ -434,6 +454,14 @@ def assess_plan(
             "before attempting to fix it."
         )
 
+    requires_modification = is_software_repair_request(user_command)
+
+    if requires_modification and not mutation_indices:
+        issues.append(
+            "This request explicitly asks for a fix or code change. "
+            "The plan must include an appropriate file modification step."
+        )
+
     if mutation_indices:
         first_mutation = min(mutation_indices)
 
@@ -453,7 +481,7 @@ def assess_plan(
                 "The repair plan must run code_test after the final file "
                 "modification."
             )
-    elif not test_indices:
+    elif requires_modification and not test_indices:
         issues.append(
             "A software repair plan must include code_test so the result "
             "can be validated."
