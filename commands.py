@@ -1498,6 +1498,26 @@ def deterministic_route(user_request):
             ]
         }
 
+    if text in {"read the page", "read the page text", "read page"}:
+        return {
+            "steps": [
+                {
+                    "tool": "browser_extract_text",
+                    "argument": "{\"selector\":\"body\"}"
+                }
+            ]
+        }
+
+    if text in {"read the title", "read the page title", "read title"}:
+        return {
+            "steps": [
+                {
+                    "tool": "browser_page_info",
+                    "argument": ""
+                }
+            ]
+        }
+
     return None
 
 
@@ -1891,15 +1911,10 @@ def should_resolve_context(text):
         "try that",
         "try it",
         "go there",
-        "go back",
         "open that",
         "click that",
         "play that",
         "select that",
-        "read the page",
-        "read the page text",
-        "read the title",
-        "show me the page",
     )
 
     if (
