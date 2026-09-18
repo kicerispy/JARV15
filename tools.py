@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import re
@@ -2165,6 +2166,30 @@ def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
     )
 
 
+def _parse_browser_object_argument(argument: str, label: str = "Browser") -> dict[str, Any]:
+    """Parse a browser tool object argument from JSON or Python-literal dict syntax."""
+    raw = str(argument or "").strip()
+    if not raw:
+        return {}
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as json_exc:
+        try:
+            payload = ast.literal_eval(raw)
+        except (ValueError, SyntaxError) as exc:
+            raise ValueError(
+                f"{label} argument must be valid JSON: {json_exc}"
+            ) from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"{label} argument must be a JSON object."
+        )
+
+    return payload
+
+
 def run_browser_tool(
     tool_name: str,
     argument: str = "",
@@ -2207,16 +2232,17 @@ def run_browser_tool(
         return normalize(browser_click_first_bing_result(query))
 
     if tool_name == "browser_click_first_result":
-        payload = {}
-        if argument:
-            try:
-                payload = json.loads(argument)
-            except json.JSONDecodeError as exc:
-                return ToolResult(
-                    success=False,
-                    tool=tool_name,
-                    error=f"First-result browser argument must be valid JSON: {exc}",
-                )
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="First-result browser",
+            )
+        except ValueError as exc:
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                error=str(exc),
+            )
 
         return normalize(
             browser_click_first_result(
@@ -2226,16 +2252,17 @@ def run_browser_tool(
         )
 
     if tool_name == "browser_click_result":
-        payload = {}
-        if argument:
-            try:
-                payload = json.loads(argument)
-            except json.JSONDecodeError as exc:
-                return ToolResult(
-                    success=False,
-                    tool=tool_name,
-                    error=f"Result browser argument must be valid JSON: {exc}",
-                )
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="Result browser",
+            )
+        except ValueError as exc:
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                error=str(exc),
+            )
 
         return normalize(
             browser_click_result(
@@ -2259,22 +2286,17 @@ def run_browser_tool(
         "browser_wait_for_element",
         "browser_extract_text",
     }:
-        import json
-
-        payload = {}
-
-        if argument:
-            try:
-                payload = json.loads(argument)
-            except json.JSONDecodeError as exc:
-                return ToolResult(
-                    success=False,
-                    tool=tool_name,
-                    error=(
-                        "DOM browser tool argument must be valid JSON: "
-                        f"{exc}"
-                    ),
-                )
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="DOM browser tool",
+            )
+        except ValueError as exc:
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                error=str(exc),
+            )
 
         from browser_controller import (
             browser_find_element,
