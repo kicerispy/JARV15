@@ -984,10 +984,27 @@ def cleanup_browser():
                 if _playwright:
                     await _playwright.stop()
 
-                # Playwright owns an internal connection task. Give the
-                # connection one loop turn to finish before cancelling any
-                # leftovers so shutdown does not destroy pending tasks.
-                await asyncio.sleep(0)
+                # Playwright can leave its internal Connection.run task
+                # one or two event-loop turns behind stop(). Let it settle
+                # before doing a final cancellation sweep.
+                for _ in range(3):
+                    await asyncio.sleep(0.05)
+
+                    pending = [
+                        task
+                        for task in asyncio.all_tasks()
+                        if (
+                            task is not current_task
+                            and not task.done()
+                        )
+                    ]
+
+                    if not pending:
+                        break
+
+                    # Give ordinary Playwright shutdown work another chance
+                    # before forcing cancellation of anything left behind.
+                    await asyncio.sleep(0)
 
                 pending = [
                     task
@@ -998,10 +1015,10 @@ def cleanup_browser():
                     )
                 ]
 
-                if pending:
-                    for task in pending:
-                        task.cancel()
+                for task in pending:
+                    task.cancel()
 
+                if pending:
                     await asyncio.gather(
                         *pending,
                         return_exceptions=True,
