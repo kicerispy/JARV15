@@ -55,6 +55,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "code_search": "Search project source files for a symbol, string, or error message.",
     "code_test": "Validate project code. argument = JSON such as {\"mode\":\"compile\",\"path\":\"main.py\"} or {\"mode\":\"pytest\",\"path\":\"tests/test_x.py\"}.",
     "code_diagnose": "Run a broader JARVIS project diagnostic pass: Python compilation, available tests, and optional static checks. Argument is JSON.",
+    "dev_command": "Run an allowlisted developer command from the JARVIS project root. Argument is JSON such as {\"command\":\"python -m pytest tests/test_x.py -q\",\"timeout\":120}.",
     "code_checkpoint": "Create a safe checkpoint of JARVIS project source files before autonomous edits.",
     "code_restore_checkpoint": "Restore the latest JARVIS source checkpoint after an unsuccessful repair.",
     "delete_file": "Delete a file. argument = filename.",
@@ -92,6 +93,7 @@ JSON_ARGUMENT_TOOLS = {
     "browser_wait_for_element",
     "browser_extract_text",
     "code_diagnose",
+    "dev_command",
 }
 
 
@@ -171,6 +173,17 @@ refactor, modify, patch, or test software:
     failure.
 17. For code creation, do not stop after writing files. Run an appropriate
     validation step and repair the generated implementation when validation fails.
+18. Use dev_command only for controlled development operations when the
+existing file/search/test tools cannot perform the required step. Never use
+shell operators, pipes, or command chaining; pass one developer command.
+
+DEVELOPER COMMAND RULES:
+
+- Use dev_command for dependency installation, targeted test execution,
+  static-analysis commands, or other necessary developer tooling.
+- Prefer the active JARVIS Python interpreter for Python and pip commands.
+- Keep commands project-scoped and do not use shell chaining.
+- Treat command output as evidence for subsequent repair decisions.
 
 AUTONOMOUS SOFTWARE ENGINEERING LOOP:
 
