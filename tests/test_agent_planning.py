@@ -375,6 +375,50 @@ def test_browser_diagnostic_accepts_browser_smoke_test():
     assert issues == []
 
 
+def test_required_code_diagnose_gate_rejects_code_test_only():
+    issues = assess_plan(
+        "diagnose the broken Python module before repairing it",
+        {
+            "goal": "diagnostic validation",
+            "steps": [
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"broken_module.py"}',
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_diagnose=True,
+        allow_prior_evidence=True,
+    )
+
+    assert any(
+        "code_diagnose" in issue.lower()
+        for issue in issues
+    )
+
+    issues = assess_plan(
+        "diagnose the broken Python module before repairing it",
+        {
+            "goal": "diagnostic validation",
+            "steps": [
+                {
+                    "tool": "code_diagnose",
+                    "argument": (
+                        '{"path":"broken_module.py","run_tests":false,'
+                        '"run_lint":false,"run_types":false}'
+                    ),
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_diagnose=True,
+        allow_prior_evidence=True,
+    )
+
+    assert issues == []
+
+
 def test_required_diagnostic_phase_falls_back_to_verified_source_target():
     planner = EvidenceAwareDiagnosticFallbackPlanner()
     agent = JarvisAgent(planner=planner)
@@ -401,10 +445,11 @@ def test_required_diagnostic_phase_falls_back_to_verified_source_target():
     assert planned.status == "ready"
     assert len(planner.calls) == 2
     assert [step.tool for step in planned.steps] == [
-        "code_test",
+        "code_diagnose",
     ]
     assert planned.steps[0].argument == (
-        '{"mode": "browser_smoke", "path": "browser_controller.py"}'
+        '{"path": "browser_controller.py", "run_tests": false, '
+        '"run_lint": false, "run_types": false}'
     )
 
 
