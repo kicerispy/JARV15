@@ -445,6 +445,7 @@ SOFTWARE_DOMAIN_TERMS = (
 CODE_INSPECTION_TOOLS = {
     "code_search",
     "code_diagnose",
+    "dev_command",
     "read_file",
     "list_files",
     "find_file",
