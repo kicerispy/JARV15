@@ -2135,6 +2135,18 @@ def _run_tool_raw(
         )
 
     # --------------------------------------------------------
+    # CODE INSPECTION / VALIDATION
+    # --------------------------------------------------------
+
+    elif tool_name == "code_search":
+
+        return code_search(argument)
+
+    elif tool_name == "code_test":
+
+        return code_test(argument)
+
+    # --------------------------------------------------------
     # SYSTEM
     # --------------------------------------------------------
 
