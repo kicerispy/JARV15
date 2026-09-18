@@ -23,7 +23,6 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
-    "browser_self_test": "Run a focused runtime smoke test of JARVIS browser automation, including generic DOM controls and the live Google result selector.",
     "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role.",
     "browser_click_element": "Click a browser DOM element by CSS selector, visible text, or ARIA role.",
     "browser_fill_element": "Fill a browser input by CSS selector, visible text, or ARIA role. Argument is JSON.",
