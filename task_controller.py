@@ -257,6 +257,13 @@ class BackgroundTaskController:
                 )
             )
 
+            if (
+                snapshot.get("task_status")
+                == "cancellation_requested"
+                or state.get("cancelled")
+            ):
+                return "I'm stopping the current task."
+
             if status == "starting":
                 return "I'm getting that task underway."
 
