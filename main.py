@@ -33,6 +33,7 @@ from conversation_handler import (
     run_memory_analysis_background,
 )
 from logger import logger
+from smart_router import route_command
 from memory import create_memory
 from planner import create_plan
 from state import JarvisState
@@ -847,21 +848,6 @@ def process_command(
         return "done"
 
     # ==================================================
-    # MEMORY ANALYSIS
-    # ==================================================
-
-    memory_analysis_start = perf_now()
-
-    run_memory_analysis_background(
-        user_input
-    )
-
-    logger.info(
-        f"PERF: memory-analysis dispatch: "
-        f"{perf_now() - memory_analysis_start:.3f}s"
-    )
-
-    # ==================================================
     # CREATIVE REQUEST
     # ==================================================
 
@@ -895,6 +881,18 @@ def process_command(
         logger.info(
             f"PERF: total command processing: "
             f"{perf_now() - command_start:.3f}s"
+        )
+
+        # Analyze memory only after the user-facing response is complete.
+        memory_analysis_start = perf_now()
+
+        run_memory_analysis_background(
+            user_input
+        )
+
+        logger.info(
+            f"PERF: memory-analysis dispatch: "
+            f"{perf_now() - memory_analysis_start:.3f}s"
         )
 
         return result
@@ -1038,6 +1036,62 @@ def process_command(
             )
 
     # ==================================================
+    # ==================================================
+    # SMART ROUTING: DIRECT CONVERSATION
+    # ==================================================
+
+    route_start = perf_now()
+
+    route_decision = route_command(
+        user_input
+    )
+
+    logger.info(
+        "JARVIS: Smart route: "
+        f"{route_decision.kind} "
+        f"({route_decision.reason})"
+    )
+
+    logger.info(
+        f"PERF: smart routing: "
+        f"{perf_now() - route_start:.3f}s"
+    )
+
+    if route_decision.kind == "conversation":
+
+        conversation_start = perf_now()
+
+        result = handle_normal_conversation(
+            planning_input,
+            state.active_context,
+            system_prompt,
+            speak_callback,
+        )
+
+        logger.info(
+            f"PERF: smart conversation: "
+            f"{perf_now() - conversation_start:.3f}s"
+        )
+
+        logger.info(
+            f"PERF: total command processing: "
+            f"{perf_now() - command_start:.3f}s"
+        )
+
+        # Analyze memory only after the user-facing response is complete.
+        memory_analysis_start = perf_now()
+
+        run_memory_analysis_background(
+            user_input
+        )
+
+        logger.info(
+            f"PERF: memory-analysis dispatch: "
+            f"{perf_now() - memory_analysis_start:.3f}s"
+        )
+
+        return result
+
     # AGENT CORE PLANNING
     # ==================================================
 
@@ -1095,6 +1149,18 @@ def process_command(
             f"{perf_now() - command_start:.3f}s"
         )
 
+        # Analyze memory only after the user-facing response is complete.
+        memory_analysis_start = perf_now()
+
+        run_memory_analysis_background(
+            user_input
+        )
+
+        logger.info(
+            f"PERF: memory-analysis dispatch: "
+            f"{perf_now() - memory_analysis_start:.3f}s"
+        )
+
         return result
 
     # ==================================================
@@ -1122,6 +1188,18 @@ def process_command(
 
     logger.info(
         f"PERF: total command processing: {perf_now() - command_start:.3f}s"
+    )
+
+    # Analyze memory only after the user-facing task is complete.
+    memory_analysis_start = perf_now()
+
+    run_memory_analysis_background(
+        user_input
+    )
+
+    logger.info(
+        f"PERF: memory-analysis dispatch: "
+        f"{perf_now() - memory_analysis_start:.3f}s"
     )
 
     return result

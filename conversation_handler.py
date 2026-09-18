@@ -5,7 +5,14 @@ import threading
 
 from ollama import chat
 
-from config import CHAT_MODEL, MAX_HISTORY_MESSAGES, MAX_MEMORIES_IN_PROMPT
+from config import (
+    CHAT_MODEL,
+    CHAT_NUM_GPU,
+    CHAT_NUM_PREDICT,
+    CHAT_THINK,
+    MAX_HISTORY_MESSAGES,
+    MAX_MEMORIES_IN_PROMPT,
+)
 from conversation import get_recent
 from logger import logger
 from memory import get_memories
@@ -99,7 +106,15 @@ def handle_normal_conversation(
     messages = build_conversation_messages(user_input, active_context, system_prompt)
 
     try:
-        response = chat(model=CHAT_MODEL, messages=messages)
+        response = chat(
+            model=CHAT_MODEL,
+            messages=messages,
+            think=CHAT_THINK,
+            options={
+                "num_gpu": CHAT_NUM_GPU,
+                "num_predict": CHAT_NUM_PREDICT,
+            },
+        )
         jarvis_reply = response.get("message", {}).get("content", "").strip()
     except Exception as e:
         logger.error(f"Ollama error: {e}")

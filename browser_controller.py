@@ -1,10 +1,19 @@
+﻿from __future__ import annotations
+
 import asyncio
 import atexit
+import base64
 import logging
 import os
+from pathlib import Path
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from typing import Any, Optional
+
 from playwright.async_api import async_playwright
 
 logging.basicConfig(level=logging.INFO, format="[JARVIS] %(message)s")
+
+CHROME_AUTOMATION_DIR = Path(os.path.abspath("./playwright_profile"))
 
 _playwright = None
 _context = None
@@ -12,200 +21,546 @@ _page = None
 _loop = None
 _skipper_task = None
 
+
 def get_event_loop():
+    """Return the single event loop owned by this controller."""
     global _loop
     if _loop is None or _loop.is_closed():
         _loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_loop)
     return _loop
 
+
 async def _auto_skip_ads(page):
+    """Install the YouTube ad observer on the supplied page."""
     try:
-        await page.evaluate("""() => {
-            if (window._jarvisObserverActive) return;
-            window._jarvisObserverActive = true;
+        await page.evaluate(
+            """() => {
+                if (window._jarvisObserverActive) return;
+                window._jarvisObserverActive = true;
 
-            const observer = new MutationObserver((mutations) => {
-                // 1. Click skip buttons instantly
-                const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, button.ytp-ad-skip-button-modern');
-                if (skipBtn) {
-                    skipBtn.click();
-                }
+                const handleAds = () => {
+                    const skipBtn = document.querySelector(
+                        '.ytp-ad-skip-button, .ytp-skip-ad-button, button.ytp-ad-skip-button-modern'
+                    );
+                    if (skipBtn) skipBtn.click();
 
-                // 2. Close overlay ads
-                const overlayClose = document.querySelector('.ytp-ad-overlay-close-button');
-                if (overlayClose) {
-                    overlayClose.click();
-                }
+                    const overlayClose = document.querySelector(
+                        '.ytp-ad-overlay-close-button'
+                    );
+                    if (overlayClose) overlayClose.click();
 
-                // 3. Handle video element speed/skipping during ad states
-                const player = document.querySelector('.html5-video-player');
-                const video = document.querySelector('video');
-                
-                if (player && video && player.classList.contains('ad-showing')) {
-                    video.muted = true;
-                    video.playbackRate = 16.0;
-                    if (Number.isFinite(video.duration) && video.duration > 0) {
-                        video.currentTime = video.duration;
+                    const player = document.querySelector('.html5-video-player');
+                    const video = document.querySelector('video');
+                    if (player && video && player.classList.contains('ad-showing')) {
+                        video.muted = true;
+                        video.playbackRate = 16.0;
+                        if (Number.isFinite(video.duration) && video.duration > 0) {
+                            try { video.currentTime = video.duration; } catch (_) {}
+                        }
                     }
-                }
-            });
+                };
 
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['class']
-            });
-        }""")
+                const observer = new MutationObserver(handleAds);
+                observer.observe(document.documentElement || document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['class']
+                });
+
+                window._jarvisHandleAds = handleAds;
+                handleAds();
+            }"""
+        )
     except Exception:
         pass
 
-async def _init_browser():
-    global _playwright, _context, _page, _skipper_task
-    if _page is None or _page.is_closed():
-        _playwright = await async_playwright().start()
-        
-        user_data_dir = os.path.abspath("./playwright_profile")
-        os.makedirs(user_data_dir, exist_ok=True)
 
-        _context = await _playwright.chromium.launch_persistent_context(
-            user_data_dir=user_data_dir,
-            headless=False,
-            viewport={"width": 1920, "height": 1080},
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        
-        pages = _context.pages
-        _page = pages[0] if pages else await _context.new_page()
-        _skipper_task = asyncio.create_task(_auto_skip_ads(_page))
+async def _init_browser():
+    """Start one persistent Playwright browser context and reuse it."""
+    global _playwright, _context, _page, _skipper_task
+
+    if _page is not None:
+        try:
+            if not _page.is_closed():
+                return _page
+        except Exception:
+            pass
+
+    _playwright = await async_playwright().start()
+    user_data_dir = str(CHROME_AUTOMATION_DIR)
+    CHROME_AUTOMATION_DIR.mkdir(parents=True, exist_ok=True)
+
+    _context = await _playwright.chromium.launch_persistent_context(
+        user_data_dir=user_data_dir,
+        headless=False,
+        viewport={"width": 1920, "height": 1080},
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+
+    pages = _context.pages
+    _page = pages[-1] if pages else await _context.new_page()
+    _skipper_task = asyncio.create_task(_auto_skip_ads(_page))
     return _page
 
+
+def ensure_browser() -> dict[str, Any]:
+    """Ensure JARVIS's persistent Playwright Chromium session is running."""
+    try:
+        get_event_loop().run_until_complete(_init_browser())
+        return {
+            "success": True,
+            "started": _context is not None,
+            "message": "JARVIS Playwright Chromium is ready.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "started": False,
+            "message": f"Could not initialize Playwright Chromium: {exc}",
+        }
+
+
+def ensure_cdp_chrome() -> dict[str, Any]:
+    """Backward-compatible alias for the Playwright browser initializer."""
+    return ensure_browser()
+
+
+def browser_connect() -> dict[str, Any]:
+    status = ensure_browser()
+    if not status.get("success"):
+        return status
+    return browser_page_info()
+
+
 def get_page():
-    loop = get_event_loop()
-    return loop.run_until_complete(_init_browser())
+    return get_event_loop().run_until_complete(_init_browser())
+
+
+def browser_goto(url: str) -> dict[str, Any]:
+    url = str(url or "").strip()
+    if not url:
+        return {"success": False, "error": "URL cannot be empty."}
+
+    async def _goto():
+        page = await _init_browser()
+        await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+        await _auto_skip_ads(page)
+        return await browser_page_info_async(page)
+
+    try:
+        return get_event_loop().run_until_complete(_goto())
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "url": url}
+
 
 def browser_navigate(url: str) -> str:
-    loop = get_event_loop()
-    async def _nav():
-        page = await _init_browser()
-        await page.goto(url, wait_until="domcontentloaded")
-        await _auto_skip_ads(page)
-    loop.run_until_complete(_nav())
-    return f"Successfully navigated to {url}"
+    result = browser_goto(url)
+    if result.get("success"):
+        return f"Successfully navigated to {result.get('url', url)}"
+    return f"Failed to navigate to {url}: {result.get('error', 'unknown error')}"
 
-def browser_scroll(direction: str = "down", distance: int = 500) -> str:
-    loop = get_event_loop()
+
+def browser_scroll(direction: str = "down", distance: int = 500):
+    try:
+        distance = max(1, int(distance))
+    except Exception:
+        distance = 500
+
     async def _scroll():
         page = await _init_browser()
-        delta_y = distance if direction.lower() == "down" else -distance
+        delta_y = distance if str(direction).lower() == "down" else -distance
         await page.mouse.wheel(0, delta_y)
-    loop.run_until_complete(_scroll())
-    return f"Scrolled {direction} by {distance}px"
+        return {"success": True, "direction": direction, "distance": distance}
+
+    try:
+        return get_event_loop().run_until_complete(_scroll())
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def _locator(page, selector: str = "", text: str = "", role: str = ""):
+    selector = (selector or "").strip()
+    text = (text or "").strip()
+    role = (role or "").strip()
+
+    if selector:
+        return page.locator(selector).first
+    if role:
+        return page.get_by_role(role).first
+    if text:
+        return page.get_by_text(text, exact=False).first
+    return page.locator("body")
+
+
+async def browser_page_info_async(page) -> dict[str, Any]:
+    return {
+        "success": True,
+        "url": page.url,
+        "title": await page.title(),
+        "pages": len(_context.pages) if _context else 0,
+    }
+
+
+def browser_page_info() -> dict[str, Any]:
+    try:
+        page = get_event_loop().run_until_complete(_init_browser())
+        return get_event_loop().run_until_complete(browser_page_info_async(page))
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def browser_search_google(query: str) -> dict[str, Any]:
+    return browser_goto("https://www.google.com/search?q=" + quote_plus(str(query or "").strip()))
+
+
+def browser_search_bing(query: str) -> dict[str, Any]:
+    return browser_goto("https://www.bing.com/search?q=" + quote_plus(str(query or "").strip()))
+
+
+def decode_bing_href(href: str) -> str:
+    if not href:
+        return ""
+    try:
+        parsed = urlparse(href)
+        encoded_u = parse_qs(parsed.query).get("u", [None])[0]
+        if not encoded_u:
+            return href
+        value = unquote(encoded_u)
+        if value.startswith("a1"):
+            encoded = value[2:]
+            try:
+                decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode(
+                    "utf-8", errors="ignore"
+                )
+                if decoded.startswith(("http://", "https://")):
+                    return decoded
+            except Exception:
+                pass
+        return value if value.startswith(("http://", "https://")) else href
+    except Exception:
+        return href
+
+
+async def _get_bing_results_async(page) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    containers = page.locator("li.b_algo")
+    count = await containers.count()
+    for index in range(count):
+        try:
+            container = containers.nth(index)
+            link = container.locator("h2 a").first
+            if await link.count() == 0:
+                continue
+            title = (await link.inner_text()).strip()
+            href = (await link.get_attribute("href") or "").strip()
+            if not title or not href:
+                continue
+            results.append(
+                {
+                    "index": index,
+                    "title": title,
+                    "href": href,
+                    "url": decode_bing_href(href),
+                }
+            )
+        except Exception:
+            continue
+    return results
+
+
+def browser_click_first_bing_result(query: Optional[str] = None) -> dict[str, Any]:
+    async def _click():
+        page = await _init_browser()
+        if query:
+            await page.goto(
+                "https://www.bing.com/search?q=" + quote_plus(query),
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+        results = await _get_bing_results_async(page)
+        if not results:
+            return {
+                "success": False,
+                "action": "click_first_bing_result",
+                "query": query,
+                "reason": "No Bing organic results were found in the DOM.",
+                "url": page.url,
+                "title": await page.title(),
+            }
+
+        first = results[0]
+        before_url = page.url
+        link = page.locator("li.b_algo").nth(first["index"]).locator("h2 a").first
+
+        try:
+            await link.scroll_into_view_if_needed(timeout=5_000)
+            await link.click(timeout=5_000)
+        except Exception:
+            target = first["url"]
+            if target.startswith(("http://", "https://")):
+                await page.goto(target, wait_until="domcontentloaded", timeout=30_000)
+            else:
+                raise
+
+        await page.wait_for_timeout(750)
+        return {
+            "success": page.url != before_url,
+            "action": "click_first_bing_result",
+            "query": query,
+            "result_title": first["title"],
+            "result_url": first["url"],
+            "before_url": before_url,
+            "after_url": page.url,
+            "title": await page.title(),
+            "navigated": page.url != before_url,
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_click())
+    except Exception as exc:
+        return {
+            "success": False,
+            "action": "click_first_bing_result",
+            "query": query,
+            "error": str(exc),
+        }
+
+
+def browser_find_element(selector: str = "", text: str = "", role: str = ""):
+    async def _find():
+        page = await _init_browser()
+        locator = _locator(page, selector, text, role)
+        count = await locator.count()
+        if count == 0:
+            return {"success": True, "found": False, "visible": False}
+        try:
+            visible = await locator.is_visible()
+        except Exception:
+            visible = False
+        return {
+            "success": True,
+            "found": True,
+            "visible": visible,
+            "selector": selector,
+            "text": text,
+            "role": role,
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_find())
+    except Exception as exc:
+        return {"success": False, "found": False, "error": str(exc)}
+
+
+def browser_click_element(selector: str = "", text: str = "", role: str = ""):
+    async def _click():
+        page = await _init_browser()
+        locator = _locator(page, selector, text, role)
+        if await locator.count() == 0:
+            return {"success": False, "error": "No matching element found."}
+        before_url = page.url
+        before_title = await page.title()
+        try:
+            await locator.click(timeout=5_000)
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "before_url": before_url,
+                "after_url": page.url,
+                "before_title": before_title,
+                "after_title": await page.title(),
+            }
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=5_000)
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "action": "click",
+            "before_url": before_url,
+            "after_url": page.url,
+            "before_title": before_title,
+            "after_title": await page.title(),
+            "navigated": page.url != before_url,
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_click())
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def browser_fill_element(value: str, selector: str = "", text: str = "", role: str = ""):
+    async def _fill():
+        page = await _init_browser()
+        locator = _locator(page, selector, text, role)
+        if await locator.count() == 0:
+            return {"success": False, "error": "No matching element found."}
+        await locator.fill(str(value or ""), timeout=5_000)
+        return {"success": True, "action": "fill"}
+
+    try:
+        return get_event_loop().run_until_complete(_fill())
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def browser_press_key(key: str, selector: str = "", text: str = "", role: str = ""):
+    async def _press():
+        page = await _init_browser()
+        locator = _locator(page, selector, text, role)
+        await locator.press(str(key or ""), timeout=5_000)
+        return {"success": True, "action": "press", "key": key}
+
+    try:
+        return get_event_loop().run_until_complete(_press())
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def browser_wait_for_element(
+    selector: str = "",
+    text: str = "",
+    role: str = "",
+    timeout: int = 10000,
+):
+    async def _wait():
+        page = await _init_browser()
+        locator = _locator(page, selector, text, role)
+        await locator.wait_for(state="visible", timeout=int(timeout))
+        return {"success": True, "action": "wait_for_element", "found": True}
+
+    try:
+        return get_event_loop().run_until_complete(_wait())
+    except Exception as exc:
+        return {"success": False, "found": False, "error": str(exc)}
+
+
+def browser_extract_text(selector: str = "", text: str = "", role: str = ""):
+    async def _extract():
+        page = await _init_browser()
+        locator = _locator(page, selector, text, role)
+        return {"success": True, "action": "extract_text", "text": await locator.inner_text(timeout=5_000)}
+
+    try:
+        return get_event_loop().run_until_complete(_extract())
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
 
 def click_dom_element(target_text: str) -> bool:
-    loop = get_event_loop()
     async def _click():
         page = await _init_browser()
         try:
-            yt_titles = page.locator("ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title")
+            target = str(target_text or "").strip()
+            if not target:
+                return False
+            yt_titles = page.locator(
+                "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
+            )
             count = await yt_titles.count()
-            for i in range(min(count, 5)):
-                elem = yt_titles.nth(i)
-                text = await elem.inner_text()
-                clean_target = target_text.replace("-", "").replace(" ", "").lower()
+            clean_target = target.replace("-", "").replace(" ", "").lower()
+            for index in range(min(count, 5)):
+                elem = yt_titles.nth(index)
+                text = (await elem.inner_text()).strip()
                 clean_text = text.replace("-", "").replace(" ", "").lower()
-                if clean_target in clean_text or "wifiskeleton" in clean_text:
+                if clean_target in clean_text:
                     await elem.click()
                     logging.info(f"DOM Click successful on YouTube video title: {text}")
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1)
                     await _auto_skip_ads(page)
                     return True
 
-            locator = page.get_by_text(target_text, exact=False).first
-            if await locator.is_visible():
+            locator = page.get_by_text(target, exact=False).first
+            if await locator.count() and await locator.is_visible():
                 await locator.click()
-                logging.info(f"DOM Click successful on text: '{target_text}'")
+                logging.info(f"DOM Click successful on text: '{target}'")
                 return True
-        except Exception as e:
-            logging.warning(f"DOM Click attempt failed: {e}")
+        except Exception as exc:
+            logging.warning(f"DOM Click attempt failed: {exc}")
         return False
-    return loop.run_until_complete(_click())
+
+    try:
+        return bool(get_event_loop().run_until_complete(_click()))
+    except Exception:
+        return False
+
 
 def browser_media_control(action: str) -> str:
-    """Controls YouTube video playback (play, pause, mute, unmute, volume_up, volume_down)."""
-    loop = get_event_loop()
     async def _control():
         page = await _init_browser()
-        result = await page.evaluate("""(action) => {
-            const video = document.querySelector('video');
-            if (!video) return "No video element found";
+        return await page.evaluate(
+            """(action) => {
+                const video = document.querySelector('video');
+                if (!video) return 'No video element found';
+                switch (action) {
+                    case 'pause': video.pause(); return 'Video paused';
+                    case 'play': video.play(); return 'Video resumed';
+                    case 'mute': video.muted = true; return 'Audio muted';
+                    case 'unmute': video.muted = false; return 'Audio unmuted';
+                    case 'volume_up':
+                        video.volume = Math.min(1.0, video.volume + 0.1);
+                        return `Volume increased to ${Math.round(video.volume * 100)}%`;
+                    case 'volume_down':
+                        video.volume = Math.max(0.0, video.volume - 0.1);
+                        return `Volume decreased to ${Math.round(video.volume * 100)}%`;
+                    default: return 'Unknown media action';
+                }
+            }""",
+            action,
+        )
 
-            switch(action) {
-                case 'pause':
-                    video.pause();
-                    return "Video paused";
-                case 'play':
-                    video.play();
-                    return "Video resumed";
-                case 'mute':
-                    video.muted = true;
-                    return "Audio muted";
-                case 'unmute':
-                    video.muted = false;
-                    return "Audio unmuted";
-                case 'volume_up':
-                    video.volume = Math.min(1.0, video.volume + 0.1);
-                    return `Volume increased to ${Math.round(video.volume * 100)}%`;
-                case 'volume_down':
-                    video.volume = Math.max(0.0, video.volume - 0.1);
-                    return `Volume decreased to ${Math.round(video.volume * 100)}%`;
-                default:
-                    return "Unknown media action";
-            }
-        }""", action)
-        return result
-    return loop.run_until_complete(_control())
+    try:
+        return str(get_event_loop().run_until_complete(_control()))
+    except Exception as exc:
+        return f"Media control failed: {exc}"
+
 
 def browser_add_to_queue(target_text: str) -> str:
-    """Finds a video matching target_text and adds it to the YouTube queue."""
-    loop = get_event_loop()
     async def _queue():
         page = await _init_browser()
-        try:
-            yt_titles = page.locator("ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title")
-            count = await yt_titles.count()
-            for i in range(min(count, 5)):
-                elem = yt_titles.nth(i)
-                text = await elem.inner_text()
-                if target_text.lower() in text.lower():
-                    renderer = elem.locator("ancestor::ytd-video-renderer").first
-                    await renderer.hover()
-                    
-                    menu_btn = renderer.locator("yt-icon-button#button, button.dropdown-trigger").first
-                    await menu_btn.click()
-                    
-                    queue_option = page.get_by_text("Add to queue", exact=True).first
-                    await queue_option.click()
-                    return f"Successfully added '{text}' to the YouTube queue."
-            return f"Could not find video matching '{target_text}' to queue."
-        except Exception as e:
-            return f"Failed to queue video: {e}"
-    return loop.run_until_complete(_queue())
+        target = str(target_text or "").strip().lower()
+        yt_titles = page.locator(
+            "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
+        )
+        count = await yt_titles.count()
+        for index in range(min(count, 10)):
+            elem = yt_titles.nth(index)
+            text = (await elem.inner_text()).strip()
+            if target and target in text.lower():
+                renderer = elem.locator("xpath=ancestor::ytd-video-renderer").first
+                await renderer.hover()
+                menu_btn = renderer.locator("yt-icon-button#button, button.dropdown-trigger").first
+                await menu_btn.click(timeout=5_000)
+                option = page.get_by_text("Add to queue", exact=True).first
+                await option.click(timeout=5_000)
+                return f"Successfully added '{text}' to the YouTube queue."
+        return f"Could not find video matching '{target_text}' to queue."
+
+    try:
+        return get_event_loop().run_until_complete(_queue())
+    except Exception as exc:
+        return f"Failed to queue video: {exc}"
+
 
 def capture_screenshot() -> bytes:
-    loop = get_event_loop()
     async def _shot():
         page = await _init_browser()
         return await page.screenshot(type="jpeg", quality=80)
-    return loop.run_until_complete(_shot())
+
+    return get_event_loop().run_until_complete(_shot())
+
 
 def click_at_coords(x: int, y: int) -> None:
-    loop = get_event_loop()
     async def _click_xy():
         page = await _init_browser()
-        await page.mouse.click(x, y)
-    loop.run_until_complete(_click_xy())
+        await page.mouse.click(int(x), int(y))
+
+    get_event_loop().run_until_complete(_click_xy())
+
 
 def cleanup_browser():
     global _playwright, _context, _page, _skipper_task, _loop
@@ -219,7 +574,13 @@ def cleanup_browser():
                 if _playwright:
                     await _playwright.stop()
             _loop.run_until_complete(_close())
-    except Exception as e:
-        logging.debug(f"Browser cleanup exception: {e}")
+    except Exception as exc:
+        logging.debug(f"Browser cleanup exception: {exc}")
+    finally:
+        _playwright = None
+        _context = None
+        _page = None
+        _skipper_task = None
+
 
 atexit.register(cleanup_browser)

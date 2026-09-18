@@ -1,39 +1,69 @@
+﻿# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyd
+.pytest_cache/
+.ruff_cache/
 
+# Virtual environments
 .venv/
 venv/
 env/
 jarvis_cuda/
 
-.env
-*.log
-*.tmp
-*.bak
-*.before_*
-*_backup*
-*.backup*
-*backup*
-
-# Build output
+# Build/package output
 build/
 dist/
+*.egg-info/
 
-# Browser profile / browser state
-chrome_automation/
+# Browser automation state
+playwright_profile/
 
-# Runtime/user data
-conversation_history.json
-jarvis_memory.db
+# Local development framework copy
+se-framework/
+
+# Local/user-specific files
 profile.json
-
-# Generated media
-*.png
-*.wav
-
-# Archives / large model data
-*.zip
 voice_model/
 
-# Temporary patch scripts
-patch_*.py
+# Runtime/generated data
+*.wav
+*.db
+*.db-shm
+*.db-wal
+conversation_history.json
+jarvis_history.json
+input.wav
+
+# Screenshots / generated images
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Local secrets/config
+.env
+.env.*
+!.env.example
+
+# Model/AI weights and generated artifacts
+*.onnx
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+
+# Temporary/debug artifacts
+*.log
+*.tmp
+
+# Historical backup files
+*.before_*
+*.backup
+*.bak
+*backup*
+
+# Archives
+*.zip
+chrome_automation/

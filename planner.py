@@ -6,8 +6,11 @@ from typing import Any, Dict, List, Optional
 
 from ollama import chat
 
-from config import PLANNER_MODEL
+from model_manager import ModelManager
 from logger import logger
+
+MODEL_MANAGER = ModelManager()
+PLANNER_MODEL = MODEL_MANAGER.planner_model
 
 # ==========================================================
 # Available Tools
@@ -527,22 +530,64 @@ Last tool: {active_context.get('last_tool', 'none')}
         }
     ]
 
+    import time
+
     try:
+        print("JARVIS DEBUG: planner -> calling Ollama", flush=True)
+        planner_start = time.perf_counter()
+
         response = chat(
             model=PLANNER_MODEL,
             messages=messages,
             format="json"
         )
+
+        print(
+            f"JARVIS DEBUG: Ollama returned after "
+            f"{time.perf_counter() - planner_start:.3f}s",
+            flush=True
+        )
+        print(
+            f"JARVIS DEBUG: response type={type(response).__name__}",
+            flush=True
+        )
+
     except Exception as e:
         logger.error(f"Planner LLM call failed: {e}")
         return {"goal": "", "steps": []}
 
+    print("JARVIS DEBUG: extracting message content", flush=True)
+
     content = response.get("message", {}).get("content", "")
+
+    print(
+        f"JARVIS DEBUG: content length={len(content)}",
+        flush=True
+    )
+
+    print("JARVIS DEBUG: calling extract_json()", flush=True)
+
     data = extract_json(content)
+
+    print(
+        f"JARVIS DEBUG: extract_json returned "
+        f"type={type(data).__name__}",
+        flush=True
+    )
 
     if not data:
         logger.warning(f"Planner returned invalid JSON: {content[:200]}")
         return {"goal": "", "steps": []}
 
-    return validate_plan(data)
+    print("JARVIS DEBUG: calling validate_plan()", flush=True)
+
+    validated = validate_plan(data)
+
+    print(
+        f"JARVIS DEBUG: validate_plan returned "
+        f"{validated!r}",
+        flush=True
+    )
+
+    return validated
 

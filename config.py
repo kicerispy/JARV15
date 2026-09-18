@@ -52,6 +52,16 @@ WHISPER_MODEL = os.environ.get(
     "small.en",
 )
 
+WHISPER_DEVICE = os.environ.get(
+    "JARVIS_WHISPER_DEVICE",
+    "cpu",
+)
+
+WHISPER_COMPUTE_TYPE = os.environ.get(
+    "JARVIS_WHISPER_COMPUTE_TYPE",
+    "int8",
+)
+
 
 # ============================================================
 # OLLAMA
@@ -282,6 +292,30 @@ CODING_TEMPERATURE = float(
     os.environ.get(
         "JARVIS_CODING_TEMPERATURE",
         "0.3",
+    )
+)
+
+CHAT_THINK = os.environ.get(
+    "JARVIS_CHAT_THINK",
+    "false",
+).lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+CHAT_NUM_GPU = int(
+    os.environ.get(
+        "JARVIS_CHAT_NUM_GPU",
+        "40",
+    )
+)
+
+CHAT_NUM_PREDICT = int(
+    os.environ.get(
+        "JARVIS_CHAT_NUM_PREDICT",
+        "100",
     )
 )
 

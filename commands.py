@@ -1,4 +1,4 @@
-from ollama import chat
+﻿from ollama import chat
 import json
 import re
 
@@ -786,6 +786,39 @@ def deterministic_route(user_request):
             ]
         }
 
+    # ==================================================
+    # Direct Website Navigation
+    # ==================================================
+
+    if (
+        "youtube" in text
+        and (
+            "open chrome" in text
+            or "open google chrome" in text
+            or "launch chrome" in text
+            or "start chrome" in text
+        )
+        and not (
+            "search" in text
+            or "searching" in text
+            or "find" in text
+            or "look up" in text
+            or "lookup" in text
+        )
+    ):
+        print("JARVIS: Direct Chrome → YouTube route selected.")
+        return {
+            "steps": [
+                {
+                    "tool": "open_program",
+                    "argument": "chrome"
+                },
+                {
+                    "tool": "browser_goto",
+                    "argument": "https://www.youtube.com"
+                }
+            ]
+        }
     # ==================================================
     # YouTube
     # ==================================================

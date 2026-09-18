@@ -47,7 +47,10 @@ def analyze_memory(text: str) -> bool:
             messages=[
                 {"role": "system", "content": MEMORY_PROMPT},
                 {"role": "user", "content": text}
-            ]
+            ],
+            options={
+                "num_predict": 50
+            }
         )
 
         result = response.get("message", {}).get("content", "").strip()

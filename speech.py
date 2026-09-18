@@ -3,8 +3,7 @@ from collections import deque
 
 import numpy as np
 import sounddevice as sd
-import torch
-import whisper
+from faster_whisper import WhisperModel
 from scipy.io.wavfile import write
 
 from config import (
@@ -19,6 +18,8 @@ from config import (
     SILENCE_DURATION,
     SILENCE_THRESHOLD,
     START_TIMEOUT,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_DEVICE,
     WHISPER_MODEL,
 )
 
@@ -41,19 +42,17 @@ PREBUFFER_CHUNKS = max(
 # WHISPER
 # ============================================================
 
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
-)
+device = WHISPER_DEVICE
 
 print(
-    f"Whisper running on: {device}"
+    f"Whisper running on: {WHISPER_DEVICE} "
+    f"({WHISPER_COMPUTE_TYPE})"
 )
 
-model = whisper.load_model(
+model = WhisperModel(
     WHISPER_MODEL,
-    device=device
+    device=WHISPER_DEVICE,
+    compute_type=WHISPER_COMPUTE_TYPE,
 )
 
 
@@ -539,14 +538,13 @@ def listen(
             "Sending audio to Whisper..."
         )
 
-        result = model.transcribe(
+        segments, _info = model.transcribe(
             filename,
-            fp16=(
-                device == "cuda"
-            ),
             language="en",
-            temperature=0
+            temperature=0,
         )
+
+        segments = list(segments)
 
     except Exception as e:
 
@@ -561,13 +559,10 @@ def listen(
     # CLEAN TRANSCRIPTION
     # ========================================================
 
-    text = (
-        result.get(
-            "text",
-            ""
-        )
-        .strip()
-    )
+    text = " ".join(
+        segment.text
+        for segment in segments
+    ).strip()
 
     if not text:
 
@@ -578,7 +573,7 @@ def listen(
 
         print(
             f"JARVIS: Whisper segments = "
-            f"{len(result.get('segments', []))}"
+            f"{len(segments)}"
         )
 
         return None
