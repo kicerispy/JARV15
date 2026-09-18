@@ -313,16 +313,6 @@ def test_task_state_tracks_completion_speech_delivery():
 
 def test_search_website_returns_concise_completion_message(monkeypatch):
     import tools
-
-    monkeypatch.setattr(
-        tools,
-        "browser_goto",
-        lambda url: {"success": True},
-        raising=False,
-    )
-
-    # search_website imports browser_goto from browser_controller at call time,
-    # so patch that canonical dependency directly.
     import browser_controller
     monkeypatch.setattr(
         browser_controller,
