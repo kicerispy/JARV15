@@ -136,95 +136,453 @@ def _unwrap_result_data(result: Any) -> Any:
     return result
 
 
+def _parse_browser_argument(argument: str) -> dict:
+    """Parse structured browser arguments without requiring strict JSON only."""
+    raw_argument = str(argument or "").strip()
+
+    if not raw_argument:
+        return {}
+
+    payload = {}
+
+    try:
+        payload = json.loads(raw_argument)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            payload = ast.literal_eval(raw_argument)
+        except (ValueError, SyntaxError, TypeError):
+            payload = {}
+
+    return payload if isinstance(payload, dict) else {}
+
+
+def _browser_target_payload(payload: dict) -> dict:
+    """Return only the DOM target fields understood by browser_controller."""
+    target = {}
+
+    for key in ("selector", "text", "role"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            target[key] = value
+
+    return target
+
+
+def _browser_result_status(result: Any) -> tuple[bool, bool]:
+    """Read success/verification without losing legacy dict compatibility."""
+    if isinstance(result, ToolResult):
+        success = bool(result.success)
+        data = result.data
+
+        if isinstance(data, dict):
+            verified = bool(data.get("verified", success))
+        else:
+            verified = success
+
+        return success, verified
+
+    if isinstance(result, dict):
+        return (
+            bool(result.get("success", False)),
+            bool(
+                result.get(
+                    "verified",
+                    result.get("success", False),
+                )
+            ),
+        )
+
+    return True, True
+
+
+def _observe_browser_state() -> dict:
+    """Re-read the current browser page before attempting recovery."""
+    try:
+        from browser_controller import browser_page_info
+
+        observed = browser_page_info()
+
+        if isinstance(observed, dict):
+            return observed
+
+        return {
+            "success": False,
+            "error": "browser_page_info returned a non-dict result.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
+
+def _augment_browser_recovery_result(
+    result: Any,
+    *,
+    observed_before: Optional[dict] = None,
+    observed_after: Optional[dict] = None,
+    recovered_by: str = "",
+) -> Any:
+    """Attach bounded recovery evidence without changing legacy result shapes."""
+    metadata = {}
+
+    if observed_before:
+        metadata["observed_before"] = observed_before
+
+    if observed_after:
+        metadata["observed_after"] = observed_after
+
+    if recovered_by:
+        metadata["recovered_by"] = recovered_by
+
+    if not metadata:
+        return result
+
+    if isinstance(result, ToolResult):
+        data = result.data
+
+        if isinstance(data, dict):
+            data = dict(data)
+            data["recovery"] = metadata
+        else:
+            data = {
+                "result": data,
+                "recovery": metadata,
+            }
+
+        return ToolResult(
+            success=result.success,
+            tool=result.tool,
+            data=data,
+            error=result.error,
+            retryable=result.retryable,
+            observation=result.observation or metadata,
+        )
+
+    if isinstance(result, dict):
+        updated = dict(result)
+        updated["recovery"] = metadata
+        return updated
+
+    return result
+
+
+def _browser_recovery_wait(
+    argument: str,
+) -> Optional[dict]:
+    """Wait briefly for a DOM target to become visible before retrying."""
+    payload = _parse_browser_argument(argument)
+    target = _browser_target_payload(payload)
+
+    if not target:
+        return None
+
+    wait_argument = dict(target)
+    wait_argument["timeout"] = 1_500
+
+    try:
+        return run_browser_tool(
+            "browser_wait_for_element",
+            json.dumps(wait_argument),
+        )
+    except Exception as exc:
+        logger.debug(
+            "JARVIS: Browser recovery wait unavailable: %s",
+            exc,
+        )
+        return None
+
+
+def _browser_alternate_strategy(
+    tool_name: str,
+    argument: str,
+    observed_state: dict,
+) -> tuple[str, Any]:
+    """
+    Try a safer alternate browser strategy.
+
+    Result clicks can switch between the specialized first-result tool and
+    the generic ordinal-result tool. DOM actions first re-check their target.
+    """
+    payload = _parse_browser_argument(argument)
+
+    if tool_name == "browser_click_first_result":
+        site = str(
+            payload.get("site")
+            or observed_state.get("site")
+            or ""
+        ).strip()
+
+        query = str(
+            payload.get("query")
+            or ""
+        ).strip()
+
+        if site.lower() in {"google", "youtube"}:
+            return (
+                "browser_click_result",
+                json.dumps(
+                    {
+                        "index": 1,
+                        "site": site.lower(),
+                        "query": query,
+                    }
+                ),
+            )
+
+    if tool_name == "browser_click_result":
+        site = str(
+            payload.get("site")
+            or observed_state.get("site")
+            or ""
+        ).strip()
+
+        query = str(
+            payload.get("query")
+            or ""
+        ).strip()
+
+        try:
+            index = int(payload.get("index", 1))
+        except (TypeError, ValueError):
+            index = 1
+
+        if index == 1 and site.lower() in {"google", "youtube"}:
+            return (
+                "browser_click_first_result",
+                json.dumps(
+                    {
+                        "site": site.lower(),
+                        "query": query,
+                    }
+                ),
+            )
+
+    dom_tools = {
+        "browser_click_element",
+        "browser_fill_element",
+        "browser_press_key",
+        "browser_extract_text",
+    }
+
+    if tool_name in dom_tools:
+        target = _browser_target_payload(payload)
+
+        if target:
+            try:
+                return (
+                    "browser_find_element",
+                    json.dumps(target),
+                )
+            except Exception:
+                pass
+
+    return "", None
+
+
 def _execute_browser_with_fallback(
     tool_name: str,
     argument: str,
 ) -> Any:
-    """Execute a browser action and use desktop vision for click fallback."""
-    result = run_browser_tool(tool_name, argument)
+    """
+    Execute a browser action with bounded state-aware recovery.
 
-    try:
-        unsuccessful = isinstance(result, ToolResult) and not result.success
+    Recovery order:
+      1. primary browser action
+      2. re-observe current page
+      3. wait/re-check the DOM target when applicable
+      4. retry the primary action once
+      5. try one safer alternate strategy
+      6. use existing desktop-vision click fallback where appropriate
+      7. capture final browser state for Agent Core
+    """
+    result = run_browser_tool(
+        tool_name,
+        argument,
+    )
 
-        if unsuccessful and isinstance(result, ToolResult) and result.retryable:
-            time.sleep(0.20)
-            retry_result = run_browser_tool(tool_name, argument)
-            if isinstance(retry_result, ToolResult) and retry_result.success:
-                return retry_result
-            result = retry_result
-            unsuccessful = isinstance(result, ToolResult) and not result.success
-        if isinstance(result, dict):
-            unsuccessful = not bool(result.get("success", False))
+    success, verified = _browser_result_status(result)
 
-        if not unsuccessful:
-            return result
+    if success and verified:
+        return result
 
-        if tool_name in {"browser_click_element", "browser_click_result"}:
-            payload = {}
-            raw_argument = str(argument or "{}").strip()
-            try:
-                payload = json.loads(raw_argument)
-            except (json.JSONDecodeError, TypeError):
-                try:
-                    payload = ast.literal_eval(raw_argument)
-                except (ValueError, SyntaxError):
-                    payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
+    observed_before = _observe_browser_state()
 
-            if tool_name == "browser_click_element":
-                target = (
-                    str(payload.get("text") or "").strip()
-                    or str(payload.get("role") or "").strip()
-                    or str(payload.get("selector") or "").strip()
+    payload = _parse_browser_argument(argument)
+
+    # A successful action with failed verification may already have changed
+    # the page. Re-observe that state, but do not blindly click again.
+    if success and not verified:
+        return _augment_browser_recovery_result(
+            result,
+            observed_before=observed_before,
+            observed_after=observed_before,
+            recovered_by="state_observation",
+        )
+
+    retryable = False
+    if isinstance(result, ToolResult):
+        retryable = bool(result.retryable)
+    elif isinstance(result, dict):
+        retryable = bool(result.get("retryable", False))
+
+    # Give dynamic pages a chance to finish rendering before retrying.
+    if retryable and tool_name in {
+        "browser_click_element",
+        "browser_fill_element",
+        "browser_press_key",
+        "browser_extract_text",
+    }:
+        _browser_recovery_wait(argument)
+
+    if retryable:
+        time.sleep(0.20)
+
+        retry_result = run_browser_tool(
+            tool_name,
+            argument,
+        )
+
+        retry_success, retry_verified = _browser_result_status(
+            retry_result
+        )
+
+        if retry_success and retry_verified:
+            return _augment_browser_recovery_result(
+                retry_result,
+                observed_before=observed_before,
+                observed_after=_observe_browser_state(),
+                recovered_by="reobserve_retry",
+            )
+
+        result = retry_result
+
+    # Try a single alternate strategy only after re-observing the page.
+    alternate_tool, alternate_argument = _browser_alternate_strategy(
+        tool_name,
+        argument,
+        observed_before,
+    )
+
+    if alternate_tool:
+        alternate_result = run_browser_tool(
+            alternate_tool,
+            alternate_argument,
+        )
+
+        alternate_success, alternate_verified = _browser_result_status(
+            alternate_result
+        )
+
+        if alternate_tool == "browser_find_element":
+            if alternate_success and alternate_verified:
+                # The target exists and is visible. Retry the original action
+                # now that we know the DOM has settled.
+                retry_after_find = run_browser_tool(
+                    tool_name,
+                    argument,
                 )
+                final_success, final_verified = _browser_result_status(
+                    retry_after_find
+                )
+
+                if final_success and final_verified:
+                    return _augment_browser_recovery_result(
+                        retry_after_find,
+                        observed_before=observed_before,
+                        observed_after=_observe_browser_state(),
+                        recovered_by="dom_reobserve",
+                    )
+
+                result = retry_after_find
             else:
+                result = alternate_result
+        elif alternate_success and alternate_verified:
+            return _augment_browser_recovery_result(
+                alternate_result,
+                observed_before=observed_before,
+                observed_after=_observe_browser_state(),
+                recovered_by=alternate_tool,
+            )
+        else:
+            result = alternate_result
+
+    success, verified = _browser_result_status(result)
+
+    if success and verified:
+        return result
+
+    # Existing desktop-vision fallback remains the last browser-click resort.
+    if tool_name in {"browser_click_element", "browser_click_result", "browser_click_first_result"}:
+        if tool_name == "browser_click_element":
+            target = (
+                str(payload.get("text") or "").strip()
+                or str(payload.get("role") or "").strip()
+                or str(payload.get("selector") or "").strip()
+            )
+        else:
+            if tool_name == "browser_click_result":
                 index = payload.get("index", 1)
                 try:
-                    is_last = str(index).strip().lower() in {"last", "final"} or int(index) < 0
+                    is_last = (
+                        str(index).strip().lower() in {"last", "final"}
+                        or int(index) < 0
+                    )
                 except Exception:
                     is_last = False
                 ordinal = "last" if is_last else str(index)
-                target = f"{ordinal} search result"
-                if payload.get("site"):
-                    target += f" on {payload['site']}"
+            else:
+                ordinal = "1"
+            target = f"{ordinal} search result"
 
-            if target:
-                try:
-                    from screen_vision import click_screen_target
-                    fallback = click_screen_target(target)
-                    if isinstance(fallback, dict) and fallback.get("success"):
-                        return ToolResult(
-                            success=True,
-                            tool=tool_name,
-                            data={
-                                **fallback,
-                                "original_browser_failure": (
-                                    str(
-                                        getattr(result, "error", "")
-                                        or (
-                                            result.get("error", "")
-                                            if isinstance(result, dict)
-                                            else ""
-                                        )
-                                    )
-                                ),
-                                "recovered_by": "desktop_vision",
-                            },
-                            observation=fallback,
-                        )
-                except Exception as fallback_error:
-                    logger.debug(
-                        "JARVIS: Desktop fallback unavailable: %s",
-                        fallback_error,
+            site = str(
+                payload.get("site")
+                or observed_before.get("site")
+                or ""
+            ).strip()
+
+            if site:
+                target += f" on {site}"
+
+        if target:
+            try:
+                from screen_vision import click_screen_target
+
+                fallback = click_screen_target(target)
+
+                if isinstance(fallback, dict) and fallback.get("success"):
+                    after_fallback = _observe_browser_state()
+
+                    return ToolResult(
+                        success=True,
+                        tool=tool_name,
+                        data={
+                            **fallback,
+                            "original_browser_failure": str(
+                                getattr(result, "error", "")
+                                or (
+                                    result.get("error", "")
+                                    if isinstance(result, dict)
+                                    else ""
+                                )
+                            ),
+                            "recovered_by": "desktop_vision",
+                            "observed_before": observed_before,
+                            "observed_after": after_fallback,
+                        },
+                        observation=fallback,
                     )
-    except Exception as exc:
-        logger.debug(
-            "JARVIS: Browser fallback evaluation failed: %s",
-            exc,
-        )
+            except Exception as fallback_error:
+                logger.debug(
+                    "JARVIS: Desktop fallback unavailable: %s",
+                    fallback_error,
+                )
 
-    return result
+    return _augment_browser_recovery_result(
+        result,
+        observed_before=observed_before,
+        observed_after=_observe_browser_state(),
+    )
 
 
 # ============================================================
