@@ -3,15 +3,15 @@ import pytest
 from smart_router import route_command
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("command_text", [
     "fix the browser automation",
     "debug the YouTube click",
     "repair your code",
     "diagnose the error",
     "can you fix the broken task",
 ])
-def test_repair_requests_route_to_agent(request):
-    decision = route_command(request)
+def test_repair_requests_route_to_agent(command_text):
+    decision = route_command(command_text)
     assert decision.kind == "agent"
 
 
