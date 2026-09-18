@@ -112,7 +112,7 @@ def test_startup_manager_builds_a_real_run_command():
     command = startup_manager._command()
 
     assert "run_jarvis.py" in command
-    assert "JARVIS" not in command or True
+    assert "--startup" in command
 
 
 def test_planner_lists_new_reliability_tools():
