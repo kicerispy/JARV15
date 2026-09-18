@@ -1702,27 +1702,48 @@ def code_test(argument=""):
         stdout = (completed.stdout or "").strip()
         stderr = (completed.stderr or "").strip()
 
-        output_parts = [
-            f"Exit code: {completed.returncode}"
-        ]
+        success = completed.returncode == 0
 
-        if stdout:
-            output_parts.append(
-                f"STDOUT:\n{stdout[:6000]}"
-            )
+        message = (
+            "Code validation passed."
+            if success
+            else "Code validation failed."
+        )
 
-        if stderr:
-            output_parts.append(
-                f"STDERR:\n{stderr[:6000]}"
-            )
-
-        return "\n\n".join(output_parts)
+        return {
+            "success": success,
+            "verified": success,
+            "message": message,
+            "exit_code": completed.returncode,
+            "stdout": stdout[:6000],
+            "stderr": stderr[:6000],
+            "mode": mode,
+            "path": target or ".",
+        }
 
     except subprocess.TimeoutExpired:
-        return f"Code test timed out after {timeout} seconds."
+        return {
+            "success": False,
+            "verified": False,
+            "message": f"Code test timed out after {timeout} seconds.",
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+            "mode": mode,
+            "path": target or ".",
+        }
 
     except Exception as e:
-        return f"Code test failed to start: {e}"
+        return {
+            "success": False,
+            "verified": False,
+            "message": f"Code test failed to start: {e}",
+            "exit_code": None,
+            "stdout": "",
+            "stderr": str(e),
+            "mode": mode,
+            "path": target or ".",
+        }
 
 
 # ============================================================
