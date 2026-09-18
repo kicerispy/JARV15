@@ -199,6 +199,10 @@ def update_active_context(
             "browser_goto",
             "browser_page_info",
             "browser_click_first_result",
+            "code_search",
+            "code_test",
+            "code_checkpoint",
+            "code_restore_checkpoint",
         }:
 
             active_context.last_tool = (
