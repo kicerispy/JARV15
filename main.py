@@ -25,7 +25,11 @@ from commands import (
     should_resolve_context,
     wants_first_result,
 )
-from config import PROFILE_PATH
+from config import (
+    PROFILE_PATH,
+    TYPED_INPUT_ENABLED,
+)
+from typed_input import TypedInputChannel
 from context_aware import JarvisContext
 from context_resolver import resolve_followup
 from conversation import ConversationHistory
@@ -1568,6 +1572,11 @@ def main():
         jarvis_agent
     )
 
+    typed_input = TypedInputChannel(
+        enabled=TYPED_INPUT_ENABLED
+    )
+    typed_input.start()
+
     conversation = ConversationHistory()
 
     logger.info(
@@ -1766,6 +1775,41 @@ def main():
                 )
 
             # ------------------------------------------
+            # Typed console command
+            #
+            # Text commands share the exact same process_command()
+            # pipeline as voice commands. A typed command also
+            # interrupts wake-word capture so it can be handled
+            # immediately.
+            # ------------------------------------------
+
+            typed_command = typed_input.get_nowait()
+
+            if typed_command:
+
+                process_start = perf_now()
+
+                result = process_command(
+                    typed_command,
+                    state,
+                    conversation,
+                    system_prompt,
+                    speak,
+                )
+
+                logger.info(
+                    f"PERF: typed command total: "
+                    f"{perf_now() - process_start:.3f}s"
+                )
+
+                if result == "shutdown":
+
+                    shutdown_background_tasks(state)
+                    break
+
+                continue
+
+            # ------------------------------------------
             # Pending barge-in command
             # ------------------------------------------
 
@@ -1919,7 +1963,9 @@ def main():
 
                 with state.io_lock:
                     triggered = (
-                        wait_for_wake_word()
+                        wait_for_wake_word(
+                            interrupt_event=typed_input.interrupt_event
+                        )
                     )
 
                 logger.info(
@@ -2048,6 +2094,8 @@ def main():
         )
 
     finally:
+        typed_input.stop()
+
         try:
             from browser_controller import cleanup_browser
             cleanup_browser()
