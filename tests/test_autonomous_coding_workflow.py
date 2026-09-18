@@ -140,7 +140,7 @@ def test_dev_command_rejects_shell_operators_as_invalid_arguments():
         '{"command":"python -m pytest tests && whoami"}'
     )
 
-    # The command is parsed as one argv list and never sent through a shell.
-    # The test only asserts that the raw shell chaining syntax is not treated
-    # as an executable command.
-    assert result["command"] == "python -m pytest tests && whoami"
+    assert result["success"] is False
+    assert result["verified"] is False
+    assert result["retryable"] is False
+    assert "Shell operators are not allowed" in result["message"]
