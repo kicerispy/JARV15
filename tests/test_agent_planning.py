@@ -558,6 +558,33 @@ class ThreePhasePlanner:
         return valid_repair_plan()
 
 
+
+def test_diagnostic_plan_rejects_hallucinated_file_target():
+    issues = assess_plan(
+        "inspect the browser automation and fix the problem",
+        {
+            "goal": "inspect browser automation",
+            "steps": [
+                {
+                    "tool": "code_search",
+                    "argument": "browser",
+                },
+                {
+                    "tool": "read_file",
+                    "argument": "browser_automation.py",
+                },
+            ],
+            },
+        require_modification=False,
+    )
+
+    assert any(
+        "nonexistent read_file target" in issue.lower()
+        or "browser_automation.py does not exist" in issue.lower()
+        for issue in issues
+    )
+
+
 def test_repair_task_can_gather_source_before_editing():
     planner = ThreePhasePlanner()
     executor = RecordingExecutor()
