@@ -258,3 +258,19 @@ def test_code_diagnose_skips_pytest_for_implementation_target(tmp_path, monkeypa
     assert result["success"] is True
     assert result["verified"] is True
     assert not any("-m" in call and "pytest" in call for call in calls)
+
+
+def test_find_file_excludes_checkpoint_snapshots(tmp_path, monkeypatch):
+    target = tmp_path / "real_module.py"
+    target.write_text("pass\n", encoding="utf-8")
+
+    checkpoint = tmp_path / ".jarvis_checkpoints" / "latest"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "real_module.py").write_text("pass\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+
+    result = find_file("real_module.py")
+
+    assert result.count("real_module.py") == 1
+    assert ".jarvis_checkpoints" not in result
