@@ -150,6 +150,70 @@ def test_screen_adapter_exposes_all_tool_dispatch_functions():
         assert f"def {name}" in source
 
 
+def test_browser_click_result_dispatch_does_not_hit_json_scope_error(monkeypatch):
+    import browser_controller
+    import tools
+
+    calls = {}
+
+    def fake_click_result(index=1, site="", query=""):
+        calls.update(index=index, site=site, query=query)
+        return {"success": True, "verified": True}
+
+    monkeypatch.setattr(browser_controller, "browser_click_result", fake_click_result)
+
+    result = tools.run_browser_tool(
+        "browser_click_result",
+        '{"index":2,"site":"google","query":"JARVIS"}',
+    )
+
+    assert result.success is True
+    assert calls == {
+        "index": 2,
+        "site": "google",
+        "query": "JARVIS",
+    }
+
+
+def test_browser_dom_dispatch_accepts_llm_python_dict_syntax(monkeypatch):
+    import browser_controller
+    import tools
+
+    calls = {}
+
+    def fake_find_element(selector="", text="", role=""):
+        calls.update(selector=selector, text=text, role=role)
+        return {"success": True, "verified": True}
+
+    monkeypatch.setattr(browser_controller, "browser_find_element", fake_find_element)
+
+    result = tools.run_browser_tool(
+        "browser_find_element",
+        "{'role': 'organic-result'}",
+    )
+
+    assert result.success is True
+    assert calls == {
+        "selector": "",
+        "text": "",
+        "role": "organic-result",
+    }
+
+
+def test_planner_canonicalizes_python_literal_browser_arguments():
+    from planner import validate_plan
+
+    plan = validate_plan({
+        "goal": "inspect browser results",
+        "steps": [{
+            "tool": "browser_find_element",
+            "argument": "{'role': 'organic-result'}",
+        }],
+    })
+
+    assert plan["steps"][0]["argument"] == '{"role":"organic-result"}'
+
+
 def test_tts_status_exposes_runtime_provider():
     source = Path("voice.py").read_text(encoding="utf-8-sig")
 
