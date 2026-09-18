@@ -43,6 +43,7 @@ from logger import logger
 from planner import (
     assess_plan,
     create_plan,
+    is_software_change_request,
     is_software_diagnostic_request,
     is_software_repair_request,
     validate_plan,
@@ -246,7 +247,7 @@ class JarvisAgent:
 
         # Give software repair work a larger bounded recovery budget while
         # preserving the existing budget for ordinary assistant tasks.
-        if is_software_repair_request(normalized_request):
+        if is_software_repair_request(normalized_request) or is_software_change_request(normalized_request):
             task.max_replans = 5
         elif is_software_diagnostic_request(normalized_request):
             task.max_replans = 3
@@ -618,21 +619,45 @@ class JarvisAgent:
                 evidence.get("tool", "") or ""
             ).strip()
 
-            if tool not in {
+            if tool == "read_file":
+                candidate_targets = [str(evidence.get("target", "") or "").strip()]
+            elif tool in {"write_file", "edit_file", "delete_file"}:
+                raw_target = str(evidence.get("target", "") or "").strip()
+                candidate_targets = [raw_target.split("|||", 1)[0].strip()]
+            elif tool in {
                 "code_search",
+                "code_diagnose",
                 "list_files",
                 "find_file",
             }:
+                candidate_targets = []
+            else:
                 continue
 
             detail = str(
                 evidence.get("detail", "") or ""
             )
 
-            for candidate in re.findall(
-                r"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*\.py)(?![A-Za-z0-9_.-])",
-                detail,
-            ):
+            explicit_target = str(
+                evidence.get("target", "") or ""
+            ).strip()
+
+            candidate_strings = []
+            if tool == "read_file":
+                candidate_strings.append(explicit_target)
+            elif tool in {"write_file", "edit_file", "delete_file"}:
+                candidate_strings.append(
+                    explicit_target.split("|||", 1)[0].strip()
+                )
+
+            candidate_strings.extend(
+                re.findall(
+                    r"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*\.py)(?![A-Za-z0-9_.-])",
+                    detail,
+                )
+            )
+
+            for candidate in candidate_strings:
                 normalized = candidate.strip()
 
                 if not normalized or normalized in candidates:
@@ -647,6 +672,9 @@ class JarvisAgent:
                     or "backup" in lowered
                     or "__pycache__" in lowered
                 ):
+                    continue
+
+                if not lowered.endswith(".py"):
                     continue
 
                 candidates.append(normalized)
@@ -895,10 +923,25 @@ class JarvisAgent:
 
                 return task
 
+            candidate_has_mutation = any(
+                str(step.get("tool", "") or "").strip()
+                in {"write_file", "edit_file", "delete_file"}
+                for step in plan.get("steps", [])
+                if isinstance(step, dict)
+            )
+
+            enforce_change_workflow = (
+                require_repair_plan
+                or (
+                    is_software_change_request(task.request)
+                    and candidate_has_mutation
+                )
+            )
+
             plan_issues = assess_plan(
                 task.request,
                 plan,
-                require_modification=require_repair_plan,
+                require_modification=enforce_change_workflow,
                 require_code_read=require_code_read,
                 require_code_test=require_code_test,
                 allow_prior_evidence=(
@@ -1987,6 +2030,53 @@ class JarvisAgent:
                         require_code_test=(
                             has_source_read and not has_code_test
                         ),
+                    )
+
+                    if replanned.status in {
+                        "conversation",
+                        "failed",
+                    }:
+                        return replanned
+
+                    continue
+
+                # Any successful software change must be validated even when
+                # the initial plan did not explicitly include a test step.
+                if (
+                    is_software_change_request(task.request)
+                    and self._plan_has_mutation(task.planner_result)
+                    and not self._has_verified_evidence(
+                        task,
+                        {"code_test", "code_diagnose"},
+                    )
+                ):
+                    logger.info(
+                        "JARVIS AGENT: Software change completed without "
+                        "validation evidence; planning validation phase."
+                    )
+
+                    validation_request = "\n".join([
+                        "The implementation phase completed successfully.",
+                        "Now validate the changed software before reporting completion.",
+                        "",
+                        f"Original request: {task.request}",
+                        "",
+                        self._build_evidence_packet(task),
+                        "",
+                        "Validation rules:",
+                        "1. Validate the actual changed implementation.",
+                        "2. Use code_test for focused validation or code_diagnose for broader validation.",
+                        "3. Treat failures as evidence for the next repair attempt.",
+                        "4. Do not claim completion until validation succeeds.",
+                        "",
+                        "Return ONLY JSON.",
+                    ])
+
+                    replanned = self.plan_task(
+                        task,
+                        history_text=history_text,
+                        planning_request=validation_request,
+                        require_code_test=True,
                     )
 
                     if replanned.status in {
