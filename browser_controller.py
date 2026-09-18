@@ -530,7 +530,17 @@ def browser_click_result(
 
         before_url = page.url
         before_title = await page.title()
-        result_title = (await locator.inner_text()).strip()
+        result_title = ""
+        try:
+            heading = locator.locator("h3").first
+            if await heading.count():
+                result_title = (await heading.inner_text()).strip()
+        except Exception:
+            pass
+
+        if not result_title:
+            result_title = (await locator.inner_text()).strip()
+
         result_url = (await locator.get_attribute("href") or "").strip()
 
         try:
@@ -1008,20 +1018,66 @@ def cleanup_browser():
                 if _playwright:
                     await _playwright.stop()
 
-                # Playwright's stop_async() waits for the transport to stop,
-                # but its internally created Connection.run() task can finish
-                # on the following event-loop turn. Await that exact task so
-                # Windows Proactor transports are fully drained before exit.
-                if _connection_task:
+                # Playwright's driver is a child process. On Windows, the
+                # Proactor stdout transport can occasionally take longer than
+                # stop_async() to observe EOF. Keep the exact Connection.run()
+                # task alive until the driver actually exits; only use the
+                # targeted process termination fallback when it does not.
+                if _connection_task and not _connection_task.done():
                     try:
                         await asyncio.wait_for(
                             asyncio.shield(_connection_task),
-                            timeout=5.0,
+                            timeout=2.0,
                         )
                     except asyncio.TimeoutError:
-                        logging.debug(
-                            "Playwright connection task did not finish within shutdown timeout."
+                        connection = getattr(
+                            getattr(_playwright, "_impl_obj", None),
+                            "_connection",
+                            None,
                         )
+                        transport = getattr(connection, "_transport", None)
+                        process = getattr(transport, "_proc", None)
+
+                        if process is not None:
+                            try:
+                                if process.returncode is None:
+                                    process.terminate()
+                                    await asyncio.wait_for(
+                                        process.wait(),
+                                        timeout=2.0,
+                                    )
+                            except asyncio.TimeoutError:
+                                try:
+                                    process.kill()
+                                    await asyncio.wait_for(
+                                        process.wait(),
+                                        timeout=2.0,
+                                    )
+                                except Exception as exc:
+                                    logging.debug(
+                                        f"Playwright driver kill exception: {exc}"
+                                    )
+                            except Exception as exc:
+                                logging.debug(
+                                    f"Playwright driver termination exception: {exc}"
+                                )
+
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(_connection_task),
+                                timeout=2.0,
+                            )
+                        except asyncio.TimeoutError:
+                            logging.debug(
+                                "Playwright connection task still pending after driver shutdown fallback."
+                            )
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as exc:
+                            logging.debug(
+                                f"Playwright connection task shutdown exception: {exc}"
+                            )
+
                     except asyncio.CancelledError:
                         pass
                     except Exception as exc:
