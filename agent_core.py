@@ -999,7 +999,7 @@ class JarvisAgent:
 
             for raw_path in matches:
                 normalized = (
-                    raw_path.strip().strip(""'")
+                    raw_path.strip().strip("\"'")
                     .replace("\\", "/")
                 )
 
