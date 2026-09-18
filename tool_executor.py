@@ -60,6 +60,73 @@ def run_browser_tool(
 
 
 # ============================================================
+# SAFE SINGLE-ACTION RETRY
+# ============================================================
+
+# These tools are observational or otherwise safe to repeat when the tool
+# explicitly marks its failure as retryable. Browser actions are excluded
+# because browser_controller.py already owns DOM retry/fallback behavior.
+SAFE_RETRY_TOOLS = {
+    "weather",
+    "current_time",
+    "current_date",
+    "system_status",
+    "jarvis_status",
+    "task_history",
+    "web_search",
+    "code_search",
+    "code_test",
+    "code_diagnose",
+    "capture_screen",
+    "screen_size",
+    "get_active_window",
+    "analyze_screen",
+    "verify_screen",
+    "barehands_board_state",
+}
+
+
+def _execute_with_safe_retry(
+    tool_name: str,
+    argument: str,
+    task_state: TaskState,
+) -> Any:
+    """
+    Retry one explicitly retryable safe action once.
+
+    This is deliberately step-local: a successful retry resumes the existing
+    multi-step plan instead of forcing Agent Core to restart the task.
+    """
+    result = run_tool(
+        tool_name,
+        argument,
+    )
+
+    if not (
+        tool_name in SAFE_RETRY_TOOLS
+        and isinstance(result, ToolResult)
+        and not result.success
+        and result.retryable
+    ):
+        return result
+
+    logger.warning(
+        "JARVIS: Retrying safe tool "
+        f"{tool_name} once after a retryable failure."
+    )
+
+    time.sleep(0.15)
+
+    task_state.record_attempt()
+    task_state.record_recovery()
+
+    return run_tool(
+        tool_name,
+        argument,
+    )
+
+
+# ============================================================
 # BROWSER FALLBACK / CONTEXT
 # ============================================================
 
@@ -1624,8 +1691,8 @@ def execute_plan(
 
             else:
 
-                # Ordinary tools execute once and therefore have
-                # exactly one attempt with no recovery.
+                # Ordinary tools execute once unless they are explicitly
+                # marked safe + retryable by their tool implementation.
                 task_state.attempts = 1
                 task_state.recovery_count = 0
 
@@ -1635,9 +1702,10 @@ def execute_plan(
                         argument,
                     )
                 else:
-                    result = run_tool(
+                    result = _execute_with_safe_retry(
                         tool_name,
                         argument,
+                        task_state,
                     )
 
             # =================================================
@@ -1735,6 +1803,14 @@ def execute_plan(
                 trace_entry["verified"] = verified
                 trace_entry["result"] = result
                 trace_entry["message"] = message
+                trace_entry["attempts"] = max(
+                    1,
+                    int(task_state.attempts or 1),
+                )
+                trace_entry["recovery_count"] = max(
+                    0,
+                    int(task_state.recovery_count or 0),
+                )
 
                 if success and verified:
                     trace_entry["status"] = "completed"
