@@ -565,6 +565,47 @@ def assess_plan(
             "implementation can be validated before deciding whether to edit."
         )
 
+    # Browser automation needs a behavioral smoke test, not only a syntax
+    # check. Once browser automation is the active repair domain, require the
+    # dedicated browser_smoke mode so the planner cannot satisfy the gate
+    # with a meaningless compile-only validation.
+    request_lower = str(user_command or "").lower()
+    if (
+        require_code_test
+        and "browser" in request_lower
+        and "automation" in request_lower
+        and test_indices
+    ):
+        browser_smoke_present = False
+
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+
+            if str(step.get("tool", "") or "").strip() != "code_test":
+                continue
+
+            argument = str(step.get("argument", "") or "").strip()
+
+            try:
+                payload = json.loads(argument)
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+
+            if (
+                isinstance(payload, dict)
+                and str(payload.get("mode", "") or "").strip().lower()
+                in {"browser_smoke", "browser_self_test"}
+            ):
+                browser_smoke_present = True
+                break
+
+        if not browser_smoke_present:
+            issues.append(
+                "Browser automation diagnostics must use code_test with "
+                'mode "browser_smoke" before any repair decision.'
+            )
+
     requires_modification = bool(require_modification)
 
     if requires_modification and not mutation_indices:
