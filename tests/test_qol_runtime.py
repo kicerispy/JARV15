@@ -239,6 +239,30 @@ def test_browser_result_format_is_specific():
     assert message == "Opened result 2: JARVIS Browser Automation."
 
 
+def test_browser_search_and_click_summaries_are_concise():
+    from tool_executor import format_browser_result
+
+    assert format_browser_result(
+        "browser_search_google",
+        {
+            "success": True,
+            "verified": True,
+            "title": "JARVIS browser automation - Google Search",
+            "url": "https://www.google.com/search?q=JARVIS+browser+automation",
+        },
+    ) == "Google search complete."
+
+    assert format_browser_result(
+        "browser_click_result",
+        {
+            "success": True,
+            "verified": True,
+            "index": 2,
+            "result_title": "Awesome Browser Automation\\n\\nGitHub\\nhttps://github.com/example",
+        },
+    ) == "Opened result 2: Awesome Browser Automation GitHub https://github.com/example."
+
+
 def test_tts_status_exposes_runtime_provider():
     source = Path("voice.py").read_text(encoding="utf-8-sig")
 
