@@ -825,7 +825,7 @@ Last tool: {active_context.get('last_tool', 'none')}
             )
         }
 
-        repair_tool_list = "\\n".join(
+        repair_tool_list = "\n".join(
             f"{name}: {desc}"
             for name, desc in repair_tools.items()
         )
