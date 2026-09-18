@@ -1472,13 +1472,61 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
             messages=messages,
             format="json",
             options=repair_options,
+            keep_alive="15m" if is_repair_phase else None,
         )
+
+        elapsed = time.perf_counter() - planner_start
 
         print(
             f"JARVIS DEBUG: Ollama returned after "
-            f"{time.perf_counter() - planner_start:.3f}s",
+            f"{elapsed:.3f}s",
             flush=True
         )
+
+        # Ollama reports the major latency components on ChatResponse. Keep
+        # these metrics in the debug log so cold-load time is distinguishable
+        # from prompt evaluation and token generation time.
+        if is_repair_phase:
+            def _seconds_from_ns(name: str):
+                try:
+                    value = getattr(response, name, None)
+                    if value is None:
+                        return None
+                    return float(value) / 1_000_000_000.0
+                except (TypeError, ValueError):
+                    return None
+
+            metric_parts = []
+            for name, label in (
+                ("load_duration", "load"),
+                ("prompt_eval_duration", "prompt_eval"),
+                ("eval_duration", "generation"),
+            ):
+                seconds = _seconds_from_ns(name)
+                if seconds is not None:
+                    metric_parts.append(f"{label}={seconds:.3f}s")
+
+            if metric_parts:
+                print(
+                    "JARVIS DEBUG: repair latency breakdown: "
+                    + " | ".join(metric_parts),
+                    flush=True,
+                )
+
+            for name, label in (
+                ("prompt_eval_count", "prompt_tokens"),
+                ("eval_count", "generated_tokens"),
+            ):
+                try:
+                    value = getattr(response, name, None)
+                    if value is not None:
+                        print(
+                            f"JARVIS DEBUG: repair {label}={value}",
+                            flush=True,
+                        )
+                except Exception:
+                    pass
+
         print(
             f"JARVIS DEBUG: response type={type(response).__name__}",
             flush=True
