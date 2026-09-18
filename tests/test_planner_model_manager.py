@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -65,7 +66,22 @@ class PlannerModelManagerTests(unittest.TestCase):
             captured.update(kwargs)
             return {
                 "message": {
-                    "content": '{"goal":"runtime diagnostic","steps":[{"tool":"code_test","argument":"{\"mode\":\"browser_smoke\",\"path\":\"browser_controller.py\"}"}]}'
+                    "content": json.dumps(
+                        {
+                            "goal": "runtime diagnostic",
+                            "steps": [
+                                {
+                                    "tool": "code_test",
+                                    "argument": json.dumps(
+                                        {
+                                            "mode": "browser_smoke",
+                                            "path": "browser_controller.py",
+                                        }
+                                    ),
+                                }
+                            ],
+                        }
+                    )
                 }
             }
 
@@ -100,6 +116,7 @@ class PlannerModelManagerTests(unittest.TestCase):
             }
 
         repair_request = (
+            "[JARVIS_INTERNAL_PHASE:REPAIR]\n"
             "The previous investigation phase has completed successfully.\n"
             "REPAIR PHASE RULES:\n"
             "Use the verified evidence and perform the smallest safe repair."
