@@ -804,7 +804,7 @@ class JarvisAgent:
             "5. Modify the existing target with the smallest safe change.",
             "6. Run code_test AFTER the modification.",
             "7. Never claim success unless validation succeeds.",
-            "8. Never invent filenames, functions, or errors that are not supported by the evidence.",
+            "8. Do not invent filenames, functions, or errors that are not supported by the evidence.",
             "",
             "Return ONLY JSON.",
         ]
