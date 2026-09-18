@@ -561,6 +561,130 @@ class JarvisAgent:
     # ======================================================
 
     @staticmethod
+    def _has_verified_evidence(
+        task: AgentTask,
+        tools: set[str],
+    ) -> bool:
+        """Return True only when prior verified evidence actually satisfies a phase."""
+        for evidence in task.evidence:
+            if not isinstance(evidence, dict):
+                continue
+
+            if not evidence.get("success") or not evidence.get("verified"):
+                continue
+
+            tool = str(
+                evidence.get("tool", "") or ""
+            ).strip()
+
+            if tool in tools:
+                return True
+
+        return False
+
+    @staticmethod
+    def _infer_source_target_from_evidence(
+        task: AgentTask,
+    ) -> Optional[str]:
+        """Infer an existing Python source target from verified discovery evidence."""
+        candidates: List[str] = []
+
+        for evidence in task.evidence:
+            if not isinstance(evidence, dict):
+                continue
+
+            if not evidence.get("success") or not evidence.get("verified"):
+                continue
+
+            tool = str(
+                evidence.get("tool", "") or ""
+            ).strip()
+
+            if tool not in {
+                "code_search",
+                "list_files",
+                "find_file",
+            }:
+                continue
+
+            detail = str(
+                evidence.get("detail", "") or ""
+            )
+
+            for candidate in re.findall(
+                r"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*\.py)(?![A-Za-z0-9_.-])",
+                detail,
+            ):
+                normalized = candidate.strip()
+
+                if not normalized or normalized in candidates:
+                    continue
+
+                lowered = normalized.lower()
+
+                if (
+                    ".before_" in lowered
+                    or ".backup" in lowered
+                    or ".bak" in lowered
+                    or "backup" in lowered
+                    or "__pycache__" in lowered
+                ):
+                    continue
+
+                candidates.append(normalized)
+
+        if not candidates:
+            return None
+
+        request_terms = {
+            term
+            for term in re.findall(
+                r"[A-Za-z_][A-Za-z0-9_]{3,}",
+                str(task.request or "").lower(),
+            )
+            if term not in {
+                "inspect",
+                "find",
+                "problem",
+                "fix",
+                "repair",
+                "debug",
+                "diagnose",
+                "test",
+                "browser",
+            }
+        }
+
+        def score(path: str) -> tuple:
+            lowered = path.lower()
+            stem_terms = set(
+                re.findall(
+                    r"[a-z_][a-z0-9_]{3,}",
+                    lowered,
+                )
+            )
+            overlap = len(request_terms & stem_terms)
+
+            domain_bonus = 0
+            request_lower = str(task.request or "").lower()
+
+            if "browser" in request_lower and "browser" in lowered:
+                domain_bonus += 4
+
+            if "automation" in request_lower and (
+                "browser" in lowered or "automation" in lowered
+            ):
+                domain_bonus += 2
+
+            return (
+                overlap + domain_bonus,
+                -lowered.count("_"),
+                -len(lowered),
+            )
+
+        return max(candidates, key=score)
+
+    @staticmethod
     def _latest_verified_source_target(
         task: AgentTask,
     ) -> Optional[str]:
@@ -588,6 +712,11 @@ class JarvisAgent:
 
             if target:
                 return target
+
+        inferred = self._infer_source_target_from_evidence(task)
+
+        if inferred:
+            return inferred
 
         return None
 
@@ -706,12 +835,29 @@ class JarvisAgent:
                 require_code_read=require_code_read,
                 require_code_test=require_code_test,
                 allow_prior_evidence=(
-                    bool(task.evidence)
-                    and (
+                    (
+                        self._has_verified_evidence(
+                            task,
+                            {"read_file"},
+                        )
+                        if require_code_read
+                        else
+                        self._has_verified_evidence(
+                            task,
+                            {
+                                "code_search",
+                                "read_file",
+                                "list_files",
+                                "find_file",
+                            },
+                        )
+                    )
+                    if (
                         require_repair_plan
                         or require_code_read
                         or require_code_test
                     )
+                    else False
                 ),
             )
 
@@ -824,7 +970,31 @@ class JarvisAgent:
                         require_modification=require_repair_plan,
                         require_code_read=require_code_read,
                         require_code_test=require_code_test,
-                        allow_prior_evidence=bool(task.evidence),
+                        allow_prior_evidence=(
+                            (
+                                self._has_verified_evidence(
+                                    task,
+                                    {"read_file"},
+                                )
+                                if require_code_read
+                                else
+                                self._has_verified_evidence(
+                                    task,
+                                    {
+                                        "code_search",
+                                        "read_file",
+                                        "list_files",
+                                        "find_file",
+                                    },
+                                )
+                            )
+                            if (
+                                require_repair_plan
+                                or require_code_read
+                                or require_code_test
+                            )
+                            else False
+                        ),
                     )
 
                     if not fallback_issues:
