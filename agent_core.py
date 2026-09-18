@@ -691,6 +691,29 @@ class JarvisAgent:
         return max(candidates, key=score)
 
     @staticmethod
+    def _latest_verified_code_test_evidence(
+        task: AgentTask,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest successful, verified code-test evidence."""
+        for evidence in reversed(task.evidence):
+            if not isinstance(evidence, dict):
+                continue
+
+            if (
+                str(evidence.get("tool", "") or "").strip()
+                != "code_test"
+            ):
+                continue
+
+            if (
+                evidence.get("success")
+                and evidence.get("verified")
+            ):
+                return evidence
+
+        return None
+
+    @staticmethod
     def _latest_verified_source_target(
         task: AgentTask,
     ) -> Optional[str]:
@@ -1874,6 +1897,41 @@ class JarvisAgent:
                             )
 
                     else:
+                        # A successful diagnostic is evidence that the reported
+                        # problem cannot currently be reproduced by the relevant
+                        # validation. Never invent a code change just because the
+                        # original request contained the word "fix".
+                        diagnostic_evidence = (
+                            self._latest_verified_code_test_evidence(task)
+                        )
+
+                        if diagnostic_evidence is not None:
+                            logger.info(
+                                "JARVIS AGENT: Diagnostic validation passed; "
+                                "no verified defect remains to repair."
+                            )
+
+                            task.status = "completed"
+                            task.completed_at = time.time()
+                            task.execution_result = (
+                                "Diagnostic validation passed; "
+                                "no reproducible defect was found, so no "
+                                "code change was made."
+                            )
+                            self.state["last_result"] = task.execution_result
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = None
+                            self.state["replans"] = task.replan_count
+
+                            if report_progress:
+                                self._announce(
+                                    "The browser automation passed its diagnostic test, so I couldn't reproduce a failure and made no code changes.",
+                                    speak_callback,
+                                )
+
+                            task_state.set_progress_callback(None)
+                            return task
+
                         logger.info(
                             "JARVIS AGENT: Diagnostic phase complete; "
                             "planning repair phase."
