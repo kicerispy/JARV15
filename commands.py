@@ -1440,6 +1440,10 @@ def deterministic_route(user_request):
         [
             "start jarvis with windows",
             "start jarvis when windows starts",
+            "start jarvis on boot",
+            "start jarvis when my pc starts",
+            "launch jarvis with windows",
+            "run jarvis on windows startup",
             "enable jarvis startup",
             "enable windows startup",
         ]
@@ -1457,6 +1461,7 @@ def deterministic_route(user_request):
         text,
         [
             "stop jarvis from starting with windows",
+            "stop jarvis on boot",
             "disable jarvis startup",
             "disable windows startup",
         ]
