@@ -43,6 +43,7 @@ from logger import logger
 from planner import (
     assess_plan,
     create_plan,
+    is_software_diagnostic_request,
     is_software_repair_request,
     validate_plan,
 )
