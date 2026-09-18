@@ -2423,6 +2423,41 @@ class JarvisAgent:
 
             if result == "done":
 
+                # A self-repair request is satisfied when the full-project
+                # diagnostic passes and no verified defect remains. Do not
+                # invoke the coding planner merely because the original
+                # request contained "fix"; there is nothing concrete to fix.
+                if (
+                    is_explicit_self_repair_request(task.request)
+                    and not self._plan_has_mutation(task.planner_result)
+                    and self._latest_verified_code_test_evidence(task) is not None
+                ):
+                    logger.info(
+                        "JARVIS AGENT: Self-repair diagnostic passed; "
+                        "no verified defect remains to repair."
+                    )
+
+                    task.status = "completed"
+                    task.completed_at = time.time()
+                    task.execution_result = (
+                        "Self-repair diagnostic passed; "
+                        "no reproducible defect was found, so no "
+                        "code change was made."
+                    )
+                    self.state["last_result"] = task.execution_result
+                    self.state["last_status"] = task.status
+                    self.state["last_error"] = None
+                    self.state["replans"] = task.replan_count
+
+                    if report_progress:
+                        self._announce(
+                            "The diagnostic passed, so I found no verified defect to repair.",
+                            speak_callback,
+                        )
+
+                    task_state.set_progress_callback(None)
+                    return task
+
                 # Repair requests can legitimately begin with discovery.
                 # After successful discovery, force a repair/test planning phase.
                 if (
