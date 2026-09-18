@@ -958,6 +958,91 @@ class JarvisAgent:
 
         return None
 
+    @staticmethod
+    def _infer_diagnostic_source_target(
+        task: AgentTask,
+    ) -> Optional[str]:
+        """Infer a real project source file from failed diagnostic evidence."""
+        base = Path.cwd().resolve()
+        ignored = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "jarvis_cuda",
+            "venv",
+            ".venv",
+            "node_modules",
+            "build",
+            "dist",
+            ".jarvis_checkpoints",
+        }
+
+        candidates: List[str] = []
+
+        for evidence in reversed(task.evidence):
+            if not isinstance(evidence, dict):
+                continue
+
+            if str(evidence.get("tool", "") or "").strip() != "code_diagnose":
+                continue
+
+            if evidence.get("success"):
+                continue
+
+            detail = str(evidence.get("detail", "") or "")
+            matches = re.findall(
+                r"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_./\\-]*\.py)(?![A-Za-z0-9_.-])",
+                detail,
+            )
+
+            for raw_path in matches:
+                normalized = (
+                    raw_path.strip().strip(""'")
+                    .replace("\\", "/")
+                )
+
+                candidate = (base / normalized).resolve()
+
+                try:
+                    relative = candidate.relative_to(base)
+                except ValueError:
+                    continue
+
+                if any(part.lower() in ignored for part in relative.parts):
+                    continue
+
+                if candidate.is_file():
+                    relative_text = relative.as_posix()
+                    if relative_text not in candidates:
+                        candidates.append(relative_text)
+
+        if len(candidates) == 1:
+            return candidates[0]
+
+        if candidates:
+            request_lower = str(task.request or "").lower()
+
+            def score(path: str) -> tuple:
+                lowered = path.lower()
+                score_value = 0
+
+                if "browser" in request_lower and "browser" in lowered:
+                    score_value += 4
+
+                if "automation" in request_lower and (
+                    "browser" in lowered or "automation" in lowered
+                ):
+                    score_value += 2
+
+                return (score_value, -len(lowered))
+
+            return max(candidates, key=score)
+
+        return None
+
+
     def _build_phase_fallback_plan(
         self,
         task: AgentTask,
@@ -968,6 +1053,12 @@ class JarvisAgent:
     ) -> Optional[Dict[str, Any]]:
         """Build a deterministic minimal plan when a required phase dead-ends."""
         target = self._latest_verified_source_target(task)
+
+        # A failed project-wide diagnostic can identify a concrete source file
+        # before any read_file phase has executed. Resolve that filename against
+        # the real project tree so the next phase can inspect it deterministically.
+        if not target and require_code_read:
+            target = self._infer_diagnostic_source_target(task)
 
         if require_code_diagnose and target:
             return {
