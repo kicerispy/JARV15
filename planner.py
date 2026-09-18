@@ -1417,14 +1417,15 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         system_content = f"""You are JARVIS's focused diagnostic test planner.
 
 The relevant source file has already been inspected. Verified evidence is
-included in the user message. Run a targeted validation against the existing
+included in the user message. Run a targeted diagnostic against the existing
 implementation before any repair is planned.
 
 Do NOT modify files.
 Do NOT use list_files.
 Do NOT perform broad rediscovery.
-Prefer exactly one code_test step for the verified target.
-For browser_controller.py use mode "browser_smoke".
+Prefer exactly one code_diagnose step for the verified target.
+Use a narrow JSON argument such as:
+{{"path":"target.py","run_tests":false,"run_lint":false,"run_types":false}}
 Do not invent filenames.
 
 Return ONLY valid JSON with goal and steps. Every argument must be a string.
@@ -1485,6 +1486,41 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 
     except Exception as e:
         logger.error(f"Planner LLM call failed: {e}")
+
+        if is_repair_phase:
+            fallback_model = MODEL_MANAGER.coding_fallback_model
+            if fallback_model and fallback_model != planner_model:
+                logger.warning(
+                    "JARVIS DEBUG: primary coding planner failed; "
+                    f"falling back to {fallback_model}"
+                )
+                try:
+                    fallback_response = chat(
+                        model=fallback_model,
+                        messages=messages,
+                        format="json",
+                        options={"temperature": 0},
+                    )
+                    fallback_content = (
+                        fallback_response
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                    fallback_data = extract_json(fallback_content)
+
+                    if fallback_data:
+                        validated_fallback = validate_plan(fallback_data)
+                        if validated_fallback.get("steps"):
+                            logger.info(
+                                "JARVIS DEBUG: coding fallback planner "
+                                "recovered a valid plan."
+                            )
+                            return validated_fallback
+                except Exception as fallback_exc:
+                    logger.error(
+                        f"Coding fallback planner failed: {fallback_exc}"
+                    )
+
         return {"goal": "", "steps": []}
 
     print("JARVIS DEBUG: extracting message content", flush=True)
@@ -1508,6 +1544,42 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 
     if not data:
         logger.warning(f"Planner returned invalid JSON: {content[:200]}")
+
+        if is_repair_phase:
+            fallback_model = MODEL_MANAGER.coding_fallback_model
+            if fallback_model and fallback_model != planner_model:
+                logger.warning(
+                    "JARVIS DEBUG: primary coding planner returned invalid "
+                    f"output; falling back to {fallback_model}"
+                )
+                try:
+                    fallback_response = chat(
+                        model=fallback_model,
+                        messages=messages,
+                        format="json",
+                        options={"temperature": 0},
+                    )
+                    fallback_content = (
+                        fallback_response
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                    fallback_data = extract_json(fallback_content)
+
+                    if fallback_data:
+                        logger.info(
+                            "JARVIS DEBUG: coding fallback planner "
+                            "returned a valid plan."
+                        )
+                        validated_fallback = validate_plan(fallback_data)
+                        if validated_fallback.get("steps"):
+                            return validated_fallback
+
+                except Exception as fallback_exc:
+                    logger.error(
+                        f"Coding fallback planner failed: {fallback_exc}"
+                    )
+
         return {"goal": "", "steps": []}
 
     print("JARVIS DEBUG: calling validate_plan()", flush=True)
