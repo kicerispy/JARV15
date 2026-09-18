@@ -1392,6 +1392,10 @@ def execute_plan(
         or ""
     )
 
+    internal_phase = bool(
+        plan.get("jarvis_internal_phase")
+    )
+
     # Directly constructed plans may not contain a task-level
     # resolved_command or goal. Use the first executable step's
     # description as a safe fallback for task state.
@@ -1863,6 +1867,13 @@ def execute_plan(
             # -------------------------------------------------
 
             if not multi_step:
+
+                # Internal Agent Core phases are orchestration steps, not
+                # user-facing milestones. Keep their evidence in execution
+                # state and let the final task result speak for itself.
+                if internal_phase:
+                    task_state.finish()
+                    return "done"
 
                 # Inspection tools can return large source/results. Keep
                 # those details in execution state, not in TTS or chat history.
