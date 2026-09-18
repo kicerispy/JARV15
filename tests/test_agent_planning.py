@@ -80,6 +80,79 @@ class RetryPlanner:
         return valid_repair_plan()
 
 
+class EvidenceAwareRetryPlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        if len(self.calls) == 1:
+            return {
+                "goal": "repair browser automation",
+                "steps": [],
+            }
+
+        assert "VERIFIED PRIOR EVIDENCE:" in request
+        assert "browser_controller.py" in request
+        assert "Do not restart project-wide discovery" in request
+
+        return {
+            "goal": "repair browser automation",
+            "steps": [
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": "browser_controller.py|||old|||new",
+                },
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                },
+            ],
+        }
+
+
+def test_corrective_repair_planning_retains_verified_evidence():
+    planner = EvidenceAwareRetryPlanner()
+    agent = JarvisAgent(planner=planner)
+
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+    task.evidence = [
+        {
+            "attempt": 1,
+            "tool": "read_file",
+            "target": "browser_controller.py",
+            "success": True,
+            "verified": True,
+            "detail": "10: def browser_connect():",
+        }
+    ]
+
+    planned = agent.plan_task(
+        task,
+        require_repair_plan=True,
+    )
+
+    assert planned.status == "ready"
+    assert len(planner.calls) == 2
+    assert [step.tool for step in planned.steps] == [
+        "code_checkpoint",
+        "edit_file",
+        "code_test",
+    ]
+
+
 def test_agent_retries_an_empty_repair_plan():
     planner = RetryPlanner()
     agent = JarvisAgent(planner=planner)
