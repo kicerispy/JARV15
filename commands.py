@@ -1287,6 +1287,24 @@ def deterministic_route(user_request):
                 "first one",
                 "the first one",
                 "on the first one",
+                "second result",
+                "the second result",
+                "second video",
+                "the second video",
+                "second link",
+                "the second link",
+                "third result",
+                "the third result",
+                "third video",
+                "the third video",
+                "third link",
+                "the third link",
+                "last result",
+                "the last result",
+                "last video",
+                "the last video",
+                "last link",
+                "the last link",
             }
 
             if target.lower().strip() in _generic_first_result_targets:
@@ -1374,7 +1392,7 @@ def deterministic_route(user_request):
         }
 
     # ==================================================
-    # System status
+    # JARVIS / WINDOWS STATUS
     # ==================================================
 
     if contains_any(
@@ -1386,12 +1404,95 @@ def deterministic_route(user_request):
             "how is my pc",
             "cpu usage",
             "ram usage",
+            "jarvis health",
+            "jarvis status",
         ]
     ):
         return {
             "steps": [
                 {
                     "tool": "system_status",
+                    "argument": ""
+                }
+            ]
+        }
+
+    if contains_any(
+        text,
+        [
+            "startup status",
+            "does jarvis start with windows",
+            "does jarvis start with my pc",
+            "is jarvis set to start with windows",
+        ]
+    ):
+        return {
+            "steps": [
+                {
+                    "tool": "startup_status",
+                    "argument": ""
+                }
+            ]
+        }
+
+    if contains_any(
+        text,
+        [
+            "start jarvis with windows",
+            "start jarvis when windows starts",
+            "enable jarvis startup",
+            "enable windows startup",
+        ]
+    ):
+        return {
+            "steps": [
+                {
+                    "tool": "enable_startup",
+                    "argument": ""
+                }
+            ]
+        }
+
+    if contains_any(
+        text,
+        [
+            "stop jarvis from starting with windows",
+            "disable jarvis startup",
+            "disable windows startup",
+        ]
+    ):
+        return {
+            "steps": [
+                {
+                    "tool": "disable_startup",
+                    "argument": ""
+                }
+            ]
+        }
+
+    if contains_any(
+        text,
+        [
+            "task history",
+            "what have you done",
+            "what did you do recently",
+            "recent tasks",
+        ]
+    ):
+        return {
+            "steps": [
+                {
+                    "tool": "task_history",
+                    "argument": ""
+                }
+            ]
+        }
+
+    if text in {"go back", "go back in the browser"}:
+        return {
+            "steps": [
+                {
+                    "tool": "browser_back",
                     "argument": ""
                 }
             ]
@@ -1782,6 +1883,7 @@ def should_resolve_context(text):
         "this one",
         "the first one",
         "the second one",
+        "the third one",
         "the last one",
         "same one",
         "do that",
@@ -1789,11 +1891,26 @@ def should_resolve_context(text):
         "try that",
         "try it",
         "go there",
+        "go back",
         "open that",
         "click that",
         "play that",
         "select that",
+        "read the page",
+        "read the page text",
+        "read the title",
+        "show me the page",
     )
+
+    if (
+        re.match(
+            r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?"
+            r"(?:first|second|third|last|top)\\s+"
+            r"(?:result|link|video|one|item)$",
+            normalized,
+        )
+    ):
+        return True
 
     return (
         normalized in context_phrases
