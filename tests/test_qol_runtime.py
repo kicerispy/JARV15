@@ -258,7 +258,7 @@ def test_browser_search_and_click_summaries_are_concise():
             "success": True,
             "verified": True,
             "index": 2,
-            "result_title": "Awesome Browser Automation\\n\\nGitHub\\nhttps://github.com/example",
+            "result_title": "Awesome Browser Automation\n\nGitHub\nhttps://github.com/example",
         },
     ) == "Opened result 2: Awesome Browser Automation GitHub https://github.com/example."
 
