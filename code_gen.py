@@ -10,7 +10,11 @@ from typing import Optional, Tuple
 
 from ollama import chat
 
-from config import CODING_MODEL, CODING_TEMPERATURE
+from config import (
+    CODING_FALLBACK_MODEL,
+    CODING_MODEL,
+    CODING_TEMPERATURE,
+)
 from logger import logger
 
 # Patterns that indicate a code generation request
@@ -172,6 +176,22 @@ Generate the code now:"""
         )
 
         code = response.get("message", {}).get("content", "").strip()
+
+        if (
+            not code
+            and CODING_FALLBACK_MODEL
+            and CODING_FALLBACK_MODEL != CODING_MODEL
+        ):
+            logger.warning(
+                "Primary coding model returned empty output; "
+                f"falling back to {CODING_FALLBACK_MODEL}."
+            )
+            response = chat(
+                model=CODING_FALLBACK_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": CODING_TEMPERATURE},
+            )
+            code = response.get("message", {}).get("content", "").strip()
 
         # Remove markdown code fences if present
         code = re.sub(r'^```(?:html|javascript|python|js|lua)?\n', '', code)
