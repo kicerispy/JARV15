@@ -21,6 +21,7 @@ _page = None
 _loop = None
 _skipper_task = None
 _connection_task = None
+_driver_process = None
 
 
 def get_event_loop():
@@ -80,7 +81,7 @@ async def _auto_skip_ads(page):
 
 async def _init_browser():
     """Start one persistent Playwright browser context and reuse it."""
-    global _playwright, _context, _page, _skipper_task, _connection_task
+    global _playwright, _context, _page, _skipper_task, _connection_task, _driver_process
 
     if _page is not None:
         try:
@@ -110,6 +111,10 @@ async def _init_browser():
         )
     except Exception:
         _connection_task = None
+
+    connection = getattr(getattr(_playwright, "_impl_obj", None), "_connection", None)
+    transport = getattr(connection, "_transport", None)
+    _driver_process = getattr(transport, "_proc", None)
 
     user_data_dir = str(CHROME_AUTOMATION_DIR)
     CHROME_AUTOMATION_DIR.mkdir(parents=True, exist_ok=True)
@@ -998,7 +1003,7 @@ def click_at_coords(x: int, y: int) -> None:
 
 
 def cleanup_browser():
-    global _playwright, _context, _page, _skipper_task, _loop, _connection_task
+    global _playwright, _context, _page, _skipper_task, _loop, _connection_task, _driver_process
 
     loop_to_close = _loop
 
@@ -1013,80 +1018,71 @@ def cleanup_browser():
                     )
 
                 if _context:
-                    await _context.close()
-
-                if _playwright:
-                    await _playwright.stop()
-
-                # Playwright's driver is a child process. On Windows, the
-                # Proactor stdout transport can occasionally take longer than
-                # stop_async() to observe EOF. Keep the exact Connection.run()
-                # task alive until the driver actually exits; only use the
-                # targeted process termination fallback when it does not.
-                if _connection_task and not _connection_task.done():
                     try:
-                        await asyncio.wait_for(
-                            asyncio.shield(_connection_task),
-                            timeout=2.0,
-                        )
-                    except asyncio.TimeoutError:
-                        connection = getattr(
-                            getattr(_playwright, "_impl_obj", None),
-                            "_connection",
-                            None,
-                        )
-                        transport = getattr(connection, "_transport", None)
-                        process = getattr(transport, "_proc", None)
-
-                        if process is not None:
-                            try:
-                                if process.returncode is None:
-                                    process.terminate()
-                                    await asyncio.wait_for(
-                                        process.wait(),
-                                        timeout=2.0,
-                                    )
-                            except asyncio.TimeoutError:
-                                try:
-                                    process.kill()
-                                    await asyncio.wait_for(
-                                        process.wait(),
-                                        timeout=2.0,
-                                    )
-                                except Exception as exc:
-                                    logging.debug(
-                                        f"Playwright driver kill exception: {exc}"
-                                    )
-                            except Exception as exc:
-                                logging.debug(
-                                    f"Playwright driver termination exception: {exc}"
-                                )
-
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.shield(_connection_task),
-                                timeout=2.0,
-                            )
-                        except asyncio.TimeoutError:
-                            logging.debug(
-                                "Playwright connection task still pending after driver shutdown fallback."
-                            )
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception as exc:
-                            logging.debug(
-                                f"Playwright connection task shutdown exception: {exc}"
-                            )
-
-                    except asyncio.CancelledError:
-                        pass
+                        await _context.close()
                     except Exception as exc:
                         logging.debug(
-                            f"Playwright connection task shutdown exception: {exc}"
+                            f"Browser context close exception: {exc}"
                         )
+
+                if _playwright:
+                    try:
+                        await _playwright.stop()
+                    except Exception as exc:
+                        logging.debug(
+                            f"Playwright stop exception: {exc}"
+                        )
+
+                # Playwright owns the driver process and its Connection.run()
+                # task. On Windows, process EOF can race interpreter teardown.
+                # Force the child process down if it remains alive, then cancel
+                # and await only Playwright's own connection task.
+                process = _driver_process
+                if process is not None:
+                    try:
+                        if process.returncode is None:
+                            process.terminate()
+                            await asyncio.wait_for(
+                                process.wait(),
+                                timeout=2.0,
+                            )
+                    except asyncio.TimeoutError:
+                        try:
+                            process.kill()
+                            await asyncio.wait_for(
+                                process.wait(),
+                                timeout=2.0,
+                            )
+                        except Exception as exc:
+                            logging.debug(
+                                f"Playwright driver kill exception: {exc}"
+                            )
+                    except Exception as exc:
+                        logging.debug(
+                            f"Playwright driver termination exception: {exc}"
+                        )
+
+                    # The Process wrapper can retain a Windows subprocess
+                    # transport after the child exits. Close that transport
+                    # explicitly so its __del__ hook never runs against a
+                    # closed event loop.
+                    process_transport = getattr(process, "_transport", None)
+                    if process_transport is not None:
+                        try:
+                            process_transport.close()
+                        except Exception:
+                            pass
+
+                if _connection_task and not _connection_task.done():
+                    _connection_task.cancel()
+                    await asyncio.gather(
+                        _connection_task,
+                        return_exceptions=True,
+                    )
 
                 await asyncio.sleep(0)
 
+            loop_to_close.run_until_complete(_close())
     except Exception as exc:
         logging.debug(f"Browser cleanup exception: {exc}")
     finally:
@@ -1095,6 +1091,7 @@ def cleanup_browser():
         _page = None
         _skipper_task = None
         _connection_task = None
+        _driver_process = None
         _loop = None
 
 
