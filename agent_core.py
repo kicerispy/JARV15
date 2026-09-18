@@ -2175,6 +2175,57 @@ class JarvisAgent:
 
             if result == "failed":
 
+                # A failed diagnostic is useful evidence, not a generic
+                # planning failure. For software repair tasks, hand the
+                # verified source + diagnostic evidence directly to the
+                # focused repair planner instead of asking the model to
+                # rediscover the task from scratch.
+                latest_diagnostic = None
+                for evidence in reversed(task.evidence):
+                    if not isinstance(evidence, dict):
+                        continue
+                    if str(evidence.get("tool", "") or "").strip() != "code_diagnose":
+                        continue
+                    if not evidence.get("success"):
+                        latest_diagnostic = evidence
+                        break
+
+                if (
+                    is_software_repair_request(task.request)
+                    and latest_diagnostic is not None
+                    and self._has_verified_evidence(task, {"read_file"})
+                ):
+                    logger.info(
+                        "JARVIS AGENT: Diagnostic failure captured as repair evidence; "
+                        "switching directly to focused repair planning."
+                    )
+
+                    self.state["replans"] = task.replan_count
+
+                    planning_request = (
+                        self._build_repair_request_after_discovery(task)
+                    )
+
+                    replanned = self.plan_task(
+                        task,
+                        history_text=history_text,
+                        planning_request=planning_request,
+                        require_repair_plan=True,
+                    )
+
+                    if replanned.status not in {
+                        "conversation",
+                        "failed",
+                    }:
+                        task.replan_count += 1
+                        self.state["replans"] = task.replan_count
+                        continue
+
+                    logger.warning(
+                        "JARVIS AGENT: Focused repair handoff failed; "
+                        "continuing through normal bounded recovery."
+                    )
+
                 if (
                     task.replan_count
                     >= task.max_replans
