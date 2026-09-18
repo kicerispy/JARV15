@@ -423,11 +423,7 @@ SOFTWARE_DOMAIN_TERMS = (
     "script",
     "software",
     "jarvis",
-    "assistant",
     "runtime",
-    "feature",
-    "function",
-    "capability",
     "project",
     "automation",
     "browser",
@@ -438,14 +434,25 @@ SOFTWARE_DOMAIN_TERMS = (
     "error",
     "exception",
     "traceback",
+    "module",
+    "repository",
+    "codebase",
+    "app",
+    "application",
+    "website",
+    "game",
     ".py",
     ".js",
+)
+
+SOFTWARE_CHANGE_DOMAIN_TERMS = SOFTWARE_DOMAIN_TERMS + (
+    "function",
+    "capability",
 )
 
 CODE_INSPECTION_TOOLS = {
     "code_search",
     "code_diagnose",
-    "dev_command",
     "read_file",
     "list_files",
     "find_file",
@@ -542,7 +549,7 @@ def is_software_change_request(text: str) -> bool:
 
     return explicit_self_change or (
         any(term in normalized for term in change_terms)
-        and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
+        and any(term in normalized for term in SOFTWARE_CHANGE_DOMAIN_TERMS)
     )
 
 
