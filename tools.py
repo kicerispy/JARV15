@@ -2651,9 +2651,7 @@ def _run_tool_raw(
 
     elif tool_name == "jarvis_status":
 
-        return jarvis_status.get_status(
-            "gemma4:e2b"
-        )
+        return jarvis_status.get_status()
 
     # --------------------------------------------------------
     # SCREEN CAPTURE
