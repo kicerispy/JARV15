@@ -1322,14 +1322,14 @@ then return the mutation plan on the next planning attempt. Do not repeat
 project-wide discovery.
 
 REPAIR PLAN SCHEMA — REQUIRED:
-{
+{{
   "goal": "brief repair goal",
   "steps": [
-    {"tool": "code_checkpoint", "argument": ""},
-    {"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"},
-    {"tool": "code_test", "argument": "{\"mode\":\"compile\",\"path\":\"existing_file.py\"}"}
+    {{"tool": "code_checkpoint", "argument": ""}},
+    {{"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"}},
+    {{"tool": "code_test", "argument": "{\"mode\":\"compile\",\"path\":\"existing_file.py\"}"}}
   ]
-}
+}}
 
 The steps array MUST contain actual tool objects with a non-empty "tool"
 field. Do not emit null tools, prose, markdown, commentary, or alternative
