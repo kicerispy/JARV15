@@ -88,6 +88,42 @@ def test_task_progress_is_reserved_for_complex_plans():
     assert agent._should_report_progress(task) is True
 
 
+
+def test_context_project_analysis_prefers_git_nonignored_files(tmp_path, monkeypatch):
+    import context_aware
+
+    monkeypatch.chdir(tmp_path)
+
+    (tmp_path / "main.py").write_text("print('ok')", encoding="utf-8")
+    (tmp_path / "ignored_backup.py").write_text(
+        "backup",
+        encoding="utf-8",
+    )
+    (tmp_path / "local_note.txt").write_text(
+        "local",
+        encoding="utf-8",
+    )
+
+    class FakeResult:
+        returncode = 0
+        stdout = "main.py\nlocal_note.txt\n"
+
+    monkeypatch.setattr(
+        context_aware.subprocess,
+        "run",
+        lambda *args, **kwargs: FakeResult(),
+    )
+
+    context = object.__new__(context_aware.JarvisContext)
+    info = context._analyze_project()
+
+    assert set(info["files"]) == {
+        "main.py",
+        "local_note.txt",
+    }
+    assert "ignored_backup.py" not in info["files"]
+
+
 def test_voice_source_uses_runtime_onnx_provider_detection():
     source = Path("voice.py").read_text(encoding="utf-8-sig")
 
