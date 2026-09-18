@@ -136,6 +136,7 @@ class TaskState:
             self.last_error = None
             self.attempts = 0
             self.recovery_count = 0
+            self.completion_spoken = False
             return True
 
     def update_step(self, step_number: int, tool_name: str) -> None:
