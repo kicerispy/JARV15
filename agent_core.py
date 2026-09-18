@@ -969,6 +969,7 @@ class JarvisAgent:
         if require_code_diagnose and target:
             return {
                 "goal": "targeted diagnostic",
+                "jarvis_internal_phase": True,
                 "steps": [
                     {
                         "tool": "code_diagnose",
@@ -997,6 +998,7 @@ class JarvisAgent:
                     if smoke_test
                     else "diagnostic validation"
                 ),
+                "jarvis_internal_phase": True,
                 "steps": [
                     {
                         "tool": "code_test",
@@ -1017,6 +1019,7 @@ class JarvisAgent:
         if require_code_read and target:
             return {
                 "goal": "inspect verified target source",
+                "jarvis_internal_phase": True,
                 "steps": [
                     {
                         "tool": "read_file",
@@ -1043,6 +1046,7 @@ class JarvisAgent:
             if requested_target:
                 return {
                     "goal": "discover requested repair target",
+                    "jarvis_internal_phase": True,
                     "steps": [
                         {
                             "tool": "find_file",
