@@ -38,7 +38,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from logger import logger
-from planner import assess_plan, create_plan, validate_plan
+from planner import (
+    assess_plan,
+    create_plan,
+    is_software_repair_request,
+    validate_plan,
+)
 from tool_executor import execute_plan
 from state import ActiveContext, TaskState
 
@@ -321,6 +326,22 @@ class JarvisAgent:
 
         return steps
 
+    @staticmethod
+    def _plan_has_mutation(plan: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(plan, dict):
+            return False
+
+        return any(
+            str(step.get("tool", "") or "").strip()
+            in {
+                "write_file",
+                "edit_file",
+                "delete_file",
+            }
+            for step in plan.get("steps", [])
+            if isinstance(step, dict)
+        )
+
     # ======================================================
     # Planning
     # ======================================================
@@ -330,6 +351,7 @@ class JarvisAgent:
         task: AgentTask,
         history_text: str = "",
         planning_request: Optional[str] = None,
+        require_repair_plan: bool = False,
     ) -> AgentTask:
 
         task.status = "planning"
@@ -395,6 +417,7 @@ class JarvisAgent:
             plan_issues = assess_plan(
                 task.request,
                 plan,
+                require_modification=require_repair_plan,
             )
 
             if plan_issues:
@@ -436,9 +459,19 @@ class JarvisAgent:
                             str(plan),
                             "",
                             "Produce a corrected plan as JSON.",
-                            "For software repair tasks, inspect first, "
-                            "checkpoint before changes, modify only what is "
-                            "needed, and run code_test after changes.",
+                            (
+                                "For the repair phase, inspect first when "
+                                "needed, create code_checkpoint before "
+                                "changing files, make the smallest targeted "
+                                "modification, and run code_test afterward."
+                                if require_repair_plan
+                                else
+                                "For the discovery phase, inspect the "
+                                "relevant project code and do not modify "
+                                "files yet."
+                            ),
+                            "Do not invent filenames. Discover the actual "
+                            "target file before editing.",
                         ]
                     )
 
@@ -523,6 +556,51 @@ class JarvisAgent:
             )
 
         return task
+
+    def _build_repair_request_after_discovery(
+        self,
+        task: AgentTask,
+    ) -> str:
+
+        lines = [
+            "The discovery phase has completed successfully.",
+            "Now create the repair and validation phase for the original task.",
+            "",
+            f"Original request: {task.request}",
+            f"Goal: {task.goal}",
+            "",
+            "Observed findings:",
+        ]
+
+        if task.observations:
+            lines.extend(
+                f"- {observation}"
+                for observation in task.observations
+            )
+        else:
+            lines.append(
+                "- No additional observation text was recorded."
+            )
+
+        lines.extend(
+            [
+                "",
+                "Required repair-phase workflow:",
+                "1. Inspect any newly identified relevant code when needed.",
+                "2. Create code_checkpoint before changing project files.",
+                "3. Make the smallest targeted modification.",
+                "4. Run code_test after the modification.",
+                "5. Do not report success unless validation succeeds.",
+                "",
+                "Do not invent filenames. Discover the real target file "
+                "from the project observations before editing.",
+                "",
+                "Return ONLY JSON.",
+            ]
+        )
+
+        return "\n".join(lines)
+
 
     # ======================================================
     # Build Replan Request
@@ -1093,6 +1171,47 @@ class JarvisAgent:
 
             if result == "done":
 
+                # Repair requests can legitimately begin with discovery.
+                # After successful discovery, force a repair/test planning phase.
+                if (
+                    is_software_repair_request(task.request)
+                    and not self._plan_has_mutation(
+                        task.planner_result
+                    )
+                ):
+
+                    logger.info(
+                        "JARVIS AGENT: Discovery phase complete; "
+                        "planning repair phase."
+                    )
+
+                    if report_progress:
+                        self._announce(
+                            "I've finished inspecting the code. I'm moving on to the fix and validation.",
+                            speak_callback,
+                        )
+
+                    planning_request = (
+                        self._build_repair_request_after_discovery(
+                            task
+                        )
+                    )
+
+                    replanned = self.plan_task(
+                        task,
+                        history_text=history_text,
+                        planning_request=planning_request,
+                        require_repair_plan=True,
+                    )
+
+                    if replanned.status in {
+                        "conversation",
+                        "failed",
+                    }:
+                        return replanned
+
+                    continue
+
                 task.status = "completed"
 
                 task.completed_at = (
@@ -1229,6 +1348,9 @@ class JarvisAgent:
                     task,
                     history_text=history_text,
                     planning_request=planning_request,
+                    require_repair_plan=(
+                        is_software_repair_request(task.request)
+                    ),
                 )
 
                 if replanned.status in {
