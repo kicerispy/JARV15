@@ -338,6 +338,23 @@ CHAT_NUM_PREDICT = int(
     )
 )
 
+# Preload the coding model in a background thread after startup so the first
+# autonomous repair does not pay the full Ollama model-load penalty.
+PRELOAD_CODING_MODEL = os.environ.get(
+    "JARVIS_PRELOAD_CODING_MODEL",
+    "1",
+).strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+
+CODING_MODEL_KEEP_ALIVE = os.environ.get(
+    "JARVIS_CODING_MODEL_KEEP_ALIVE",
+    "15m",
+).strip() or "15m"
+
 
 # ============================================================
 # DEBUG
