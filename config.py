@@ -314,6 +314,13 @@ CODING_TEMPERATURE = float(
     )
 )
 
+CODING_NUM_CTX = int(
+    os.environ.get(
+        "JARVIS_CODING_NUM_CTX",
+        "8192",
+    )
+)
+
 CHAT_THINK = os.environ.get(
     "JARVIS_CHAT_THINK",
     "false",
