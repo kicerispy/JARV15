@@ -1909,46 +1909,70 @@ def execute_plan(
 
         except Exception as e:
 
-            logger.error(
-                f"JARVIS: Tool error "
-                f"({tool_name}): {e}"
-            )
-
+            # Unexpected tool exceptions are execution evidence, not a final
+            # user-facing response. Agent Core owns recovery/replanning and
+            # should decide whether another approach is appropriate.
+            error_detail = str(e).strip() or "Unknown tool exception."
             error_message = (
-                f"I couldn't complete the "
-                f"{tool_name} action."
+                f"{tool_name} failed with an unexpected error: "
+                f"{error_detail}"
             )
 
-            active_context.clear()
-
-            add_assistant_message(
-                error_message
+            logger.error(
+                f"JARVIS: Tool error ({tool_name}): {error_detail}"
             )
 
-            logger.info(
-                f"JARVIS: {error_message}"
+            exception_result = ToolResult(
+                success=False,
+                tool=tool_name,
+                error=error_message,
+                retryable=True,
+                observation={
+                    "failure_type": "exception",
+                    "exception": error_detail,
+                },
             )
+
+            # Keep the exact failure in the execution trace so Agent Core can
+            # replan from concrete evidence instead of a generic "failed".
+            if LAST_EXECUTION_TRACE:
+                trace_entry = LAST_EXECUTION_TRACE[-1]
+                trace_entry["success"] = False
+                trace_entry["verified"] = False
+                trace_entry["result"] = exception_result
+                trace_entry["message"] = error_message
+                trace_entry["status"] = "failed"
+                trace_entry["failure_type"] = "exception"
+
+            if tool_name in BROWSER_TOOLS:
+                # Preserve browser state for replanning. The failed action may
+                # have changed the page before the exception was raised.
+                active_context.last_tool = tool_name
+                active_context.last_result = error_message
+                active_context.last_action = f"failed:{tool_name}"
+
+                try:
+                    from browser_controller import browser_page_info
+
+                    page_info = browser_page_info()
+
+                    if (
+                        isinstance(page_info, dict)
+                        and page_info.get("success")
+                    ):
+                        active_context.page_url = page_info.get("url")
+                        active_context.page_title = page_info.get("title")
+                except Exception:
+                    pass
+            else:
+                active_context.clear()
 
             task_state.record_error(error_message)
             task_state.fail(error_message)
 
-            # -------------------------------------------------
-            # IMPORTANT:
-            #
-            # speak_result() returns "done" when TTS finishes.
-            # That does NOT mean the task succeeded.
-            #
-            # Preserve the execution failure so JarvisAgent
-            # can trigger its replan/recovery loop.
-            # -------------------------------------------------
-
-            speak_status = speak_result(
-                error_message,
-                speak_callback,
-            )
-
-            if speak_status == "interrupted":
-                return "interrupted"
+            # Do not speak here. A replan may recover the task, and Agent Core
+            # is responsible for the final user-facing outcome.
+            return "failed"
 
             return "failed"
 
