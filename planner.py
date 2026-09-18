@@ -29,6 +29,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_press_key": "Press a keyboard key on a browser element by CSS selector, visible text, or ARIA role. Argument is JSON.",
     "browser_wait_for_element": "Wait for a browser DOM element to become visible. Argument is JSON.",
     "browser_extract_text": "Extract text from a browser DOM element. Argument is JSON.",
+    "browser_click_first_result": "Click the first organic Google or YouTube result through the controlled browser DOM. Argument is JSON.",
     "weather": "Get current weather. argument = location, or empty for default.",
     "current_time": "Get current time. argument = timezone/city, or empty for local.",
     "current_date": "Get today's date. argument = empty.",
@@ -482,8 +483,11 @@ def create_plan(
                     "goal": "click first Google result",
                     "steps": [
                         {
-                            "tool": "click_screen",
-                            "argument": resolved_command,
+                            "tool": "browser_click_first_result",
+                            "argument": json.dumps({
+                                "site": "google",
+                                "query": active_query,
+                            }),
                         }
                     ],
                     "resolved_command": resolved_command,
@@ -519,8 +523,11 @@ def create_plan(
                     "goal": "click first YouTube result",
                     "steps": [
                         {
-                            "tool": "click_screen",
-                            "argument": resolved_command,
+                            "tool": "browser_click_first_result",
+                            "argument": json.dumps({
+                                "site": "youtube",
+                                "query": active_query,
+                            }),
                         }
                     ],
                     "resolved_command": resolved_command,
