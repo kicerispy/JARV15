@@ -198,7 +198,7 @@ def test_code_search_accepts_structured_query_argument(monkeypatch, tmp_path):
 
 def test_code_diagnose_resolves_voice_transcribed_target(tmp_path, monkeypatch):
     target = tmp_path / "jarvis_autonomous_test_target.py"
-    target.write_text("def add_numbers(a, b):\\n    return a + b\\n", encoding="utf-8")
+    target.write_text("def add_numbers(a, b):\n    return a + b\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     result = code_diagnose(
