@@ -784,10 +784,22 @@ class JarvisAgent:
 
         task.status = "planning"
 
-        request_for_planner = (
+        phase_marker = ""
+        if require_repair_plan:
+            phase_marker = "[JARVIS_INTERNAL_PHASE:REPAIR]\n"
+        elif require_code_test:
+            phase_marker = "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]\n"
+        elif require_code_read:
+            phase_marker = "[JARVIS_INTERNAL_PHASE:SOURCE_READ]\n"
+
+        base_planning_request = (
             planning_request
             if planning_request is not None
             else task.request
+        )
+
+        request_for_planner = (
+            phase_marker + base_planning_request
         )
 
         logger.info(
@@ -964,8 +976,9 @@ class JarvisAgent:
                             ]
                         )
 
-                    request_for_planner = "\n".join(
-                        correction_lines
+                    request_for_planner = (
+                        phase_marker
+                        + "\n".join(correction_lines)
                     )
 
                     continue
