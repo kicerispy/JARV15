@@ -2023,10 +2023,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    try:
-        from browser_controller import cleanup_browser
-        cleanup_browser()
-    except Exception as exc:
-        logger.debug(f"Browser cleanup after main exit failed: {exc}")
 
 
