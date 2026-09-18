@@ -507,6 +507,14 @@ def is_software_repair_request(text: str) -> bool:
             "repair yourself",
             "self diagnose and fix",
             "self-diagnose and fix",
+            "diagnose yourself and fix",
+            "diagnose yourself and repair",
+            "run a full diagnostic on yourself and fix",
+            "run a full diagnostic on yourself and repair",
+            "audit yourself and fix",
+            "audit your own code and fix",
+            "find bugs in your own code and fix",
+            "check your own code and fix",
             "fix your own code",
             "repair your own code",
         )
@@ -527,9 +535,14 @@ def is_software_diagnostic_request(text: str) -> bool:
             "diagnose yourself",
             "self diagnose",
             "self-diagnose",
-            "diagnose your own code",
+            "run a full diagnostic on yourself",
+            "run a full diagnostic on your own code",
+            "audit yourself",
+            "audit your own code",
+            "check yourself for bugs",
             "check your own code",
             "inspect your own code",
+            "find bugs in your own code",
         )
     )
 
