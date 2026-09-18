@@ -2004,10 +2004,17 @@ class JarvisAgent:
                 )
 
                 if report_progress:
-                    self._announce(
-                        "The task is complete.",
-                        speak_callback,
-                    )
+                    completion_spoken = False
+                    try:
+                        completion_spoken = task_state.was_completion_spoken()
+                    except Exception:
+                        completion_spoken = False
+
+                    if not completion_spoken:
+                        self._announce(
+                            "The task is complete.",
+                            speak_callback,
+                        )
 
                 task_state.set_progress_callback(None)
                 return task
