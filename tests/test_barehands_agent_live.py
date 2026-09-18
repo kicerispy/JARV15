@@ -3,9 +3,16 @@ import unittest
 from agent_core import JarvisAgent
 from state import ActiveContext, TaskState
 from tool_executor import execute_plan
+from barehands_controller import BarehandsController
+
+BAREHANDS_LIVE = BarehandsController().is_available()
 
 
 class TestBarehandsAgentLiveIntegration(unittest.TestCase):
+    @unittest.skipUnless(
+        BAREHANDS_LIVE,
+        "Barehands live server is not running",
+    )
     def test_agent_runs_real_barehands_executor(self):
         def fake_planner(request, active_context=None, history_text=""):
             return {
