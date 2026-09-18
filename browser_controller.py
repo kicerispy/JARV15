@@ -20,6 +20,7 @@ _context = None
 _page = None
 _loop = None
 _skipper_task = None
+_connection_task = None
 
 
 def get_event_loop():
@@ -79,7 +80,7 @@ async def _auto_skip_ads(page):
 
 async def _init_browser():
     """Start one persistent Playwright browser context and reuse it."""
-    global _playwright, _context, _page, _skipper_task
+    global _playwright, _context, _page, _skipper_task, _connection_task
 
     if _page is not None:
         try:
@@ -89,6 +90,27 @@ async def _init_browser():
             pass
 
     _playwright = await async_playwright().start()
+
+    # Playwright creates its Connection.run() task internally. Keep a direct
+    # reference so shutdown can await that exact task instead of cancelling
+    # arbitrary asyncio tasks on the shared Windows event loop.
+    try:
+        current = asyncio.current_task()
+        _connection_task = next(
+            (
+                task
+                for task in asyncio.all_tasks()
+                if (
+                    task is not current
+                    and not task.done()
+                    and "Connection.run" in task.get_coro().__qualname__
+                )
+            ),
+            None,
+        )
+    except Exception:
+        _connection_task = None
+
     user_data_dir = str(CHROME_AUTOMATION_DIR)
     CHROME_AUTOMATION_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -966,15 +988,13 @@ def click_at_coords(x: int, y: int) -> None:
 
 
 def cleanup_browser():
-    global _playwright, _context, _page, _skipper_task, _loop
+    global _playwright, _context, _page, _skipper_task, _loop, _connection_task
 
     loop_to_close = _loop
 
     try:
         if loop_to_close and not loop_to_close.is_closed():
             async def _close():
-                current_task = asyncio.current_task()
-
                 if _skipper_task and not _skipper_task.done():
                     _skipper_task.cancel()
                     await asyncio.gather(
@@ -988,47 +1008,29 @@ def cleanup_browser():
                 if _playwright:
                     await _playwright.stop()
 
-                # Playwright can leave its internal Connection.run task
-                # one or two event-loop turns behind stop(). Let it settle
-                # before doing a final cancellation sweep.
-                for _ in range(3):
-                    await asyncio.sleep(0.05)
-
-                    pending = [
-                        task
-                        for task in asyncio.all_tasks()
-                        if (
-                            task is not current_task
-                            and not task.done()
+                # Playwright's stop_async() waits for the transport to stop,
+                # but its internally created Connection.run() task can finish
+                # on the following event-loop turn. Await that exact task so
+                # Windows Proactor transports are fully drained before exit.
+                if _connection_task:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(_connection_task),
+                            timeout=5.0,
                         )
-                    ]
+                    except asyncio.TimeoutError:
+                        logging.debug(
+                            "Playwright connection task did not finish within shutdown timeout."
+                        )
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:
+                        logging.debug(
+                            f"Playwright connection task shutdown exception: {exc}"
+                        )
 
-                    if not pending:
-                        break
+                await asyncio.sleep(0)
 
-                    # Give ordinary Playwright shutdown work another chance
-                    # before forcing cancellation of anything left behind.
-                    await asyncio.sleep(0)
-
-                pending = [
-                    task
-                    for task in asyncio.all_tasks()
-                    if (
-                        task is not current_task
-                        and not task.done()
-                    )
-                ]
-
-                for task in pending:
-                    task.cancel()
-
-                if pending:
-                    await asyncio.gather(
-                        *pending,
-                        return_exceptions=True,
-                    )
-
-            loop_to_close.run_until_complete(_close())
     except Exception as exc:
         logging.debug(f"Browser cleanup exception: {exc}")
     finally:
@@ -1036,12 +1038,7 @@ def cleanup_browser():
         _context = None
         _page = None
         _skipper_task = None
-
-        # Do not close the shared Windows Proactor loop here. Playwright's
-        # subprocess transports may still need one final loop turn during
-        # interpreter shutdown, and closing it early produces noisy
-        # unclosed-pipe warnings. The browser resources are cleaned up while
-        # the loop is still alive; the loop itself can be released by Python.
+        _connection_task = None
         _loop = None
 
 
