@@ -18,6 +18,7 @@ class ModelManager:
     chat_model: str = config.CHAT_MODEL
     planner_model: str = config.PLANNER_MODEL
     coding_model: str = config.CODING_MODEL
+    coding_fallback_model: str = config.CODING_FALLBACK_MODEL
 
     chat_think: bool = config.CHAT_THINK
     chat_num_gpu: int = config.CHAT_NUM_GPU
