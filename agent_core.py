@@ -844,8 +844,9 @@ class JarvisAgent:
                         task.steps = self._build_steps(
                             fallback_plan
                         )
+                        task.status = "ready"
                         self.state["last_goal"] = task.goal
-                        self.state["last_status"] = "ready"
+                        self.state["last_status"] = task.status
                         return task
 
                 task.status = "failed"
