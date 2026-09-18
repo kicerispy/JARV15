@@ -1990,6 +1990,177 @@ def code_test(argument=""):
         }
 
 
+def dev_command(argument=""):
+    """Run an allowlisted developer command without invoking a shell."""
+    import json
+    import shlex
+    import sys
+
+    raw = str(argument or "").strip()
+    if not raw:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": "Developer command cannot be empty.",
+        }
+
+    try:
+        candidate = json.loads(raw)
+        if isinstance(candidate, dict):
+            command_text = str(candidate.get("command", "") or "").strip()
+            timeout = int(candidate.get("timeout", 120))
+        else:
+            command_text = raw
+            timeout = 120
+    except (json.JSONDecodeError, TypeError, ValueError):
+        command_text = raw
+        timeout = 120
+
+    if not command_text:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": "Developer command cannot be empty.",
+        }
+
+    try:
+        argv = shlex.split(command_text, posix=False)
+    except ValueError as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": f"Could not parse developer command: {exc}",
+        }
+
+    if not argv:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": "Developer command cannot be empty.",
+        }
+
+    executable = argv[0].strip().lower()
+    allowed = {
+        "python",
+        "python.exe",
+        "py",
+        "py.exe",
+        "pip",
+        "pip.exe",
+        "pytest",
+        "pytest.exe",
+        "ruff",
+        "ruff.exe",
+        "mypy",
+        "mypy.exe",
+        "node",
+        "node.exe",
+        "npm",
+        "npm.cmd",
+        "npx",
+        "npx.cmd",
+        "git",
+        "git.exe",
+    }
+
+    if executable not in allowed:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                f"Developer command '{argv[0]}' is not allowed. "
+                "Use Python, pip, pytest, ruff, mypy, node, npm, npx, or git."
+            ),
+        }
+
+    # Always execute from the JARVIS project root and never use shell=True.
+    # Rewrite bare Python/pip/pytest tooling to the active interpreter so
+    # JARVIS does not accidentally use a different Windows installation.
+    if executable in {"python", "python.exe", "py", "py.exe"}:
+        argv = [sys.executable, *argv[1:]]
+    elif executable in {"pip", "pip.exe"}:
+        argv = [sys.executable, "-m", "pip", *argv[1:]]
+    elif executable in {"pytest", "pytest.exe"}:
+        argv = [sys.executable, "-m", "pytest", *argv[1:]]
+    elif executable in {"ruff", "ruff.exe"}:
+        argv = [sys.executable, "-m", "ruff", *argv[1:]}
+    elif executable in {"mypy", "mypy.exe"}:
+        argv = [sys.executable, "-m", "mypy", *argv[1:]]
+
+    base = __import__("pathlib").Path.cwd().resolve()
+    timeout = max(5, min(timeout, 300))
+
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        success = completed.returncode == 0
+
+        return {
+            "success": success,
+            "verified": success,
+            "retryable": not success,
+            "command": command_text,
+            "exit_code": completed.returncode,
+            "stdout": stdout[:12000],
+            "stderr": stderr[:12000],
+            "message": (
+                "Developer command completed successfully."
+                if success
+                else "Developer command failed."
+            ),
+        }
+
+    except FileNotFoundError as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "command": command_text,
+            "exit_code": None,
+            "stdout": "",
+            "stderr": str(exc),
+            "message": "Developer command executable was not found.",
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "command": command_text,
+            "exit_code": None,
+            "stdout": "",
+            "stderr": f"Command timed out after {timeout} seconds.",
+            "message": "Developer command timed out.",
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "command": command_text,
+            "exit_code": None,
+            "stdout": "",
+            "stderr": str(exc),
+            "message": f"Developer command failed to start: {exc}",
+        }
+
+
 def code_diagnose(argument=""):
     """Run a bounded project-wide diagnostic pass for autonomous coding work."""
     import ast
@@ -2795,6 +2966,11 @@ def _run_tool_raw(
     elif tool_name == "code_test":
 
         return code_test(argument)
+
+
+    elif tool_name == "dev_command":
+
+        return dev_command(argument)
 
     elif tool_name == "code_diagnose":
 
