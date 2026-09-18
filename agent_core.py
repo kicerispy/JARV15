@@ -2166,7 +2166,18 @@ class JarvisAgent:
         plan: Dict[str, Any],
     ) -> AgentTask:
         """Install a deterministic phase plan without invoking the LLM."""
+        internal_phase = bool(
+            isinstance(plan, dict)
+            and plan.get("jarvis_internal_phase")
+        )
+
         validated = validate_plan(plan)
+
+        # Reassert internal-phase metadata at the Agent Core boundary so a
+        # deterministic orchestration plan can never accidentally become
+        # user-facing speech because a future validator drops metadata.
+        if internal_phase:
+            validated["jarvis_internal_phase"] = True
 
         task.planner_result = validated
         task.goal = str(validated.get("goal", "") or "")
