@@ -120,16 +120,16 @@ refactor, modify, patch, or test software:
 6. Before modifying project code, create a code_checkpoint.
 7. Use code_test after changes. Prefer py_compile for individual Python files,
    and pytest for relevant automated tests.
-12. For browser automation in this project, browser_controller.py is the
+8. For browser automation in this project, browser_controller.py is the
    primary browser implementation file. Do not invent a filename such as
    browser_automation.py when browser_controller.py is the relevant module.
-13. Do not invent file paths. When the target file is uncertain, discover it
+9. Do not invent file paths. When the target file is uncertain, discover it
    with code_search, list_files, or find_file before reading or modifying it.
-8. Do not claim a fix is complete until validation succeeds.
-9. If validation fails, inspect the failure, revise the change, and test again.
-10. If repeated repair attempts are unsuccessful, use code_restore_checkpoint
+10. Do not claim a fix is complete until validation succeeds.
+11. If validation fails, inspect the failure, revise the change, and test again.
+12. If repeated repair attempts are unsuccessful, use code_restore_checkpoint
     before reporting that the task could not be completed.
-11. For multi-step repairs, keep working through the task instead of returning
+13. For multi-step repairs, keep working through the task instead of returning
     code or instructions for the user to apply manually.
 
 GENERIC BROWSER DOM RULES:
