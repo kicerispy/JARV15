@@ -448,8 +448,8 @@ def test_required_diagnostic_phase_falls_back_to_verified_source_target():
         "code_diagnose",
     ]
     assert planned.steps[0].argument == (
-        '{"path": "browser_controller.py", "run_tests": false, '
-        '"run_lint": false, "run_types": false}'
+        '{"path":"browser_controller.py","run_tests":false,'
+        '"run_lint":false,"run_types":false}'
     )
 
 
