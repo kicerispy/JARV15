@@ -5,6 +5,7 @@ import ast
 import json
 from typing import Any, Dict, List, Optional
 
+import config
 from ollama import chat
 
 from model_manager import ModelManager
@@ -1472,7 +1473,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
             messages=messages,
             format="json",
             options=repair_options,
-            keep_alive="15m" if is_repair_phase else None,
+            keep_alive=config.CODING_MODEL_KEEP_ALIVE if is_repair_phase else None,
         )
 
         elapsed = time.perf_counter() - planner_start
@@ -1552,7 +1553,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                             "num_predict": 240,
                             "num_ctx": 8192,
                         },
-                        keep_alive="15m",
+                        keep_alive=config.CODING_MODEL_KEEP_ALIVE,
                     )
                     fallback_content = (
                         fallback_response
@@ -1615,7 +1616,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                             "num_predict": 240,
                             "num_ctx": 8192,
                         },
-                        keep_alive="15m",
+                        keep_alive=config.CODING_MODEL_KEEP_ALIVE,
                     )
                     fallback_content = (
                         fallback_response
