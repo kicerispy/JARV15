@@ -875,7 +875,7 @@ class JarvisAgent:
 
             if (
                 str(evidence.get("tool", "") or "").strip()
-                != "read_file"
+                not in {"read_file", "find_file"}
             ):
                 continue
 
@@ -1036,9 +1036,26 @@ class JarvisAgent:
             f"{task.task_id}"
         )
 
-        # Give an incomplete software-repair plan one corrective
-        # planning pass before allowing execution to begin.
+        # Give an incomplete plan one corrective planning pass in general.
+        # For a repair request that already names an existing target file,
+        # deterministic discovery can take over immediately after the first
+        # bad planner response; there is no value in asking the same model
+        # to rediscover a filename it already received.
         max_plan_repairs = 1
+
+        if (
+            planning_request is None
+            and is_software_repair_request(task.request)
+            and not (
+                require_repair_plan
+                or require_code_read
+                or require_code_test
+                or require_code_diagnose
+            )
+        ):
+            requested_target = self._infer_requested_file_target(task.request)
+            if requested_target and Path(requested_target).is_file():
+                max_plan_repairs = 0
 
         for planning_attempt in range(
             max_plan_repairs + 1
@@ -2046,6 +2063,24 @@ class JarvisAgent:
 
             return "failed"
 
+    def _install_phase_plan(
+        self,
+        task: AgentTask,
+        plan: Dict[str, Any],
+    ) -> AgentTask:
+        """Install a deterministic phase plan without invoking the LLM."""
+        validated = validate_plan(plan)
+
+        task.planner_result = validated
+        task.goal = str(validated.get("goal", "") or "")
+        task.steps = self._build_steps(validated)
+        task.status = "ready"
+
+        self.state["last_goal"] = task.goal
+        self.state["last_status"] = task.status
+
+        return task
+
     # ======================================================
     # Autonomous Execute
     # ======================================================
@@ -2217,6 +2252,30 @@ class JarvisAgent:
                                 "I've finished the investigation. I'm moving on to the fix and validation.",
                                 speak_callback,
                             )
+
+                    # Discovery -> source read -> diagnostic are deterministic
+                    # transitions. The coding model is reserved for the actual
+                    # repair decision after concrete evidence exists.
+                    phase_plan = self._build_phase_fallback_plan(
+                        task,
+                        require_code_read=not has_source_read,
+                        require_code_diagnose=(
+                            has_source_read and not has_code_test
+                        ),
+                    )
+
+                    if phase_plan is not None:
+                        self._install_phase_plan(
+                            task,
+                            phase_plan,
+                        )
+
+                        logger.info(
+                            "JARVIS AGENT: Advancing directly to the next "
+                            "required repair phase without another planner call."
+                        )
+
+                        continue
 
                     planning_request = (
                         self._build_repair_request_after_discovery(
