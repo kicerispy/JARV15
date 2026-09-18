@@ -2,6 +2,7 @@
 JARVIS context-aware conversation - smarter responses with user/project context.
 """
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -71,21 +72,57 @@ class JarvisContext:
             "task_state.json",
         }
 
+        def should_include(path: Path) -> bool:
+            parts = set(path.parts)
+
+            if parts & excluded_dirs:
+                return False
+
+            name = path.name.lower()
+
+            if (
+                name in ignored_runtime_files
+                or any(token in name for token in ignored_file_tokens)
+            ):
+                return False
+
+            return path.is_file()
+
+        # Prefer Git's tracked + non-ignored working-tree view. This avoids
+        # crawling large local runtime/model/build directories that happen to
+        # exist beside the actual source tree. Fall back to a filesystem walk
+        # when this is not a Git checkout.
+        project_paths = []
+
         try:
-            for path in Path(".").rglob("*"):
-                if not path.is_file():
-                    continue
+            git_result = subprocess.run(
+                [
+                    "git",
+                    "ls-files",
+                    "-co",
+                    "--exclude-standard",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
 
-                parts = set(path.parts)
-                if parts & excluded_dirs:
-                    continue
+            if git_result.returncode == 0:
+                project_paths = [
+                    Path(line.strip())
+                    for line in git_result.stdout.splitlines()
+                    if line.strip()
+                ]
+        except Exception:
+            project_paths = []
 
-                name = path.name.lower()
+        if not project_paths:
+            project_paths = list(Path(".").rglob("*"))
 
-                if (
-                    name in ignored_runtime_files
-                    or any(token in name for token in ignored_file_tokens)
-                ):
+        try:
+            for path in project_paths:
+                if not should_include(path):
                     continue
 
                 info["files"].append(str(path))
