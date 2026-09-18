@@ -138,6 +138,10 @@ SCREENSHOT_PATH = BASE_DIR / "jarvis_screen.png"
 
 TASK_STATE_PATH = BASE_DIR / "task_state.json"
 
+TASK_MEMORY_PATH = BASE_DIR / "task_memory.json"
+
+MAX_TASK_MEMORY = 20
+
 
 # ============================================================
 # MEMORY / CONVERSATION
