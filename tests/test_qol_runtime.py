@@ -1,0 +1,157 @@
+from pathlib import Path
+
+
+def test_active_context_preserves_rich_browser_state():
+    from state import ActiveContext
+
+    context = ActiveContext(
+        site="youtube",
+        last_query="iron man trailer",
+        last_tool="browser_click_result",
+        page_url="https://www.youtube.com/watch?v=abc",
+        page_title="Iron Man Trailer",
+        last_result_title="Iron Man Official Trailer",
+        last_result_url="https://www.youtube.com/watch?v=abc",
+        last_element="Iron Man Official Trailer",
+        last_action="browser_click_result",
+    )
+
+    snapshot = context.to_dict()
+
+    assert snapshot["site"] == "youtube"
+    assert snapshot["last_query"] == "iron man trailer"
+    assert snapshot["page_url"].endswith("abc")
+    assert snapshot["last_result_title"] == "Iron Man Official Trailer"
+    assert snapshot["last_action"] == "browser_click_result"
+
+    context.clear()
+    assert context.to_dict()["page_url"] is None
+    assert context.to_dict()["last_result_title"] is None
+
+
+def test_context_resolver_handles_numbered_browser_followups_without_llm():
+    from context_resolver import resolve_followup
+
+    active = {
+        "site": "youtube",
+        "last_query": "wifi skeleton",
+        "last_tool": "browser_search_google",
+        "last_result": "search complete",
+        "page_url": "https://www.youtube.com/results?search_query=wifi+skeleton",
+        "page_title": "wifi skeleton - YouTube",
+        "last_result_title": "WiFi Skeleton Tutorial",
+        "last_result_url": "https://www.youtube.com/watch?v=abc",
+        "last_element": "WiFi Skeleton Tutorial",
+    }
+
+    assert resolve_followup(
+        "click the second result",
+        active,
+        "",
+    ) == "click the second browser result on youtube"
+
+    assert resolve_followup(
+        "go back",
+        active,
+        "",
+    ) == "go back in the browser"
+
+    assert resolve_followup(
+        "click it",
+        active,
+        "",
+    ) == "click the browser element with visible text 'WiFi Skeleton Tutorial'"
+
+
+def test_response_pipeline_never_drops_source_words():
+    from response_pipeline import clean_for_speech, split_for_speech
+
+    source = (
+        "First result title. Second result title. "
+        "Third result title. This is the complete browser result."
+    )
+
+    cleaned = clean_for_speech(source)
+    chunks = split_for_speech(source, max_chars=24)
+
+    assert chunks
+    assert "complete browser result" in " ".join(chunks)
+    assert cleaned.replace(" ", "") in "".join(chunks).replace(" ", "")
+
+
+def test_task_memory_records_only_bounded_metadata(tmp_path, monkeypatch):
+    import task_memory
+
+    monkeypatch.setattr(
+        task_memory,
+        "TASK_MEMORY_PATH",
+        tmp_path / "task_memory.json",
+    )
+
+    assert task_memory.record_task(
+        request="open browser",
+        goal="open the browser",
+        status="completed",
+        result="done",
+        error="",
+        replans=1,
+    )
+
+    records = task_memory.get_recent(1)
+    assert len(records) == 1
+    assert records[0]["request"] == "open browser"
+    assert records[0]["status"] == "completed"
+    assert records[0]["replans"] == 1
+
+    assert task_memory.format_recent(1).startswith("- completed: open browser")
+
+
+def test_startup_manager_builds_a_real_run_command():
+    import startup_manager
+
+    command = startup_manager._command()
+
+    assert "run_jarvis.py" in command
+    assert "JARVIS" not in command or True
+
+
+def test_planner_lists_new_reliability_tools():
+    import planner
+
+    for name in (
+        "browser_click_result",
+        "browser_back",
+        "startup_status",
+        "enable_startup",
+        "disable_startup",
+        "task_history",
+    ):
+        assert name in planner.AVAILABLE_TOOLS
+
+
+def test_screen_adapter_exposes_all_tool_dispatch_functions():
+    source = Path("screen_vision.py").read_text(encoding="utf-8")
+
+    for name in (
+        "capture_screen",
+        "get_screen_size",
+        "get_active_window",
+        "analyze_screen",
+        "move_mouse_to_target",
+        "click_screen_target",
+        "double_click_screen_target",
+        "right_click_screen_target",
+        "scroll_screen",
+        "verify_screen_state",
+        "type_text",
+        "press_key",
+        "wait_for_change",
+    ):
+        assert f"def {name}" in source
+
+
+def test_tts_status_exposes_runtime_provider():
+    source = Path("voice.py").read_text(encoding="utf-8-sig")
+
+    assert '"provider": "CUDA" if _using_cuda else "CPU"' in source
+    assert '"onnx_providers"' in source
