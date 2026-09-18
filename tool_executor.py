@@ -744,10 +744,29 @@ def normalize_tool_result(
             message,
         )
 
+    text = str(result or "").strip()
+
+    code_test_errors = (
+        "Code test refused:",
+        "Code test target not found:",
+        "Compile mode requires",
+        "Unsupported code test mode.",
+        "Code test timed out",
+        "Code test failed to start:",
+        "Code validation failed.",
+    )
+
+    if text.startswith(code_test_errors):
+        return (
+            False,
+            False,
+            text,
+        )
+
     return (
         True,
         True,
-        str(result),
+        text,
     )
 
 
