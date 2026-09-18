@@ -1174,6 +1174,7 @@ def test_verified_find_file_target_feeds_deterministic_source_phase():
 
     assert phase_plan == {
         "goal": "inspect verified target source",
+        "jarvis_internal_phase": True,
         "steps": [
             {
                 "tool": "read_file",
