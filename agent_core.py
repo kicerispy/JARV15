@@ -354,6 +354,7 @@ class JarvisAgent:
         history_text: str = "",
         planning_request: Optional[str] = None,
         require_repair_plan: bool = False,
+        require_code_read: bool = False,
     ) -> AgentTask:
 
         task.status = "planning"
@@ -420,6 +421,7 @@ class JarvisAgent:
                 task.request,
                 plan,
                 require_modification=require_repair_plan,
+                require_code_read=require_code_read,
             )
 
             if plan_issues:
@@ -471,6 +473,14 @@ class JarvisAgent:
                                 "For the discovery phase, inspect the "
                                 "relevant project code and do not modify "
                                 "files yet."
+                            ),
+                            (
+                                "Read the actual target source file with "
+                                "read_file before selecting the fix."
+                                if require_code_read
+                                else
+                                "Use the observed code and do not invent "
+                                "filenames."
                             ),
                             "Do not invent filenames. Discover the actual "
                             "target file before editing.",
@@ -1182,16 +1192,33 @@ class JarvisAgent:
                     )
                 ):
 
-                    logger.info(
-                        "JARVIS AGENT: Discovery phase complete; "
-                        "planning repair phase."
+                    has_source_read = any(
+                        step.tool == "read_file"
+                        for step in task.steps
                     )
 
-                    if report_progress:
-                        self._announce(
-                            "I've finished inspecting the code. I'm moving on to the fix and validation.",
-                            speak_callback,
+                    if has_source_read:
+                        logger.info(
+                            "JARVIS AGENT: Source inspection complete; "
+                            "planning repair phase."
                         )
+
+                        if report_progress:
+                            self._announce(
+                                "I've finished inspecting the code. I'm moving on to the fix and validation.",
+                                speak_callback,
+                            )
+                    else:
+                        logger.info(
+                            "JARVIS AGENT: Discovery is incomplete; "
+                            "planning a source-reading phase."
+                        )
+
+                        if report_progress:
+                            self._announce(
+                                "I need to inspect the actual source before changing anything.",
+                                speak_callback,
+                            )
 
                     planning_request = (
                         self._build_repair_request_after_discovery(
@@ -1203,7 +1230,8 @@ class JarvisAgent:
                         task,
                         history_text=history_text,
                         planning_request=planning_request,
-                        require_repair_plan=True,
+                        require_repair_plan=has_source_read,
+                        require_code_read=not has_source_read,
                     )
 
                     if replanned.status in {
