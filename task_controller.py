@@ -224,10 +224,28 @@ class BackgroundTaskController:
 
     def consume_completion_signal(self) -> bool:
         """Return whether a task completed, then clear the signal."""
-        was_set = self._completion_event.is_set()
-        if was_set:
-            self._completion_event.clear()
-        return was_set
+        with self._lock:
+            was_set = self._completion_event.is_set()
+            if was_set:
+                self._completion_event.clear()
+            return was_set
+
+    def prepare_followup_wait(self) -> tuple[Optional[threading.Event], bool]:
+        """Prepare a race-free wait for a background task to finish.
+
+        Returns (event, False) when a task is still running. Returns
+        (None, True) when completion was already signalled. Returns
+        (None, False) when there is no active task and no new completion.
+        """
+        with self._lock:
+            if self._is_running_locked() and self._task is not None:
+                self._completion_event.clear()
+                return self._completion_event, False
+
+            completed = self._completion_event.is_set()
+            if completed:
+                self._completion_event.clear()
+            return None, completed
 
     def _queue_speech(self, message: str) -> bool:
         """Queue worker speech for safe playback by the main loop."""
@@ -465,6 +483,7 @@ class BackgroundTaskController:
                 self._task_state = None
 
             self._thread = None
+            self._completion_event.set()
 
         try:
             from task_memory import record_task
@@ -480,8 +499,6 @@ class BackgroundTaskController:
             logger.debug(
                 f"JARVIS TASK CONTROLLER: Task memory skipped: {exc}"
             )
-
-        self._completion_event.set()
 
         logger.info(
             "JARVIS TASK CONTROLLER: "
