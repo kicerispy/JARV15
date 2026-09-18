@@ -681,6 +681,111 @@ def browser_add_to_queue(target_text: str) -> str:
         return f"Failed to queue video: {exc}"
 
 
+
+def browser_self_test() -> dict[str, Any]:
+    """Run a focused runtime smoke test of JARVIS browser automation."""
+    async def _test():
+        page = await _init_browser()
+        test_page = await _context.new_page()
+        original_url = page.url
+
+        try:
+            # 1) Exercise the generic DOM locator path on a controlled page.
+            await test_page.set_content(
+                """<!doctype html>
+<html><body>
+<input aria-label="Search" id="search">
+<button type="button" id="go" onclick="document.body.dataset.clicked='1'; document.querySelector('#result').textContent=document.querySelector('#search').value;">Go</button>
+<div id="result"></div>
+</body></html>"""
+            )
+
+            search = test_page.get_by_role("textbox", name="Search")
+            if await search.count() == 0:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "mode": "browser_smoke",
+                    "message": "Browser DOM smoke test failed: search textbox role was not found.",
+                }
+
+            await search.fill("JARVIS browser test")
+            await search.press("Enter")
+
+            # Enter has no submit handler in this fixture; verify the fill
+            # path directly before exercising the click/wait/extract path.
+            button = test_page.locator("#go").first
+            await button.click(timeout=5_000)
+            result = test_page.locator("#result").first
+            await result.wait_for(state="visible", timeout=5_000)
+            extracted = (await result.inner_text()).strip()
+
+            if extracted != "JARVIS browser test":
+                return {
+                    "success": False,
+                    "verified": False,
+                    "mode": "browser_smoke",
+                    "message": (
+                        "Browser DOM smoke test failed: fill/click/extract "
+                        f"returned {extracted!r} instead of the expected text."
+                    ),
+                }
+
+            # 2) Verify the live Google first-result selector still resolves.
+            await test_page.goto(
+                "https://www.google.com/search?q=JARVIS+browser+automation",
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+            google_result = test_page.locator("div#search a:has(h3)").first
+            await google_result.wait_for(state="visible", timeout=10_000)
+            google_title = (await google_result.inner_text()).strip()
+
+            if not google_title:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "mode": "browser_smoke",
+                    "message": "Browser smoke test failed: Google first-result selector matched an empty result.",
+                }
+
+            return {
+                "success": True,
+                "verified": True,
+                "mode": "browser_smoke",
+                "message": "Browser automation smoke test passed.",
+                "dom_test": "fill/click/wait/extract passed",
+                "google_first_result": google_title[:300],
+                "google_selector": "div#search a:has(h3)",
+                "original_url": original_url,
+            }
+
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "mode": "browser_smoke",
+                "message": f"Browser automation smoke test failed: {exc}",
+                "error": str(exc),
+                "original_url": original_url,
+            }
+        finally:
+            try:
+                await test_page.close()
+            except Exception:
+                pass
+
+    try:
+        return get_event_loop().run_until_complete(_test())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "mode": "browser_smoke",
+            "message": f"Browser automation smoke test failed to start: {exc}",
+            "error": str(exc),
+        }
+
 def capture_screenshot() -> bytes:
     async def _shot():
         page = await _init_browser()
