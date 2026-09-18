@@ -875,7 +875,23 @@ class EvidencePhasePlanner:
                 ],
             }
 
-        return valid_repair_plan()
+        return {
+            "goal": "repair browser automation",
+            "steps": [
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": "browser_controller.py|||old|||new",
+                },
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                },
+            ],
+        }
 
 
 class EvidencePhaseExecutor:
