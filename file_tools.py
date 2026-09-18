@@ -23,6 +23,7 @@ IGNORED_LIST_DIRECTORIES = {
     ".nox",
     ".cache",
     ".eggs",
+    ".jarvis_checkpoints",
     "build",
     "dist",
 }
