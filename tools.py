@@ -1994,15 +1994,14 @@ def code_test(argument=""):
 
 def system_status():
 
-    cpu = psutil.cpu_percent(
-        interval=1
-    )
-
+    cpu = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory()
+    health = runtime_health.collect_health()
 
     return (
-        f"CPU usage is {cpu}%.\n"
-        f"RAM usage is {ram.percent}%."
+        f"CPU usage is {cpu}%.\\n"
+        f"RAM usage is {ram.percent}%.\\n\\n"
+        + runtime_health.format_health(health)
     )
 
 
