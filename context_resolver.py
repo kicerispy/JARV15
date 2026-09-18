@@ -9,6 +9,55 @@ from config import CHAT_MODEL
 from logger import logger
 
 
+_CONTEXTUAL_PATTERNS = (
+    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:first|top)\\s+(?:result|link|video|one|item)$",
+     "click the first browser result"),
+    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:second|2nd)\\s+(?:result|link|video|one|item)$",
+     "click the second browser result"),
+    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:third|3rd)\\s+(?:result|link|video|one|item)$",
+     "click the third browser result"),
+    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:last|final)\\s+(?:result|link|video|one|item)$",
+     "click the last browser result"),
+    (r"^(?:go\\s+)?back$", "go back in the browser"),
+    (r"^(?:read|show|tell me)\\s+(?:the\\s+)?(?:page|page contents|page text)$",
+     "read the current browser page"),
+    (r"^(?:read|show|tell me)\\s+(?:the\\s+)?(?:title|page title)$",
+     "inspect the current browser page"),
+)
+
+
+def _deterministic_followup(user_input: str, active_context: Dict[str, Any]) -> Optional[str]:
+    normalized = " ".join(str(user_input or "").strip().lower().split())
+    if not normalized:
+        return None
+
+    site = str(active_context.get("site") or "").strip().lower()
+    last_title = str(active_context.get("last_result_title") or "").strip()
+
+    for pattern, resolved in _CONTEXTUAL_PATTERNS:
+        import re
+        if re.match(pattern, normalized):
+            if resolved.startswith("click the") and site:
+                if "last browser result" in resolved:
+                    return resolved + f" on {site}"
+                return resolved + f" on {site}"
+            return resolved
+
+    if normalized in {"click it", "open it", "play it", "select it", "use it", "open that", "click that", "play that"}:
+        if last_title:
+            return f"click the browser element with visible text {last_title!r}"
+        if site:
+            return f"click the current browser result on {site}"
+
+    if normalized in {"that one", "this one", "the same one", "do it", "do that", "try it", "try that"}:
+        if last_title:
+            return f"click the browser element with visible text {last_title!r}"
+        if site:
+            return f"repeat the last browser action on {site}"
+
+    return None
+
+
 def resolve_followup(
     user_input: str,
     active_context: Dict[str, Any],
@@ -28,10 +77,20 @@ def resolve_followup(
     if not user_input or not user_input.strip():
         return user_input
 
+    deterministic = _deterministic_followup(user_input, active_context)
+    if deterministic:
+        logger.info(f"Deterministic context resolution: '{user_input}' -> '{deterministic}'")
+        return deterministic
+
     active_site = active_context.get("site") or "none"
     last_query = active_context.get("last_query") or "none"
     last_tool = active_context.get("last_tool") or "none"
     last_result = active_context.get("last_result") or "none"
+    page_url = active_context.get("page_url") or "none"
+    page_title = active_context.get("page_title") or "none"
+    last_result_title = active_context.get("last_result_title") or "none"
+    last_result_url = active_context.get("last_result_url") or "none"
+    last_element = active_context.get("last_element") or "none"
 
     prompt = f"""
 You are JARVIS's command-context resolver.
@@ -85,6 +144,21 @@ Previous tool:
 
 Previous result:
 {last_result}
+
+Current browser page URL:
+{page_url}
+
+Current browser page title:
+{page_title}
+
+Last selected result title:
+{last_result_title}
+
+Last selected result URL:
+{last_result_url}
+
+Last browser element:
+{last_element}
 
 RECENT CONVERSATION:
 
