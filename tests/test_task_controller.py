@@ -1,4 +1,5 @@
 import threading
+import time
 
 from state import TaskState
 from task_controller import BackgroundTaskController, is_task_status_request
@@ -198,7 +199,14 @@ def test_worker_speech_is_queued_until_main_loop_drains_it():
     ) is True
 
     assert agent.started.wait(timeout=1)
-    assert controller.drain_speech(lambda message: False) == 1
+
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        if controller.drain_speech(lambda message: False) == 1:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("Worker speech was not queued.")
 
     agent.release.set()
     assert controller.wait_for_current(timeout=1) is True
