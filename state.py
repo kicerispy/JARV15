@@ -175,7 +175,7 @@ class TaskState:
         with self._lock:
             if self.cancelled:
                 self.status = "cancelled"
-            elif self.status == "running":
+            elif self.status in {"running", "starting"}:
                 self.status = "completed"
 
             self.active = False
