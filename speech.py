@@ -1,5 +1,6 @@
 import time
 from collections import deque
+from typing import Any, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -94,7 +95,8 @@ def get_volume(audio):
 
 def listen(
     initial_audio=None,
-    mode="wake"
+    mode="wake",
+    interrupt_event: Optional[Any] = None,
 ):
 
     print(
@@ -205,6 +207,19 @@ def listen(
         ) as stream:
 
             while True:
+
+                # A background task finishing should release the main loop
+                # while it is waiting for a new follow-up command. Once the
+                # user has started speaking, do not interrupt the capture.
+                if (
+                    interrupt_event is not None
+                    and not speech_started
+                    and interrupt_event.is_set()
+                ):
+                    print(
+                        "JARVIS: Background task completed while waiting for follow-up."
+                    )
+                    return None
 
                 # ------------------------------------------------
                 # Read microphone chunk.
