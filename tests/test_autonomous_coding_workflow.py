@@ -45,7 +45,7 @@ def test_software_change_classification_covers_feature_work():
         "add a new browser automation feature to JARVIS"
     ) is True
     assert is_software_change_request(
-        "integrate another capability into my assistant"
+        "integrate another capability into JARVIS"
     ) is True
     assert is_software_change_request(
         "tell me a story about an assistant"
