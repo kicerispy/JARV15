@@ -1924,8 +1924,8 @@ def should_resolve_context(text):
 
     if (
         re.match(
-            r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?"
-            r"(?:first|second|third|last|top)\\s+"
+            r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?"
+            r"(?:first|second|third|last|top)\s+"
             r"(?:result|link|video|one|item)$",
             normalized,
         )
