@@ -806,10 +806,59 @@ Last tool: {active_context.get('last_tool', 'none')}
 
     history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
 
+    system_content = _planner_prompt() + context_str + history_str
+
+    # --------------------------------------------------------
+    # REPAIR HANDOFF MODE
+    # --------------------------------------------------------
+    # Agent Core uses this marker only after the discovery/source/test
+    # phases have produced verified evidence. The generic planner rules
+    # are intentionally discovery-oriented, so make the repair phase an
+    # explicit higher-priority instruction block for the local planner.
+    # This prevents the model from restarting list_files/code_search after
+    # the target source has already been inspected.
+    # --------------------------------------------------------
+    if (
+        planning_request
+        and "REPAIR PHASE RULES:" in planning_request
+    ):
+        system_content += """
+
+REPAIR HANDOFF MODE — HIGH PRIORITY:
+
+The user request is already in the repair phase. Verified project evidence
+has been gathered and is included in the user message.
+
+Do NOT restart generic discovery.
+Do NOT use list_files.
+Do NOT use broad project-wide code_search.
+Do NOT reread the same source file unless the verified evidence explicitly
+shows that a specific missing region is required.
+
+You MUST build the repair plan directly from the verified evidence.
+
+For a software repair request, the returned JSON MUST contain this order:
+1. code_checkpoint
+2. one or more appropriate file mutation steps
+3. code_test after the final mutation
+
+For an existing source change, prefer edit_file and use its exact format:
+"filename|||old_text|||new_text"
+
+The old_text MUST be copied from the verified source evidence. Do not invent
+source text, filenames, functions, errors, or behavior.
+
+Choose the smallest safe change that is actually supported by the evidence.
+Use browser_controller.py when the evidence identifies it as the browser
+implementation target.
+
+Return ONLY the repair JSON. Do not return discovery steps or an explanation.
+"""
+
     messages = [
         {
             "role": "system",
-            "content": _planner_prompt() + context_str + history_str
+            "content": system_content
         },
         {
             "role": "user",
