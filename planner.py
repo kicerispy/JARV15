@@ -44,6 +44,8 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "write_file": "Write content to a file. argument = 'filename|||content' format.",
     "read_file": "Read content from a file. argument = filename.",
     "edit_file": "Edit a file by replacing text. argument = 'filename|||old_text|||new_text'.",
+    "code_search": "Search project source files for a symbol, string, or error message.",
+    "code_test": "Validate project code. argument = JSON such as {\"mode\":\"compile\",\"path\":\"main.py\"} or {\"mode\":\"pytest\",\"path\":\"tests/test_x.py\"}.",
     "delete_file": "Delete a file. argument = filename.",
     "web_search": "Search the web for information. argument = search query.",
     "jarvis_status": "Report JARVIS's own status/uptime. argument = empty.",
@@ -101,6 +103,23 @@ BAREHANDS TOOL SELECTION:
   on the Barehands display or glass board, use barehands_present.
 - A request to display JARVIS status on Barehands is a display request,
   not a jarvis_status query; use barehands_present rather than jarvis_status.
+
+CODE REPAIR RULES:
+
+When the user asks JARVIS to fix, debug, repair, diagnose, inspect,
+refactor, modify, patch, or test software:
+
+1. Treat the request as an actionable task, not ordinary conversation.
+2. Inspect the relevant project files before editing.
+3. Use code_search to locate symbols, error messages, and likely call sites.
+4. Use read_file to inspect the surrounding implementation.
+5. Make the smallest targeted change needed.
+6. Use code_test after changes. Prefer py_compile for individual Python files,
+   and pytest for relevant automated tests.
+7. Do not claim a fix is complete until validation succeeds.
+8. If validation fails, inspect the failure, revise the change, and test again.
+9. For multi-step repairs, keep working through the task instead of returning
+   code or instructions for the user to apply manually.
 
 GENERIC BROWSER DOM RULES:
 
