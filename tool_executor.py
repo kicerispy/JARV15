@@ -197,6 +197,7 @@ def update_active_context(
             "browser_click_first_bing_result",
             "browser_goto",
             "browser_page_info",
+            "browser_click_first_result",
         }:
 
             active_context.last_tool = (
