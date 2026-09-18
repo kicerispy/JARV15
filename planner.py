@@ -393,6 +393,7 @@ def assess_plan(
     plan: Dict[str, Any],
     require_modification: Optional[bool] = None,
     require_code_read: bool = False,
+    require_code_test: bool = False,
 ) -> List[str]:
     """
     Return planner-quality issues for code/automation repair tasks.
@@ -474,6 +475,12 @@ def assess_plan(
         issues.append(
             "The next investigation phase must read the actual relevant "
             "source file with read_file before choosing a code change."
+        )
+
+    if require_code_test and not test_indices:
+        issues.append(
+            "The next diagnostic phase must run code_test so the "
+            "implementation can be validated before deciding whether to edit."
         )
 
     requires_modification = bool(require_modification)
