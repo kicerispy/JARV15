@@ -1812,7 +1812,8 @@ def code_search(argument=""):
 
 
 def code_test(argument=""):
-    """Run a safe Python compile check or pytest command inside the project."""
+    """Run a safe Python compile check, pytest command, or browser smoke test."""
+
     import ast
     import json
     import sys
@@ -1848,6 +1849,33 @@ def code_test(argument=""):
     # uses compile. Accept the harmless alias at the tool boundary.
     if mode in {"py_compile", "python_compile"}:
         mode = "compile"
+
+    if mode in {"browser_smoke", "browser_self_test"}:
+        try:
+            from browser_controller import browser_self_test
+
+            result = browser_self_test()
+            if not isinstance(result, dict):
+                return {
+                    "success": False,
+                    "verified": False,
+                    "message": "Code validation failed: browser smoke test returned an invalid result.",
+                    "mode": "browser_smoke",
+                    "path": "browser_controller.py",
+                }
+
+            result = dict(result)
+            result["mode"] = "browser_smoke"
+            result.setdefault("path", "browser_controller.py")
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "verified": False,
+                "message": f"Browser smoke test failed to start: {e}",
+                "mode": "browser_smoke",
+                "path": "browser_controller.py",
+            }
 
     target = str(
         payload.get("path", "")
@@ -1897,7 +1925,7 @@ def code_test(argument=""):
         command.append("-q")
 
     else:
-        return "Unsupported code test mode. Use 'compile' or 'pytest'."
+        return "Unsupported code test mode. Use 'compile', 'pytest', or 'browser_smoke'."
 
     timeout = int(payload.get("timeout", 120))
 
