@@ -91,6 +91,7 @@ JSON_ARGUMENT_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "code_diagnose",
 }
 
 
@@ -411,6 +412,9 @@ SOFTWARE_DOMAIN_TERMS = (
     "jarvis",
     "assistant",
     "runtime",
+    "feature",
+    "function",
+    "capability",
     "project",
     "automation",
     "browser",
@@ -484,6 +488,46 @@ def is_software_diagnostic_request(text: str) -> bool:
 
     return explicit_self_diagnostic or (
         any(term in normalized for term in CODE_DIAGNOSTIC_TERMS)
+        and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
+    )
+
+
+def is_software_change_request(text: str) -> bool:
+    """Return True for software feature/change work that should be validated."""
+    normalized = _normalized_words(text)
+
+    change_terms = (
+        "add",
+        "implement",
+        "integrate",
+        "enhance",
+        "improve",
+        "upgrade",
+        "introduce",
+        "enable",
+        "support",
+        "build",
+        "create",
+        "make",
+        "write",
+        "generate",
+        "change",
+    )
+
+    explicit_self_change = any(
+        phrase in normalized
+        for phrase in (
+            "change your own code",
+            "modify your own code",
+            "improve yourself",
+            "add a feature to yourself",
+            "add a feature to jarvis",
+            "add a function to jarvis",
+        )
+    )
+
+    return explicit_self_change or (
+        any(term in normalized for term in change_terms)
         and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
     )
 
