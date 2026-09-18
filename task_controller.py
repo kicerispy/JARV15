@@ -324,6 +324,11 @@ class BackgroundTaskController:
         history_text: str,
     ) -> None:
         """Plan first, then execute, without blocking the main loop."""
+        worker_speak = lambda message: self._background_speak(
+            self._queue_speech,
+            message,
+        )
+
         try:
             if task_state.is_cancelled():
                 task.status = "cancelled"
