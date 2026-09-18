@@ -1,5 +1,5 @@
 from agent_core import JarvisAgent
-from planner import assess_plan, is_software_repair_request
+from planner import assess_plan, is_software_repair_request, validate_plan
 from state import TaskState
 
 
@@ -557,6 +557,29 @@ class ThreePhasePlanner:
 
         return valid_repair_plan()
 
+
+
+
+def test_validate_plan_drops_nonexistent_read_target():
+    plan = validate_plan(
+        {
+            "goal": "inspect browser automation",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_automation.py",
+                },
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                },
+            ],
+        }
+    )
+
+    assert [step["argument"] for step in plan["steps"]] == [
+        "browser_controller.py",
+    ]
 
 
 def test_diagnostic_plan_rejects_hallucinated_file_target():
