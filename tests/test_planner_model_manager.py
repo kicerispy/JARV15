@@ -51,6 +51,8 @@ class PlannerModelManagerTests(unittest.TestCase):
         self.assertEqual(result.get("goal"), "repair")
         system = captured.get("messages", [{}])[0].get("content", "")
         self.assertIn("REPAIR HANDOFF MODE", system)
+        self.assertIn("code_checkpoint", system)
+        self.assertNotIn("expert software engineer and systems architect", system)
 
 
 if __name__ == "__main__":
