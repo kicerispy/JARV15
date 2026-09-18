@@ -197,6 +197,10 @@ present, it is authoritative and overrides generic planning preferences:
   repair plan with code_checkpoint before mutation and code_test after mutation.
   Do not repeat generic discovery unless the evidence explicitly shows that
   another focused source read is required.
+  For edit_file, the argument MUST be exactly:
+  filename|||old_text|||new_text
+  Use three literal pipe characters between all three fields. Never use ||
+  between old_text and new_text.
 
 DEVELOPER COMMAND RULES:
 
@@ -632,6 +636,25 @@ def assess_plan(
         for index, tool in enumerate(tool_names)
         if tool in CODE_MUTATION_TOOLS
     ]
+
+    # Validate edit_file's three-part wire format before execution.
+    # The executor expects: filename|||old_text|||new_text.
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+
+        if str(step.get("tool", "") or "").strip() != "edit_file":
+            continue
+
+        argument = str(step.get("argument", "") or "")
+        parts = argument.split("|||", 2)
+
+        if len(parts) != 3 or any(not part for part in parts):
+            issues.append(
+                "edit_file arguments must use exactly "
+                "filename|||old_text|||new_text with three non-empty parts. "
+                "Do not use || between old_text and new_text."
+            )
 
     checkpoint_index = next(
         (
