@@ -913,10 +913,18 @@ Last tool: {active_context.get('last_tool', 'none')}
 
     history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
 
-    # Repair handoffs get a focused prompt instead of the full general
-    # planner prompt. This keeps verified source evidence prominent and
-    # avoids the model reverting to generic discovery behavior.
-    if "REPAIR PHASE RULES:" in user_command:
+    # --------------------------------------------------------
+    # Focused autonomous phase prompts
+    # --------------------------------------------------------
+    # Agent Core prefixes internal phase markers so intermediate
+    # investigation/test planning cannot accidentally enter repair mode.
+    # Only the final repair phase uses the coding model.
+    # --------------------------------------------------------
+    is_repair_phase = "[JARVIS_INTERNAL_PHASE:REPAIR]" in user_command
+    is_source_read_phase = "[JARVIS_INTERNAL_PHASE:SOURCE_READ]" in user_command
+    is_diagnostic_test_phase = "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]" in user_command
+
+    if is_repair_phase:
         repair_tools = {
             name: AVAILABLE_TOOLS[name]
             for name in (
@@ -972,6 +980,40 @@ project-wide discovery.
 
 Return ONLY valid JSON with goal and steps. Every argument must be a string.
 """
+    elif is_source_read_phase:
+        system_content = f"""You are JARVIS's focused source-inspection planner.
+
+The project discovery phase is complete. Verified evidence is included in
+the user message. You must inspect the actual existing source before any
+repair is planned.
+
+Do NOT modify files.
+Do NOT use list_files.
+Do NOT perform broad project-wide discovery when the evidence already names
+the target.
+Prefer exactly one read_file step for the verified target source file.
+Do not invent filenames.
+
+Return ONLY valid JSON with goal and steps. Every argument must be a string.
+"""
+
+    elif is_diagnostic_test_phase:
+        system_content = f"""You are JARVIS's focused diagnostic test planner.
+
+The relevant source file has already been inspected. Verified evidence is
+included in the user message. Run a targeted validation against the existing
+implementation before any repair is planned.
+
+Do NOT modify files.
+Do NOT use list_files.
+Do NOT perform broad rediscovery.
+Prefer exactly one code_test step for the verified target.
+For browser_controller.py use mode "browser_smoke".
+Do not invent filenames.
+
+Return ONLY valid JSON with goal and steps. Every argument must be a string.
+"""
+
     else:
         system_content = _planner_prompt() + context_str + history_str
 
@@ -994,11 +1036,11 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 
         planner_model = (
             MODEL_MANAGER.coding_model
-            if "REPAIR PHASE RULES:" in user_command
+            if is_repair_phase
             else PLANNER_MODEL
         )
 
-        if "REPAIR PHASE RULES:" in user_command:
+        if is_repair_phase:
             print(
                 f"JARVIS DEBUG: repair planner -> using {planner_model}",
                 flush=True,
