@@ -2024,6 +2024,12 @@ class JarvisAgent:
                     "last_status"
                 ] = task.status
 
+                if not task.initial_acknowledged:
+                    self._announce(
+                        "Stopped.",
+                        speak_callback,
+                    )
+
                 task_state.set_progress_callback(None)
                 return task
 
@@ -2065,11 +2071,10 @@ class JarvisAgent:
                         "Maximum replans reached."
                     )
 
-                    if report_progress:
-                        self._announce(
-                            "I wasn't able to complete the task.",
-                            speak_callback,
-                        )
+                    self._announce(
+                        "I wasn't able to complete the task.",
+                        speak_callback,
+                    )
 
                     task_state.set_progress_callback(None)
                     return task
