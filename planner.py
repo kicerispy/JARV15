@@ -23,6 +23,8 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
+    "browser_click_result": "Click a numbered or last organic Google/YouTube result. Argument is JSON.",
+    "browser_back": "Navigate the controlled browser back one page.",
     "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role.",
     "browser_click_element": "Click a browser DOM element by CSS selector, visible text, or ARIA role.",
     "browser_fill_element": "Fill a browser input by CSS selector, visible text, or ARIA role. Argument is JSON.",
@@ -37,7 +39,11 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "open_website": "Open a website in the browser. argument = site name or URL.",
     "search_website": "Search a specific site. argument = 'site|query', e.g. 'youtube|iron man trailer'.",
     "open_program": "Launch a desktop application. argument = program name, e.g. 'notepad', 'chrome'.",
-    "system_status": "Report CPU/RAM usage. argument = empty.",
+    "system_status": "Report computer and JARVIS subsystem status. argument = empty.",
+    "startup_status": "Report whether JARVIS starts with Windows. argument = empty.",
+    "enable_startup": "Configure JARVIS to start with Windows. argument = empty.",
+    "disable_startup": "Disable JARVIS Windows startup. argument = empty.",
+    "task_history": "Report recent JARVIS task history. argument = empty.",
     "create_folder": "Create a folder. argument = folder name.",
     "list_files": "List files in a folder. argument = folder path, or empty for current folder.",
     "find_file": "Search for a file by name. argument = filename.",
@@ -98,6 +104,14 @@ Available tools:
 
 Rules:
 
+WINDOWS STARTUP AND RUNTIME STATUS:
+
+- Use system_status when the user asks about computer or JARVIS subsystem health.
+- Use startup_status when the user asks whether JARVIS starts with Windows.
+- Use enable_startup when the user asks JARVIS to start automatically with Windows.
+- Use disable_startup when the user asks JARVIS to stop starting with Windows.
+- Use task_history when the user asks what JARVIS has recently done.
+
 BAREHANDS TOOL SELECTION:
 
 - jarvis_status is for reporting JARVIS's own internal status or uptime.
@@ -147,7 +161,9 @@ Browser workflow:
 5. Use browser_click_element for links, buttons, and controls.
 6. Use browser_wait_for_element when content may load asynchronously.
 7. Use browser_extract_text or browser_page_info to verify the result.
-8. When an action fails, use the browser state and observations to
+8. Use browser_click_result for second, third, or last search results.
+9. Use browser_back for requests to go back to the previous page.
+10. When an action fails, use the browser state and observations to
    choose a different strategy during replanning.
 
 DOM TOOL ARGUMENT FORMAT:
