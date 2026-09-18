@@ -977,6 +977,10 @@ def cleanup_browser():
 
                 if _skipper_task and not _skipper_task.done():
                     _skipper_task.cancel()
+                    await asyncio.gather(
+                        _skipper_task,
+                        return_exceptions=True,
+                    )
 
                 if _context:
                     await _context.close()
@@ -1036,9 +1040,9 @@ def cleanup_browser():
         # Do not close the shared Windows Proactor loop here. Playwright's
         # subprocess transports may still need one final loop turn during
         # interpreter shutdown, and closing it early produces noisy
-        # unclosed-pipe warnings. The process is exiting, so retaining the
-        # already-cleaned loop is safer than tearing it down underneath
-        # asyncio transport destructors.
+        # unclosed-pipe warnings. The browser resources are cleaned up while
+        # the loop is still alive; the loop itself can be released by Python.
+        _loop = None
 
 
 atexit.register(cleanup_browser)
