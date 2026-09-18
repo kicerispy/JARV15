@@ -208,3 +208,54 @@ def test_code_diagnose_resolves_voice_transcribed_target(tmp_path, monkeypatch):
     assert result["success"] is True
     assert result["verified"] is True
     assert result["path"] == "Jarvis Autonomous Test target.py"
+
+def test_code_diagnose_reports_compile_failure_details(tmp_path, monkeypatch):
+    target = tmp_path / "broken_module.py"
+    target.write_text("def broken(:\n    pass\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    def fake_run(command, **kwargs):
+        command_text = " ".join(str(part) for part in command)
+        if "py_compile" in command_text:
+            return SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr='  File "broken_module.py", line 1\n    def broken(:\n              ^\nSyntaxError: invalid syntax',
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.subprocess.run", fake_run)
+
+    result = code_diagnose(
+        "{'path': 'broken_module.py', 'run_tests': True, 'run_lint': False}"
+    )
+
+    assert result["success"] is False
+    assert result["verified"] is False
+    assert result["checks"][0]["status"] == "failed"
+    assert result["failures"]
+    assert "SyntaxError" in result["failures"][0]
+    assert "SyntaxError" in result["message"]
+
+
+def test_code_diagnose_skips_pytest_for_implementation_target(tmp_path, monkeypatch):
+    target = tmp_path / "implementation.py"
+    target.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(part) for part in command])
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("tools.subprocess.run", fake_run)
+
+    result = code_diagnose(
+        "{'path': 'implementation.py', 'run_tests': True, 'run_lint': False}"
+    )
+
+    assert result["success"] is True
+    assert result["verified"] is True
+    assert not any("-m" in call and "pytest" in call for call in calls)
+\n
