@@ -236,13 +236,13 @@ Output:
 }}
 
 User:
-What's the weather in Chicago?
+What's the weather in Belvidere, IL?
 
 Output:
 {{
 "goal": "check weather",
 "steps": [
-  {{"tool": "weather", "argument": "Chicago"}}
+  {{"tool": "weather", "argument": "Belvidere, IL"}}
 ]
 }}
 
