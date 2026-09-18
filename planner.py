@@ -1327,7 +1327,7 @@ REPAIR PLAN SCHEMA — REQUIRED:
   "steps": [
     {{"tool": "code_checkpoint", "argument": ""}},
     {{"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"}},
-    {{"tool": "code_test", "argument": "{\"mode\":\"compile\",\"path\":\"existing_file.py\"}"}}
+    {{"tool": "code_test", "argument": "{'mode':'compile','path':'existing_file.py'}"}}
   ]
 }}
 
