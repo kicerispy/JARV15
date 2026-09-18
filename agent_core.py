@@ -2085,7 +2085,16 @@ class JarvisAgent:
 
                 step = task.steps[index]
 
-                step.attempts += 1
+                trace_attempts = entry.get("attempts", 1)
+                try:
+                    trace_attempts = max(1, int(trace_attempts or 1))
+                except (TypeError, ValueError):
+                    trace_attempts = 1
+
+                step.attempts = max(
+                    step.attempts + 1,
+                    trace_attempts,
+                )
 
                 step.result = entry.get(
                     "result"
@@ -3066,4 +3075,3 @@ if __name__ == "__main__":
     print(
         task_state
     )
-
