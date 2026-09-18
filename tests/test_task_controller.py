@@ -2,7 +2,11 @@ import threading
 import time
 
 from state import TaskState
-from task_controller import BackgroundTaskController, is_task_status_request
+from task_controller import (
+    BackgroundTaskController,
+    is_task_acknowledgement,
+    is_task_status_request,
+)
 
 
 class FakeAgent:
@@ -263,3 +267,44 @@ def test_action_request_with_empty_plan_fails_without_chat_fallback():
         "I'm on it. I'll keep you updated and let you know when it's finished.",
         "I couldn't create an action plan for that request.",
     ]
+
+
+
+def test_task_acknowledgements_are_deterministic():
+    assert is_task_acknowledgement("All right") is True
+    assert is_task_acknowledgement("okay") is True
+    assert is_task_acknowledgement("tell me a joke") is False
+
+
+def test_task_controller_status_works_without_active_task():
+    agent = FakeAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+
+    task = type("Task", (), {
+        "task_id": "completed-task",
+        "request": "do a test",
+        "goal": "run the test",
+        "status": "created",
+        "steps": [object()],
+        "current_step": -1,
+        "replan_count": 0,
+        "error": None,
+        "started_at": None,
+        "completed_at": None,
+    })()
+
+    assert controller.start(
+        task,
+        {},
+        task_state,
+        None,
+    ) is True
+
+    assert agent.started.wait(timeout=1)
+    agent.release.set()
+    assert controller.wait_for_current(timeout=1) is True
+
+    assert controller.status_message() == (
+        "The last background task is complete."
+    )
