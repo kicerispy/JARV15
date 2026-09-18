@@ -297,6 +297,44 @@ def test_task_completion_summaries_are_natural_and_concise():
     ) == "Done."
 
 
+def test_task_state_tracks_completion_speech_delivery():
+    from state import TaskState
+
+    task_state = TaskState()
+    task_state.prepare("test task", 1)
+    assert task_state.was_completion_spoken() is False
+
+    task_state.mark_completion_spoken()
+    assert task_state.was_completion_spoken() is True
+
+    task_state.start("test task", 1)
+    assert task_state.was_completion_spoken() is False
+
+
+def test_search_website_returns_concise_completion_message(monkeypatch):
+    import tools
+
+    monkeypatch.setattr(
+        tools,
+        "browser_goto",
+        lambda url: {"success": True},
+        raising=False,
+    )
+
+    # search_website imports browser_goto from browser_controller at call time,
+    # so patch that canonical dependency directly.
+    import browser_controller
+    monkeypatch.setattr(
+        browser_controller,
+        "browser_goto",
+        lambda url: {"success": True},
+    )
+
+    assert tools.search_website("google", "Wi-Fi Skeleton") == (
+        "Google search complete."
+    )
+
+
 def test_tts_status_exposes_runtime_provider():
     source = Path("voice.py").read_text(encoding="utf-8-sig")
 
