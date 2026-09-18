@@ -1547,6 +1547,197 @@ def open_program(program):
 
 
 # ============================================================
+# AUTONOMOUS CODE CHECKPOINTS
+# ============================================================
+
+CODE_CHECKPOINT_DIR = (
+    __import__("pathlib").Path.cwd()
+    / ".jarvis_checkpoints"
+    / "latest"
+)
+
+CODE_SOURCE_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".html",
+    ".css",
+    ".lua",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".md",
+    ".bat",
+    ".ps1",
+}
+
+CODE_CHECKPOINT_MANIFEST = (
+    __import__("pathlib").Path.cwd()
+    / ".jarvis_checkpoints"
+    / "manifest.json"
+)
+
+
+def _checkpoint_source_files():
+    base = __import__("pathlib").Path.cwd().resolve()
+    ignored = {
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "jarvis_cuda",
+        "venv",
+        ".venv",
+        "node_modules",
+        "build",
+        "dist",
+        ".jarvis_checkpoints",
+    }
+    excluded_names = {
+        "profile.json",
+        ".env",
+        ".env.local",
+        ".env.production",
+    }
+
+    files = []
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in ignored for part in path.parts):
+            continue
+        if path.name in excluded_names:
+            continue
+        if path.suffix.lower() not in CODE_SOURCE_EXTENSIONS:
+            continue
+        files.append(path)
+
+    return files
+
+
+def code_checkpoint(argument=""):
+    """Snapshot project source files before an autonomous edit."""
+    import json
+    import shutil
+    from datetime import datetime
+    from pathlib import Path
+
+    base = Path.cwd().resolve()
+    checkpoint_dir = (base / ".jarvis_checkpoints" / "latest").resolve()
+    manifest_path = (base / ".jarvis_checkpoints" / "manifest.json").resolve()
+
+    try:
+        checkpoint_dir.parent.mkdir(parents=True, exist_ok=True)
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        files = _checkpoint_source_files()
+        manifest_files = []
+
+        for source in files:
+            relative = source.relative_to(base)
+            destination = checkpoint_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            manifest_files.append(str(relative))
+
+        manifest = {
+            "created_at": datetime.now().isoformat(),
+            "file_count": len(manifest_files),
+            "files": manifest_files,
+        }
+
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2),
+            encoding="utf-8",
+        )
+
+        return {
+            "success": True,
+            "verified": True,
+            "message": (
+                f"Checkpoint created for {len(manifest_files)} source files."
+            ),
+            "checkpoint": str(manifest_path),
+            "file_count": len(manifest_files),
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "verified": False,
+            "message": f"Could not create code checkpoint: {e}",
+            "error": str(e),
+        }
+
+
+def code_restore_checkpoint(argument=""):
+    """Restore source files from the latest autonomous checkpoint."""
+    import json
+    import shutil
+    from pathlib import Path
+
+    base = Path.cwd().resolve()
+    checkpoint_dir = (base / ".jarvis_checkpoints" / "latest").resolve()
+    manifest_path = (base / ".jarvis_checkpoints" / "manifest.json").resolve()
+
+    if not manifest_path.exists() or not checkpoint_dir.exists():
+        return {
+            "success": False,
+            "verified": False,
+            "message": "No JARVIS code checkpoint is available.",
+        }
+
+    try:
+        manifest = json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        )
+
+        restored = 0
+        for relative_name in manifest.get("files", []):
+            relative = Path(relative_name)
+            source = (checkpoint_dir / relative).resolve()
+            destination = (base / relative).resolve()
+
+            try:
+                source.relative_to(checkpoint_dir)
+                destination.relative_to(base)
+            except ValueError:
+                continue
+
+            if not source.exists():
+                continue
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            restored += 1
+
+        expected = int(manifest.get("file_count", restored))
+        return {
+            "success": restored > 0 or expected == 0,
+            "verified": restored == expected,
+            "message": (
+                f"Restored {restored} of {expected} checkpointed source files."
+            ),
+            "restored_files": restored,
+            "expected_files": expected,
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "verified": False,
+            "message": f"Could not restore code checkpoint: {e}",
+            "error": str(e),
+        }
+
+
+# ============================================================
 # CODE INSPECTION / VALIDATION
 # ============================================================
 
