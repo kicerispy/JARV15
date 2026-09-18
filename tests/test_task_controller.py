@@ -260,5 +260,6 @@ def test_action_request_with_empty_plan_fails_without_chat_fallback():
     )
 
     assert spoken == [
+        "I'm on it. I'll keep you updated and let you know when it's finished.",
         "I couldn't create an action plan for that request.",
     ]
