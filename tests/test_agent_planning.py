@@ -1017,6 +1017,43 @@ def test_requested_file_target_extractor_preserves_multi_word_names():
     )
 
 
+def test_internal_repair_phase_success_is_silent(monkeypatch):
+    import tool_executor
+    from tool_result import ToolResult
+    from state import ActiveContext
+
+    monkeypatch.setattr(
+        tool_executor,
+        "run_tool",
+        lambda tool_name, argument: ToolResult(
+            success=True,
+            tool=tool_name,
+            data="internal phase completed",
+        ),
+    )
+
+    spoken = []
+    task_state = TaskState()
+    result = tool_executor.execute_plan(
+        {
+            "goal": "discover repair target",
+            "jarvis_internal_phase": True,
+            "steps": [
+                {
+                    "tool": "find_file",
+                    "argument": "example.py",
+                }
+            ],
+        },
+        ActiveContext(),
+        task_state,
+        spoken.append,
+    )
+
+    assert result == "done"
+    assert spoken == []
+
+
 def test_existing_explicit_repair_target_skips_initial_planner_call():
     class TrackingPlanner:
         def __init__(self):
