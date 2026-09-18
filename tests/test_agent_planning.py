@@ -840,3 +840,132 @@ def test_required_source_read_rejects_empty_plan_and_recovers_target_from_discov
     ]
     assert planned.steps[0].argument == "browser_controller.py"
 
+class EvidencePhasePlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        if len(self.calls) == 1:
+            return {
+                "goal": "inspect browser automation",
+                "steps": [
+                    {"tool": "list_files", "argument": ""},
+                    {
+                        "tool": "read_file",
+                        "argument": "browser_controller.py",
+                    },
+                ],
+            }
+
+        if len(self.calls) == 2:
+            return {
+                "goal": "diagnostic validation",
+                "steps": [],
+            }
+
+        return valid_repair_plan()
+
+
+class EvidencePhaseExecutor:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        plan,
+        active_context,
+        task_state,
+        speak_callback,
+    ):
+        import tool_executor
+        from tool_result import ToolResult
+
+        self.calls.append(plan)
+        steps = plan.get("steps", [])
+
+        tool_executor.LAST_EXECUTION_TRACE = []
+
+        for index, step in enumerate(steps, start=1):
+            tool = step["tool"]
+            argument = step.get("argument", "")
+
+            if tool == "read_file":
+                result = ToolResult(
+                    success=True,
+                    tool=tool,
+                    data="from pathlib import Path\\n\\ndef browser_connect():\\n    return True\\n",
+                )
+            elif tool == "code_test":
+                result = ToolResult(
+                    success=True,
+                    tool=tool,
+                    data={
+                        "message": "Code validation passed.",
+                        "mode": "compile",
+                        "path": "browser_controller.py",
+                    },
+                )
+            else:
+                result = ToolResult(
+                    success=True,
+                    tool=tool,
+                    data="browser_controller.py",
+                )
+
+            tool_executor.LAST_EXECUTION_TRACE.append(
+                {
+                    "index": index,
+                    "tool": tool,
+                    "argument": argument,
+                    "status": "completed",
+                    "success": True,
+                    "verified": True,
+                    "result": result,
+                    "message": (
+                        "Source inspection completed."
+                        if tool == "read_file"
+                        else
+                        "Code validation passed."
+                        if tool == "code_test"
+                        else
+                        "Discovery completed."
+                    ),
+                }
+            )
+
+        return "done"
+
+
+def test_verified_evidence_prevents_redundant_source_phase():
+    planner = EvidencePhasePlanner()
+    executor = EvidencePhaseExecutor()
+    agent = JarvisAgent(
+        planner=planner,
+        executor=executor,
+    )
+
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+
+    planned = agent.plan_task(task)
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner.calls) == 3
+    assert len(executor.calls) == 3
+    assert executor.calls[1]["steps"][0]["tool"] == "code_test"
+    assert executor.calls[2]["steps"][0]["tool"] == "code_checkpoint"
+
