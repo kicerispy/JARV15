@@ -80,6 +80,8 @@ _ACTION_WORDS = {
     "download",
     "upload",
     "create",
+    "make",
+    "generate",
     "write",
     "edit",
     "change",
