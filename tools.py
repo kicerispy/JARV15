@@ -121,10 +121,10 @@ def _extract_weather_location(request):
     Extract a location from requests such as:
 
         weather
-        weather in Chicago
-        weather for Chicago
-        weather in Chicago today
-        weather in Chicago tomorrow
+        weather in Belvidere, IL
+        weather for Belvidere, IL
+        weather in Belvidere, IL today
+        weather in Belvidere, IL tomorrow
     """
 
     request = (
@@ -537,6 +537,9 @@ def weather(request=""):
 # ============================================================
 
 TIMEZONE_ALIASES = {
+
+    "belvidere":
+        "America/Chicago",
 
     "chicago":
         "America/Chicago",
