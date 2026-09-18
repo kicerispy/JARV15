@@ -231,7 +231,7 @@ CLICK_BIAS_Y = 0
 # WEATHER
 # ============================================================
 
-DEFAULT_WEATHER_LOCATION = "Chicago"
+DEFAULT_WEATHER_LOCATION = "Belvidere, IL"
 
 WEATHER_GEOCODING_URL = (
     "https://geocoding-api.open-meteo.com/v1/search"
