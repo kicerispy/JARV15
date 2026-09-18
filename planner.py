@@ -457,6 +457,87 @@ def assess_plan(
         if tool == "code_test"
     ]
 
+    # --------------------------------------------------------
+    # File-target sanity checks for diagnostic/repair plans.
+    # --------------------------------------------------------
+    # A planner hallucinating a source filename is worse than returning
+    # an incomplete plan: it causes an avoidable execution failure and can
+    # contaminate the repair evidence. Reject nonexistent read/edit targets
+    # before execution and give the planner a concrete correction.
+    # --------------------------------------------------------
+    import ast
+    from pathlib import Path
+
+    base = Path.cwd().resolve()
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+
+        tool = str(step.get("tool", "") or "").strip()
+        argument = str(step.get("argument", "") or "").strip()
+
+        target = ""
+        if tool == "read_file":
+            target = argument
+        elif tool in {"edit_file", "delete_file", "write_file"}:
+            target = argument.split("|||", 1)[0].strip()
+        elif tool == "code_test":
+            try:
+                payload = json.loads(argument)
+                if not isinstance(payload, dict):
+                    payload = ast.literal_eval(argument)
+                if isinstance(payload, dict):
+                    target = str(payload.get("path", "") or "").strip()
+            except (json.JSONDecodeError, ValueError, SyntaxError):
+                target = ""
+
+        if not target or tool == "write_file":
+            continue
+
+        candidate = (base / target).resolve()
+
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            issues.append(
+                f"The {tool} target must stay inside the project: {target}"
+            )
+            continue
+
+        if not candidate.exists():
+            issues.append(
+                f"The planner referenced a nonexistent {tool} target: {target}. "
+                "Do not invent filenames; use the actual discovered project file."
+            )
+
+    request_lower = str(user_command or "").lower()
+
+    if (
+        "browser" in request_lower
+        and "automation" in request_lower
+    ):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+
+            tool = str(step.get("tool", "") or "").strip()
+            argument = str(step.get("argument", "") or "").strip()
+
+            if tool not in {
+                "read_file",
+                "edit_file",
+                "delete_file",
+                "code_test",
+            }:
+                continue
+
+            if "browser_automation.py" in argument.lower():
+                issues.append(
+                    "For browser automation in this project, use the existing "
+                    "browser_controller.py target. browser_automation.py does not exist."
+                )
+
     if inspection_index is None and not allow_prior_evidence:
         issues.append(
             "The repair plan must inspect the relevant project code "
