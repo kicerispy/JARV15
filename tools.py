@@ -1751,7 +1751,21 @@ def code_restore_checkpoint(argument=""):
 
 def code_search(argument=""):
     """Search project text files for a symbol, string, or error message."""
-    query = str(argument or "").strip()
+    raw_argument = str(argument or "").strip()
+    query = raw_argument
+
+    if raw_argument:
+        try:
+            payload = json.loads(raw_argument)
+            if isinstance(payload, dict) and "query" in payload:
+                query = str(payload.get("query") or "").strip()
+        except (json.JSONDecodeError, TypeError):
+            try:
+                payload = ast.literal_eval(raw_argument)
+                if isinstance(payload, dict) and "query" in payload:
+                    query = str(payload.get("query") or "").strip()
+            except (ValueError, SyntaxError):
+                pass
 
     if not query:
         return "Code search query cannot be empty."
@@ -2208,16 +2222,60 @@ def code_diagnose(argument=""):
         if not value:
             return None, None
 
-        candidate = (base / value).resolve()
+        raw_value = str(value).strip()
+        candidate = (base / raw_value).resolve()
         try:
             candidate.relative_to(base)
         except ValueError:
             return None, f"Target is outside the project: {value}"
 
-        if not candidate.exists():
-            return None, f"Target not found: {value}"
+        if candidate.exists() and candidate.is_file():
+            return candidate, None
 
-        return candidate, None
+        normalized_target = re.sub(r"[^a-z0-9]", "", raw_value.lower())
+
+        if normalized_target:
+            ignored = {
+                ".git",
+                "__pycache__",
+                ".pytest_cache",
+                ".mypy_cache",
+                ".ruff_cache",
+                "jarvis_cuda",
+                "venv",
+                ".venv",
+                "node_modules",
+                "build",
+                "dist",
+                ".jarvis_checkpoints",
+            }
+
+            matches = []
+            try:
+                for path in base.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    if any(part in ignored for part in path.parts):
+                        continue
+
+                    normalized_name = re.sub(
+                        r"[^a-z0-9]",
+                        "",
+                        path.name.lower(),
+                    )
+
+                    if normalized_name == normalized_target:
+                        matches.append(path)
+
+                        if len(matches) > 1:
+                            break
+            except OSError:
+                matches = []
+
+            if len(matches) == 1:
+                return matches[0], None
+
+        return None, f"Target not found: {value}"
 
     target_path, target_error = resolve_target(target)
     if target_error:
