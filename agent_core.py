@@ -979,10 +979,18 @@ class JarvisAgent:
         report_progress = self._should_report_progress(task)
 
         if report_progress:
+            task_state.set_progress_callback(
+                lambda message: self._announce(
+                    message,
+                    speak_callback,
+                )
+            )
             self._announce(
                 "I'm on it. I'll keep you updated and let you know when it's finished.",
                 speak_callback,
             )
+        else:
+            task_state.set_progress_callback(None)
 
         while True:
 
@@ -1032,6 +1040,7 @@ class JarvisAgent:
                         speak_callback,
                     )
 
+                task_state.set_progress_callback(None)
                 return task
 
             # ------------------------------------------------
@@ -1050,6 +1059,7 @@ class JarvisAgent:
                     "last_status"
                 ] = task.status
 
+                task_state.set_progress_callback(None)
                 return task
 
             # ------------------------------------------------
@@ -1096,6 +1106,7 @@ class JarvisAgent:
                             speak_callback,
                         )
 
+                    task_state.set_progress_callback(None)
                     return task
 
                 # --------------------------------------------
