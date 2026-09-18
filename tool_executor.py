@@ -354,6 +354,37 @@ def verify_action_for_task(
 
 
 # ============================================================
+# TASK PROGRESS
+# ============================================================
+
+def _report_tool_progress(
+    task_state: TaskState,
+    tool_name: str,
+    index: int,
+    total: int,
+) -> None:
+    """Emit concise progress updates for significant task stages."""
+    messages = {
+        "code_search": "I'm locating the relevant code.",
+        "read_file": "I've found the relevant file. I'm inspecting it now.",
+        "edit_file": "I'm applying the change.",
+        "write_file": "I'm writing the updated code.",
+        "code_test": "The change is in place. I'm testing it now.",
+        "browser_connect": "I'm connecting to the browser.",
+        "browser_find_element": "I'm locating the browser element.",
+        "browser_click_element": "I'm interacting with the browser element.",
+        "browser_click_first_result": "I'm selecting the result through the browser DOM.",
+        "browser_fill_element": "I'm filling the browser input.",
+        "browser_wait_for_element": "I'm waiting for the page element.",
+        "browser_extract_text": "I'm reading the page content.",
+    }
+
+    message = messages.get(tool_name)
+    if message:
+        prefix = f"Step {index} of {total}. "
+        task_state.report_progress(prefix + message)
+
+# ============================================================
 # TOOL RESULT NORMALIZATION
 # ============================================================
 
