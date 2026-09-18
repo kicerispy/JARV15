@@ -276,6 +276,42 @@ def test_task_acknowledgements_are_deterministic():
     assert is_task_acknowledgement("tell me a joke") is False
 
 
+def test_background_task_completion_signal_is_set_and_consumed():
+    agent = FakeAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+
+    task = type("Task", (), {
+        "task_id": "completion-signal-task",
+        "request": "do a test",
+        "goal": "run the test",
+        "status": "created",
+        "steps": [object()],
+        "current_step": -1,
+        "replan_count": 0,
+        "error": None,
+        "started_at": None,
+        "completed_at": None,
+    })()
+
+    assert controller.completion_event.is_set() is False
+
+    assert controller.start(
+        task,
+        {},
+        task_state,
+        None,
+    ) is True
+
+    assert agent.started.wait(timeout=1)
+    agent.release.set()
+    assert controller.wait_for_current(timeout=1) is True
+
+    assert controller.completion_event.is_set() is True
+    assert controller.consume_completion_signal() is True
+    assert controller.consume_completion_signal() is False
+
+
 def test_task_controller_status_works_without_active_task():
     agent = FakeAgent()
     controller = BackgroundTaskController(agent)
