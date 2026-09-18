@@ -1990,6 +1990,283 @@ def code_test(argument=""):
         }
 
 
+def code_diagnose(argument=""):
+    """Run a bounded project-wide diagnostic pass for autonomous coding work."""
+    import ast
+    import json
+    import sys
+    from pathlib import Path
+
+    raw = str(argument or "").strip()
+    payload = {}
+
+    if raw:
+        try:
+            candidate = json.loads(raw)
+            if isinstance(candidate, dict):
+                payload = candidate
+        except (json.JSONDecodeError, TypeError):
+            try:
+                candidate = ast.literal_eval(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (ValueError, SyntaxError):
+                payload = {"path": raw}
+
+    base = Path.cwd().resolve()
+    target = str(payload.get("path", "") or "").strip()
+    run_tests = bool(payload.get("run_tests", True))
+    run_lint = bool(payload.get("run_lint", True))
+    run_types = bool(payload.get("run_types", False))
+    timeout = max(15, min(int(payload.get("timeout", 180)), 300))
+
+    def resolve_target(value: str):
+        if not value:
+            return None, None
+
+        candidate = (base / value).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            return None, f"Target is outside the project: {value}"
+
+        if not candidate.exists():
+            return None, f"Target not found: {value}"
+
+        return candidate, None
+
+    target_path, target_error = resolve_target(target)
+    if target_error:
+        return {
+            "success": False,
+            "verified": False,
+            "mode": "diagnose",
+            "path": target,
+            "checks": [],
+            "failures": [target_error],
+            "message": "Project diagnostic could not start.",
+        }
+
+    ignored = {
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "jarvis_cuda",
+        "venv",
+        ".venv",
+        "node_modules",
+        "build",
+        "dist",
+        ".jarvis_checkpoints",
+    }
+
+    if target_path is not None:
+        python_files = (
+            [target_path]
+            if target_path.is_file() and target_path.suffix.lower() == ".py"
+            else []
+        )
+    else:
+        python_files = [
+            path
+            for path in base.rglob("*.py")
+            if path.is_file()
+            and not any(part in ignored for part in path.parts)
+        ]
+
+    checks = []
+    failures = []
+
+    def run_check(name, command, required=True):
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(base),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except FileNotFoundError as exc:
+            checks.append({
+                "name": name,
+                "status": "unavailable",
+                "required": required,
+                "returncode": None,
+                "stdout": "",
+                "stderr": str(exc),
+            })
+            if required:
+                failures.append(f"{name} is unavailable: {exc}")
+            return None
+        except subprocess.TimeoutExpired:
+            checks.append({
+                "name": name,
+                "status": "timeout",
+                "required": required,
+                "returncode": None,
+                "stdout": "",
+                "stderr": f"Timed out after {timeout} seconds.",
+            })
+            if required:
+                failures.append(f"{name} timed out after {timeout} seconds.")
+            return None
+        except Exception as exc:
+            checks.append({
+                "name": name,
+                "status": "error",
+                "required": required,
+                "returncode": None,
+                "stdout": "",
+                "stderr": str(exc),
+            })
+            if required:
+                failures.append(f"{name} could not start: {exc}")
+            return None
+
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        passed = completed.returncode == 0
+
+        checks.append({
+            "name": name,
+            "status": "passed" if passed else "failed",
+            "required": required,
+            "returncode": completed.returncode,
+            "stdout": stdout[:6000],
+            "stderr": stderr[:6000],
+        })
+
+        if not passed and required:
+            detail = stderr or stdout or "No diagnostic output."
+            failures.append(
+                f"{name} failed (exit {completed.returncode}): {detail[:5000]}"
+            )
+
+        return completed
+
+    if target_path is not None:
+        if target_path.is_file() and target_path.suffix.lower() == ".py":
+            run_check(
+                f"compile:{target_path.relative_to(base)}",
+                [sys.executable, "-m", "py_compile", str(target_path)],
+            )
+        else:
+            checks.append({
+                "name": "python_compile",
+                "status": "skipped",
+                "required": False,
+                "returncode": None,
+                "stdout": "",
+                "stderr": "Target is not a Python file.",
+            })
+    elif python_files:
+        run_check(
+            "compile_all",
+            [sys.executable, "-m", "compileall", "-q", "."],
+        )
+    else:
+        checks.append({
+            "name": "compile_all",
+            "status": "skipped",
+            "required": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "No Python source files were discovered.",
+        })
+
+    tests_dir = base / "tests"
+    if run_tests and tests_dir.exists() and tests_dir.is_dir():
+        test_target = str(target_path) if target_path is not None else "tests"
+        run_check(
+            "pytest",
+            [sys.executable, "-m", "pytest", test_target, "-q"],
+        )
+    elif run_tests:
+        checks.append({
+            "name": "pytest",
+            "status": "skipped",
+            "required": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "No tests directory is present.",
+        })
+
+    if run_lint:
+        probe = subprocess.run(
+            [sys.executable, "-m", "ruff", "--version"],
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode == 0:
+            run_check(
+                "ruff",
+                [sys.executable, "-m", "ruff", "check", target or "."],
+                required=False,
+            )
+        else:
+            checks.append({
+                "name": "ruff",
+                "status": "unavailable",
+                "required": False,
+                "returncode": None,
+                "stdout": "",
+                "stderr": "ruff is not installed in the active Python environment.",
+            })
+
+    if run_types:
+        probe = subprocess.run(
+            [sys.executable, "-m", "mypy", "--version"],
+            cwd=str(base),
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode == 0:
+            run_check(
+                "mypy",
+                [sys.executable, "-m", "mypy", target or "."],
+                required=False,
+            )
+        else:
+            checks.append({
+                "name": "mypy",
+                "status": "unavailable",
+                "required": False,
+                "returncode": None,
+                "stdout": "",
+                "stderr": "mypy is not installed in the active Python environment.",
+            })
+
+    required_checks = [
+        check
+        for check in checks
+        if check.get("required")
+        and check.get("status") not in {"skipped", "unavailable"}
+    ]
+
+    success = bool(required_checks) and not failures
+
+    return {
+        "success": success,
+        "verified": success,
+        "mode": "diagnose",
+        "path": target or ".",
+        "summary": (
+            "Project diagnostic passed."
+            if success
+            else "Project diagnostic found actionable issues."
+            if failures
+            else "Project diagnostic completed without required checks."
+        ),
+        "checks": checks,
+        "failures": failures[:20],
+        "check_count": len(checks),
+        "failure_count": len(failures),
+    }
+
+
 # ============================================================
 # SYSTEM STATUS
 # ============================================================
@@ -2518,6 +2795,10 @@ def _run_tool_raw(
     elif tool_name == "code_test":
 
         return code_test(argument)
+
+    elif tool_name == "code_diagnose":
+
+        return code_diagnose(argument)
 
     # --------------------------------------------------------
     # SYSTEM
