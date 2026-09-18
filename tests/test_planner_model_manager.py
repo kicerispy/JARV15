@@ -53,6 +53,11 @@ class PlannerModelManagerTests(unittest.TestCase):
         self.assertIn("REPAIR HANDOFF MODE", system)
         self.assertIn("code_checkpoint", system)
         self.assertNotIn("expert software engineer and systems architect", system)
+        self.assertEqual(
+            captured.get("model"),
+            planner.ModelManager().coding_model,
+            "repair handoffs must use the centralized coding model",
+        )
 
 
 if __name__ == "__main__":
