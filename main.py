@@ -568,6 +568,39 @@ def process_command(
         return "shutdown"
 
     # ==================================================
+    # BACKGROUND TASK BUSY GUARD
+    # ==================================================
+
+    if (
+        task_controller is not None
+        and task_controller.has_active_task()
+    ):
+
+        pending_route = route_command(
+            user_input
+        )
+
+        if pending_route.kind in {
+            "fast",
+            "contextual",
+            "agent",
+        }:
+
+            reply = (
+                "I'm already handling another task. "
+                "Say stop first if you'd like me to cancel it."
+            )
+
+            logger.info(
+                "JARVIS TASK CONTROLLER: "
+                "Rejected concurrent action."
+            )
+
+            speak_callback(reply)
+
+            return "done"
+
+    # ==================================================
     # REMEMBER
     # ==================================================
 
