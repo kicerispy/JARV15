@@ -463,7 +463,7 @@ def wake_triggered(probability):
 # Main wake listener
 # ==================================================
 
-def wait_for_wake_word():
+def wait_for_wake_word(interrupt_event=None):
 
     global _last_wake_time
 
@@ -506,11 +506,16 @@ def wait_for_wake_word():
     )
 
     if elapsed < REFRACTORY_SECONDS:
+        remaining = REFRACTORY_SECONDS - elapsed
 
-        time.sleep(
-            REFRACTORY_SECONDS
-            - elapsed
-        )
+        if (
+            interrupt_event is not None
+            and interrupt_event.wait(remaining)
+        ):
+            return False
+
+        if interrupt_event is None:
+            time.sleep(remaining)
 
     # --------------------------------------------------
     # Reset detector
@@ -531,6 +536,12 @@ def wait_for_wake_word():
     ) as stream:
 
         while True:
+
+            if (
+                interrupt_event is not None
+                and interrupt_event.is_set()
+            ):
+                return False
 
             audio, overflowed = (
                 stream.read(CHUNK_SIZE)
