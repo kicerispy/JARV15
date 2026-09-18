@@ -156,15 +156,13 @@ def _clean_generated_code(code: str) -> str:
     """Normalize model output before validation/writing."""
     code = str(code or "").strip()
     code = re.sub(
-        r"^\`\`\`(?:html|javascript|python|js|lua|css|typescript|ts)?\\n",
+        r"^```(?:html|javascript|python|js|lua|css|typescript|ts)?\s*\n",
         "",
         code,
         flags=re.IGNORECASE,
     )
-    code = re.sub(r"\\n\`\`\`$", "", code)
+    code = re.sub(r"\s*```$", "", code)
     return code.strip()
-
-
 def _validate_generated_file(filename: str, code: str) -> Tuple[bool, str]:
     """Validate generated source without executing arbitrary generated code."""
     suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
