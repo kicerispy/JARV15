@@ -243,12 +243,8 @@ def double_click_screen_target(target: str) -> dict[str, Any]:
     if not target:
         return {"success": False, "error": "Screen target cannot be empty."}
 
-    dom = _dom_click_fallback(target, double=True)
-    if dom is not None:
-        # DOM controller intentionally exposes only a single-click primitive.
-        # Fall through to desktop vision for a genuine double-click request.
-        pass
-
+    # Playwright currently exposes a single-click primitive, so use
+    # desktop vision for a genuine double-click request.
     return _desktop_click(target, clicks=2)
 
 
