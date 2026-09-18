@@ -775,6 +775,18 @@ class JarvisAgent:
         if direct_matches:
             return direct_matches[-1]
 
+        spaced_match = re.search(
+            rf"\b(?:in|of|called|named|file)\s+"
+            rf"([A-Za-z0-9][A-Za-z0-9 _-]*\.{extension_pattern})\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if spaced_match:
+            return " ".join(
+                str(spaced_match.group(1)).strip().split()
+            )
+
         dotted_match = re.search(
             rf"\b(?:in|of|called|named|file)\s+"
             rf"([A-Za-z0-9][A-Za-z0-9 _-]*?)\s+dot\s+"
