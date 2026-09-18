@@ -1462,7 +1462,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
             {
                 "temperature": 0,
                 "num_predict": 240,
-                "num_ctx": 8192,
+                "num_ctx": config.CODING_NUM_CTX,
             }
             if is_repair_phase
             else None
@@ -1551,7 +1551,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                         options={
                             "temperature": 0,
                             "num_predict": 240,
-                            "num_ctx": 8192,
+                            "num_ctx": config.CODING_NUM_CTX,
                         },
                         keep_alive=config.CODING_MODEL_KEEP_ALIVE,
                     )
@@ -1614,7 +1614,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                         options={
                             "temperature": 0,
                             "num_predict": 240,
-                            "num_ctx": 8192,
+                            "num_ctx": config.CODING_NUM_CTX,
                         },
                         keep_alive=config.CODING_MODEL_KEEP_ALIVE,
                     )
