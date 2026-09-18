@@ -282,3 +282,77 @@ def test_successful_discovery_transitions_into_repair_phase():
     assert len(planner.calls) == 2
     assert len(executor.calls) == 2
     assert executor.calls[1]["steps"][-1]["tool"] == "code_test"
+
+
+
+class ThreePhasePlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        if len(self.calls) == 1:
+            return {
+                "goal": "discover browser automation",
+                "steps": [
+                    {"tool": "list_files", "argument": ""},
+                    {
+                        "tool": "find_file",
+                        "argument": "browser_controller.py",
+                    },
+                ],
+            }
+
+        if len(self.calls) == 2:
+            return {
+                "goal": "read browser automation source",
+                "steps": [
+                    {
+                        "tool": "read_file",
+                        "argument": "browser_controller.py",
+                    },
+                ],
+            }
+
+        return valid_repair_plan()
+
+
+def test_repair_task_can_gather_source_before_editing():
+    planner = ThreePhasePlanner()
+    executor = RecordingExecutor()
+    agent = JarvisAgent(
+        planner=planner,
+        executor=executor,
+    )
+
+    task = agent.create_task(
+        "inspect the browser automation, find the problem, fix it, and test it"
+    )
+
+    planned = agent.plan_task(task)
+
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner.calls) == 3
+    assert len(executor.calls) == 3
+    assert [
+        step["tool"]
+        for step in executor.calls[0]["steps"]
+    ] == ["list_files", "find_file"]
+    assert [
+        step["tool"]
+        for step in executor.calls[1]["steps"]
+    ] == ["read_file"]
+    assert executor.calls[2]["steps"][-1]["tool"] == "code_test"
