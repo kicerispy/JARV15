@@ -42,6 +42,26 @@ def is_task_status_request(text: str) -> bool:
     return normalized in _STATUS_PHRASES
 
 
+_TASK_ACKNOWLEDGEMENT_PHRASES = (
+    "ok",
+    "okay",
+    "all right",
+    "alright",
+    "got it",
+    "understood",
+    "sounds good",
+    "sure",
+    "thanks",
+    "thank you",
+)
+
+
+def is_task_acknowledgement(text: str) -> bool:
+    """Return True for short conversational acknowledgements while a task runs."""
+    normalized = " ".join(str(text or "").strip().lower().split())
+    return normalized in _TASK_ACKNOWLEDGEMENT_PHRASES
+
+
 class BackgroundTaskController:
     """Owns at most one active Agent Core task at a time."""
 
