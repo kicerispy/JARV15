@@ -76,6 +76,7 @@ class BackgroundTaskController:
         self._speech_queue: Queue[str] = Queue()
         self._pending_speech_count = 0
         self._last_pending_message = ""
+        self._completion_event = threading.Event()
 
     def _is_running_locked(self) -> bool:
         return (
@@ -105,6 +106,7 @@ class BackgroundTaskController:
 
             self._task = task
             self._task_state = task_state
+            self._completion_event.clear()
 
             thread = threading.Thread(
                 target=thread_target,
@@ -210,6 +212,22 @@ class BackgroundTaskController:
             ),
             initial_message="On it.",
         )
+
+    @property
+    def completion_event(self) -> threading.Event:
+        """Event set when the current background task finishes."""
+        return self._completion_event
+
+    def clear_completion_signal(self) -> None:
+        """Clear a previously observed task-completion signal."""
+        self._completion_event.clear()
+
+    def consume_completion_signal(self) -> bool:
+        """Return whether a task completed, then clear the signal."""
+        was_set = self._completion_event.is_set()
+        if was_set:
+            self._completion_event.clear()
+        return was_set
 
     def _queue_speech(self, message: str) -> bool:
         """Queue worker speech for safe playback by the main loop."""
@@ -462,6 +480,8 @@ class BackgroundTaskController:
             logger.debug(
                 f"JARVIS TASK CONTROLLER: Task memory skipped: {exc}"
             )
+
+        self._completion_event.set()
 
         logger.info(
             "JARVIS TASK CONTROLLER: "
