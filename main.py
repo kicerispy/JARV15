@@ -40,6 +40,7 @@ from planner import create_plan
 from state import JarvisState
 from task_controller import (
     BackgroundTaskController,
+    is_task_acknowledgement,
     is_task_status_request,
 )
 from tool_executor import execute_plan
@@ -510,7 +511,6 @@ def process_command(
 
     if (
         task_controller is not None
-        and task_controller.has_active_task()
         and is_task_status_request(user_input)
     ):
 
@@ -599,6 +599,27 @@ def process_command(
         pending_route = route_command(
             user_input
         )
+
+        if pending_route.kind == "conversation":
+
+            if is_task_acknowledgement(user_input):
+                reply = (
+                    "Understood. I'm continuing with the current task."
+                )
+            else:
+                reply = (
+                    "I'm still working on the current task. "
+                    "Say stop if you'd like me to cancel it."
+                )
+
+            logger.info(
+                "JARVIS TASK CONTROLLER: "
+                "Handled conversation while task is active."
+            )
+
+            speak_callback(reply)
+
+            return "done"
 
         if pending_route.kind in {
             "fast",
