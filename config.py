@@ -315,7 +315,7 @@ CHAT_NUM_GPU = int(
 CHAT_NUM_PREDICT = int(
     os.environ.get(
         "JARVIS_CHAT_NUM_PREDICT",
-        "100",
+        "220",
     )
 )
 
