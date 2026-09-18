@@ -13,13 +13,25 @@ class ActiveContext:
     last_query: Optional[str] = None
     last_tool: Optional[str] = None
     last_result: Optional[str] = None
+    page_url: Optional[str] = None
+    page_title: Optional[str] = None
+    last_result_title: Optional[str] = None
+    last_result_url: Optional[str] = None
+    last_element: Optional[str] = None
+    last_action: Optional[str] = None
 
     def update(
         self,
         site: Optional[str] = None,
         last_query: Optional[str] = None,
         last_tool: Optional[str] = None,
-        last_result: Optional[str] = None
+        last_result: Optional[str] = None,
+        page_url: Optional[str] = None,
+        page_title: Optional[str] = None,
+        last_result_title: Optional[str] = None,
+        last_result_url: Optional[str] = None,
+        last_element: Optional[str] = None,
+        last_action: Optional[str] = None,
     ) -> None:
         """Update context fields. None means no change."""
         if site is not None:
@@ -30,6 +42,18 @@ class ActiveContext:
             self.last_tool = last_tool
         if last_result is not None:
             self.last_result = last_result
+        if page_url is not None:
+            self.page_url = page_url
+        if page_title is not None:
+            self.page_title = page_title
+        if last_result_title is not None:
+            self.last_result_title = last_result_title
+        if last_result_url is not None:
+            self.last_result_url = last_result_url
+        if last_element is not None:
+            self.last_element = last_element
+        if last_action is not None:
+            self.last_action = last_action
 
     def clear(self) -> None:
         """Reset all context fields."""
@@ -37,6 +61,12 @@ class ActiveContext:
         self.last_query = None
         self.last_tool = None
         self.last_result = None
+        self.page_url = None
+        self.page_title = None
+        self.last_result_title = None
+        self.last_result_url = None
+        self.last_element = None
+        self.last_action = None
 
     def to_dict(self) -> Dict[str, Optional[str]]:
         """Convert to dictionary."""
@@ -45,6 +75,12 @@ class ActiveContext:
             "last_query": self.last_query,
             "last_tool": self.last_tool,
             "last_result": self.last_result,
+            "page_url": self.page_url,
+            "page_title": self.page_title,
+            "last_result_title": self.last_result_title,
+            "last_result_url": self.last_result_url,
+            "last_element": self.last_element,
+            "last_action": self.last_action,
         }
 
 
