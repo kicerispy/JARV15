@@ -42,7 +42,12 @@ from logger import logger
 from model_manager import ModelManager
 from smart_router import route_command
 from memory import create_memory
-from planner import create_plan
+from planner import (
+    create_plan,
+    is_software_change_request,
+    is_software_diagnostic_request,
+    is_software_repair_request,
+)
 from state import JarvisState
 from task_controller import (
     BackgroundTaskController,
@@ -86,6 +91,23 @@ def log_perf(
     )
 
     return perf_now()
+
+
+def should_run_background_memory_analysis(user_input: str) -> bool:
+    """Avoid loading the chat model during active software-engineering work."""
+    text = str(user_input or "").strip()
+
+    if not text:
+        return False
+
+    if (
+        is_software_repair_request(text)
+        or is_software_change_request(text)
+        or is_software_diagnostic_request(text)
+    ):
+        return False
+
+    return True
 
 
 def shutdown_background_tasks(state: JarvisState) -> None:
@@ -1087,9 +1109,13 @@ def process_command(
         # Analyze memory only after the user-facing response is complete.
         memory_analysis_start = perf_now()
 
-        run_memory_analysis_background(
-            user_input
-        )
+        if should_run_background_memory_analysis(user_input):
+
+            run_memory_analysis_background(
+
+                user_input
+
+            )
 
         logger.info(
             f"PERF: memory-analysis dispatch: "
@@ -1282,9 +1308,13 @@ def process_command(
         # Analyze memory only after the user-facing response is complete.
         memory_analysis_start = perf_now()
 
-        run_memory_analysis_background(
-            user_input
-        )
+        if should_run_background_memory_analysis(user_input):
+
+            run_memory_analysis_background(
+
+                user_input
+
+            )
 
         logger.info(
             f"PERF: memory-analysis dispatch: "
@@ -1331,9 +1361,13 @@ def process_command(
 
             result = "task_started"
 
-            run_memory_analysis_background(
-                user_input
-            )
+            if should_run_background_memory_analysis(user_input):
+
+                run_memory_analysis_background(
+
+                    user_input
+
+                )
 
             return result
 
@@ -1385,9 +1419,13 @@ def process_command(
         # Analyze memory only after the user-facing response is complete.
         memory_analysis_start = perf_now()
 
-        run_memory_analysis_background(
-            user_input
-        )
+        if should_run_background_memory_analysis(user_input):
+
+            run_memory_analysis_background(
+
+                user_input
+
+            )
 
         logger.info(
             f"PERF: memory-analysis dispatch: "
@@ -1454,9 +1492,13 @@ def process_command(
     # Analyze memory only after the user-facing task is complete.
     memory_analysis_start = perf_now()
 
-    run_memory_analysis_background(
-        user_input
-    )
+    if should_run_background_memory_analysis(user_input):
+
+        run_memory_analysis_background(
+
+            user_input
+
+        )
 
     logger.info(
         f"PERF: memory-analysis dispatch: "
