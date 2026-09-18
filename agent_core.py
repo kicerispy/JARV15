@@ -681,10 +681,14 @@ class JarvisAgent:
                             "",
                             "Produce a corrected plan as JSON.",
                             (
-                                "For the repair phase, inspect first when "
-                                "needed, create code_checkpoint before "
-                                "changing files, make the smallest targeted "
-                                "modification, and run code_test afterward."
+                                "For the repair phase, use the verified "
+                                "evidence from the previous phase. Do not "
+                                "repeat generic discovery when the evidence "
+                                "already identifies the relevant source. "
+                                "The corrected plan must contain a "
+                                "code_checkpoint before modification, an "
+                                "appropriate file modification, and "
+                                "code_test afterward."
                                 if require_repair_plan
                                 else
                                 "For the discovery phase, inspect the "
@@ -703,6 +707,22 @@ class JarvisAgent:
                             "target file before editing.",
                         ]
                     )
+
+                    if require_repair_plan and task.evidence:
+                        correction_lines.extend(
+                            [
+                                "",
+                                "VERIFIED PRIOR EVIDENCE:",
+                                self._build_evidence_packet(task),
+                                "",
+                                "This evidence is authoritative for the "
+                                "next repair-planning attempt. Use it to "
+                                "choose the existing target and smallest "
+                                "safe change. Do not restart project-wide "
+                                "discovery just because the previous "
+                                "candidate plan was rejected.",
+                            ]
+                        )
 
                     request_for_planner = "\n".join(
                         correction_lines
