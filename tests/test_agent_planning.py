@@ -403,6 +403,20 @@ def test_required_diagnostic_phase_falls_back_to_verified_source_target():
     )
 
 
+
+def test_dom_tools_are_tracked_as_browser_state_tools():
+    from agent_core import BROWSER_STATE_TOOLS
+
+    assert {
+        "browser_find_element",
+        "browser_click_element",
+        "browser_fill_element",
+        "browser_press_key",
+        "browser_wait_for_element",
+        "browser_extract_text",
+    }.issubset(BROWSER_STATE_TOOLS)
+
+
 class EvidenceAwareRepairPlanner:
     def __call__(
         self,
