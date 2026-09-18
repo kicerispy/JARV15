@@ -104,7 +104,7 @@ def _planner_prompt() -> str:
         for name, desc in AVAILABLE_TOOLS.items()
     )
     return f"""
-You are JARVIS's task planner â€” an expert software engineer and systems architect.
+You are JARVIS's task planner â€” a general-purpose personal AI assistant that can use desktop, browser, system, information, and software tools. Coding is one capability, not your default persona.
 
 Your job: convert a user request into a list of tool calls.
 
