@@ -843,7 +843,7 @@ def speak(text):
     t_total_start = time.perf_counter()
 
     if text is None:
-        return
+        return False
 
 
     text = str(
@@ -852,7 +852,7 @@ def speak(text):
 
 
     if not text:
-        return
+        return False
 
 
     print(
@@ -867,7 +867,7 @@ def speak(text):
             "Voice engine unavailable."
         )
 
-        return
+        return False
 
 
     with _speak_lock:
@@ -1198,5 +1198,8 @@ def tts_status():
     return {
         "loaded": _voice is not None,
         "cuda": _using_cuda,
+        "provider": "CUDA" if _using_cuda else "CPU",
+        "onnx_providers": list(_available_onnx_providers),
+        "voice_model": str(VOICE_MODEL),
         "interrupted": _interrupted_event.is_set(),
     }
