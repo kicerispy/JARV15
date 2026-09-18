@@ -806,51 +806,67 @@ Last tool: {active_context.get('last_tool', 'none')}
 
     history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
 
-    system_content = _planner_prompt() + context_str + history_str
-
-    # --------------------------------------------------------
-    # REPAIR HANDOFF MODE
-    # --------------------------------------------------------
-    # Agent Core uses this marker only after the discovery/source/test
-    # phases have produced verified evidence. The generic planner rules
-    # are intentionally discovery-oriented, so make the repair phase an
-    # explicit higher-priority instruction block for the local planner.
-    # This prevents the model from restarting list_files/code_search after
-    # the target source has already been inspected.
-    # --------------------------------------------------------
+    # Repair handoffs get a focused prompt instead of the full general
+    # planner prompt. This keeps verified source evidence prominent and
+    # avoids the model reverting to generic discovery behavior.
     if "REPAIR PHASE RULES:" in user_command:
-        system_content += """
+        repair_tools = {
+            name: AVAILABLE_TOOLS[name]
+            for name in (
+                "code_checkpoint",
+                "edit_file",
+                "write_file",
+                "delete_file",
+                "code_test",
+                "read_file",
+                "code_search",
+                "list_files",
+                "find_file",
+            )
+        }
+
+        repair_tool_list = "\\n".join(
+            f"{name}: {desc}"
+            for name, desc in repair_tools.items()
+        )
+
+        system_content = f"""You are JARVIS's focused software repair planner.
+
+The investigation phase is already complete. The user message contains
+verified evidence from the actual project source and validation steps.
+
+Available repair tools:
+{repair_tool_list}
 
 REPAIR HANDOFF MODE — HIGH PRIORITY:
 
-The user request is already in the repair phase. Verified project evidence
-has been gathered and is included in the user message.
-
 Do NOT restart generic discovery.
-Do NOT use list_files.
-Do NOT use broad project-wide code_search.
-Do NOT reread the same source file unless the verified evidence explicitly
-shows that a specific missing region is required.
+Do NOT use list_files or broad code_search unless the evidence explicitly
+shows that the existing target is insufficient.
+Do NOT return an empty steps list for this repair request.
 
-You MUST build the repair plan directly from the verified evidence.
+Use the verified evidence to identify ONE concrete, evidence-supported defect
+or robustness problem and make the smallest safe repair.
 
-For a software repair request, the returned JSON MUST contain this order:
+The repair plan MUST be ordered exactly as:
 1. code_checkpoint
 2. one or more appropriate file mutation steps
 3. code_test after the final mutation
 
-For an existing source change, prefer edit_file and use its exact format:
+For existing source, prefer edit_file with this exact argument format:
 "filename|||old_text|||new_text"
 
-The old_text MUST be copied from the verified source evidence. Do not invent
-source text, filenames, functions, errors, or behavior.
+Copy old_text from the verified source evidence. Do not invent filenames,
+source text, functions, errors, or behavior.
 
-Choose the smallest safe change that is actually supported by the evidence.
-Use browser_controller.py when the evidence identifies it as the browser
-implementation target.
+If a targeted reread is truly necessary, use read_file on the specific file,
+then return the mutation plan on the next planning attempt. Do not repeat
+project-wide discovery.
 
-Return ONLY the repair JSON. Do not return discovery steps or an explanation.
+Return ONLY valid JSON with goal and steps. Every argument must be a string.
 """
+    else:
+        system_content = _planner_prompt() + context_str + history_str
 
     messages = [
         {
