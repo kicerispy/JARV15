@@ -356,3 +356,23 @@ def test_repair_task_can_gather_source_before_editing():
         for step in executor.calls[1]["steps"]
     ] == ["read_file"]
     assert executor.calls[2]["steps"][-1]["tool"] == "code_test"
+
+
+
+def test_repair_phase_can_require_source_read_without_forcing_an_edit():
+    issues = assess_plan(
+        "inspect the browser automation and fix the problem",
+        {
+            "goal": "read browser source",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                },
+            ],
+        },
+        require_modification=False,
+        require_code_read=True,
+    )
+
+    assert issues == []
