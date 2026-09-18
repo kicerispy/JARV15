@@ -1335,9 +1335,6 @@ Last tool: {active_context.get('last_tool', 'none')}
                 "delete_file",
                 "code_test",
                 "read_file",
-                "code_search",
-                "list_files",
-                "find_file",
             )
         }
 
@@ -1348,53 +1345,36 @@ Last tool: {active_context.get('last_tool', 'none')}
 
         system_content = f"""You are JARVIS's focused software repair planner.
 
-The investigation phase is already complete. The user message contains
-verified evidence from the actual project source and validation steps.
+The investigation is complete. The user message contains verified source and
+diagnostic evidence from the real project.
 
-Available repair tools:
+Available tools:
 {repair_tool_list}
 
-REPAIR HANDOFF MODE — HIGH PRIORITY:
+Rules:
+- Make ONE evidence-supported repair; do not rediscover the project.
+- Use the existing verified target file.
+- Prefer edit_file for existing source:
+  filename|||old_text|||new_text
+- Copy old_text exactly from the verified source evidence.
+- Create code_checkpoint before any mutation.
+- Run code_test after the final mutation.
+- Use read_file only when the supplied evidence does not contain enough source
+  to make the repair safely.
+- Do not invent filenames, code, errors, or behavior.
+- Return executable JSON only. Never return prose or an empty plan.
 
-Do NOT restart generic discovery.
-Do NOT use list_files or broad code_search unless the evidence explicitly
-shows that the existing target is insufficient.
-Do NOT return an empty steps list for this repair request.
-
-Use the verified evidence to identify ONE concrete, evidence-supported defect
-or robustness problem and make the smallest safe repair.
-
-The repair plan MUST be ordered exactly as:
-1. code_checkpoint
-2. one or more appropriate file mutation steps
-3. code_test after the final mutation
-
-For existing source, prefer edit_file with this exact argument format:
-"filename|||old_text|||new_text"
-
-Copy old_text from the verified source evidence. Do not invent filenames,
-source text, functions, errors, or behavior.
-
-If a targeted reread is truly necessary, use read_file on the specific file,
-then return the mutation plan on the next planning attempt. Do not repeat
-project-wide discovery.
-
-REPAIR PLAN SCHEMA — REQUIRED:
+Required shape:
 {{
   "goal": "brief repair goal",
   "steps": [
     {{"tool": "code_checkpoint", "argument": ""}},
     {{"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"}},
-    {{"tool": "code_test", "argument": "{{'mode': 'compile', 'path': 'existing_file.py'}}"}}
+    {{"tool": "code_test", "argument": "{{\"mode\":\"compile\",\"path\":\"existing_file.py\"}}"}}
   ]
 }}
 
-The steps array MUST contain actual tool objects with a non-empty "tool"
-field. Do not emit null tools, prose, markdown, commentary, or alternative
-schemas. For an existing Python file, copy the exact failing source text
-from the verified evidence into edit_file.old_text and change only what is
-required to repair the documented failure. The final step MUST validate the
-same file. Return ONLY that JSON object.
+The final step must validate the changed target. Return ONLY JSON.
 """
     elif is_source_read_phase:
         system_content = f"""You are JARVIS's focused source-inspection planner.
@@ -1463,15 +1443,21 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                 flush=True,
             )
 
+        repair_options = (
+            {
+                "temperature": 0,
+                "num_predict": 240,
+                "num_ctx": 8192,
+            }
+            if is_repair_phase
+            else None
+        )
+
         response = chat(
             model=planner_model,
             messages=messages,
             format="json",
-            options=(
-                {"temperature": 0}
-                if is_repair_phase
-                else None
-            ),
+            options=repair_options,
         )
 
         print(
