@@ -947,9 +947,10 @@ def search_website(
                 f"for the search."
             )
 
-        return (
-            f"Searching {display_name} for {query}."
-        )
+        # Return a concise completion message. The query/site remain in
+        # active browser context and execution logs, so TTS does not need
+        # to repeat internal narration.
+        return f"{display_name} search complete."
 
     except Exception as e:
 
