@@ -258,4 +258,3 @@ def test_code_diagnose_skips_pytest_for_implementation_target(tmp_path, monkeypa
     assert result["success"] is True
     assert result["verified"] is True
     assert not any("-m" in call and "pytest" in call for call in calls)
-\n
