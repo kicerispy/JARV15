@@ -5,10 +5,11 @@ JARVIS error recovery and self-correction system.
 from tool_result import ToolResult
 from typing import Any, Dict, Optional
 
-from ollama import chat
-
-from config import CHAT_MODEL
 from logger import logger
+from model_manager import ModelManager
+
+
+MODEL_MANAGER = ModelManager()
 
 
 def analyze_error(
@@ -16,10 +17,13 @@ def analyze_error(
     argument: str,
     error_message: str,
     attempt: int = 1,
-    max_attempts: int = 3
+    max_attempts: int = 3,
 ) -> Optional[Dict[str, Any]]:
     """
     Analyze a tool execution error and suggest a fix.
+
+    Recovery analysis goes through ModelManager so the same centralized
+    Ollama retry/response validation applies to self-correction as well.
     """
     if attempt >= max_attempts:
         return None
@@ -44,11 +48,9 @@ If you cannot fix this error, return can_fix: false.
 If you can fix it, provide the corrected argument."""
 
     try:
-        response = chat(
-            model=CHAT_MODEL,
-            messages=[{"role": "user", "content": prompt}],
+        response = MODEL_MANAGER.recovery(
+            [{"role": "user", "content": prompt}],
             format="json",
-            options={"temperature": 0.0}
         )
 
         import json
@@ -56,10 +58,10 @@ If you can fix it, provide the corrected argument."""
         result = json.loads(
             response.get(
                 "message",
-                {}
+                {},
             ).get(
                 "content",
-                "{}"
+                "{}",
             )
         )
 
@@ -80,7 +82,7 @@ If you can fix it, provide the corrected argument."""
 
 def validate_code(
     code: str,
-    language: str = "python"
+    language: str = "python",
 ) -> Dict[str, Any]:
     """
     Validate generated code before writing it.
@@ -102,7 +104,7 @@ def validate_code(
         )
 
     if language == "python":
-        if "    " in code and "\t" in code:
+        if "    " in code and "	" in code:
             result["warnings"].append(
                 "Mixed tabs and spaces detected"
             )
@@ -133,7 +135,7 @@ def retry_with_recovery(
     tool_name: str,
     argument: str,
     execute_func,
-    max_attempts: int = 3
+    max_attempts: int = 3,
 ) -> Dict[str, Any]:
     """
     Execute a tool with error recovery.
@@ -142,12 +144,12 @@ def retry_with_recovery(
 
     for attempt in range(
         1,
-        max_attempts + 1
+        max_attempts + 1,
     ):
         try:
             result = execute_func(
                 tool_name,
-                argument
+                argument,
             )
 
             if isinstance(result, ToolResult):
@@ -190,7 +192,7 @@ def retry_with_recovery(
                     "message",
                     result.get(
                         "error",
-                        "Unknown error"
+                        "Unknown error",
                     ),
                 )
 
