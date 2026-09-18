@@ -837,7 +837,8 @@ class JarvisAgent:
         # with a differently formatted physical filename found on disk.
         direct_match = re.search(
             rf"\b(?:diagnose\s+and\s+repair|repair|fix)\s+"
-            rf"(?:the\s+)?(?:intentional\s+bug\s+in\s+)?"
+            rf"(?:(?:(?:the|a|an)\s+)?(?:intentional\s+)?"
+            rf"(?:bug|issue|problem)\s+in\s+)?"
             rf"(.+?\.{extension_pattern})",
             normalized_text,
             flags=re.IGNORECASE,
