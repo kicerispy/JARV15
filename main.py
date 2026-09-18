@@ -1575,7 +1575,6 @@ def main():
     typed_input = TypedInputChannel(
         enabled=TYPED_INPUT_ENABLED
     )
-    typed_input.start()
 
     conversation = ConversationHistory()
 
@@ -1679,6 +1678,8 @@ def main():
         f"PERF: startup initialization complete: "
         f"{perf_now() - startup_start:.3f}s"
     )
+
+    typed_input.start()
 
     # ==================================================
     # SPEAK FUNCTION
