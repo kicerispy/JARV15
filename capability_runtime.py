@@ -95,7 +95,7 @@ def fast_plan_for_request(request: str) -> Optional[dict[str, Any]]:
             ],
         }
 
-    location = _weather_location(normalized)
+    location = _weather_location(original)
 
     if location:
         return {
