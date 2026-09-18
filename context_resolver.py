@@ -10,18 +10,18 @@ from logger import logger
 
 
 _CONTEXTUAL_PATTERNS = (
-    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:first|top)\\s+(?:result|link|video|one|item)$",
+    (r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?(?:first|top)\s+(?:result|link|video|one|item)$",
      "click the first browser result"),
-    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:second|2nd)\\s+(?:result|link|video|one|item)$",
+    (r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?(?:second|2nd)\s+(?:result|link|video|one|item)$",
      "click the second browser result"),
-    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:third|3rd)\\s+(?:result|link|video|one|item)$",
+    (r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?(?:third|3rd)\s+(?:result|link|video|one|item)$",
      "click the third browser result"),
-    (r"^(?:click|open|play|select|choose|pick)\\s+(?:the\\s+)?(?:last|final)\\s+(?:result|link|video|one|item)$",
+    (r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?(?:last|final)\s+(?:result|link|video|one|item)$",
      "click the last browser result"),
-    (r"^(?:go\\s+)?back$", "go back in the browser"),
-    (r"^(?:read|show|tell me)\\s+(?:the\\s+)?(?:page|page contents|page text)$",
+    (r"^(?:go\s+)?back$", "go back in the browser"),
+    (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:page|page contents|page text)$",
      "read the current browser page"),
-    (r"^(?:read|show|tell me)\\s+(?:the\\s+)?(?:title|page title)$",
+    (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:title|page title)$",
      "inspect the current browser page"),
 )
 
