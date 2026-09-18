@@ -2020,6 +2020,15 @@ def main():
             "Goodbye."
         )
 
+    finally:
+        try:
+            from browser_controller import cleanup_browser
+            cleanup_browser()
+        except Exception as exc:
+            logger.debug(
+                f"Browser cleanup during JARVIS shutdown failed: {exc}"
+            )
+
 
 if __name__ == "__main__":
     main()
