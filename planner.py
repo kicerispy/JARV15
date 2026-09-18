@@ -394,6 +394,7 @@ def assess_plan(
     require_modification: Optional[bool] = None,
     require_code_read: bool = False,
     require_code_test: bool = False,
+    allow_prior_evidence: bool = False,
 ) -> List[str]:
     """
     Return planner-quality issues for code/automation repair tasks.
@@ -456,7 +457,7 @@ def assess_plan(
         if tool == "code_test"
     ]
 
-    if inspection_index is None:
+    if inspection_index is None and not allow_prior_evidence:
         issues.append(
             "The repair plan must inspect the relevant project code "
             "before attempting to fix it."
@@ -471,7 +472,7 @@ def assess_plan(
         None,
     )
 
-    if require_code_read and read_index is None:
+    if require_code_read and read_index is None and not allow_prior_evidence:
         issues.append(
             "The next investigation phase must read the actual relevant "
             "source file with read_file before choosing a code change."
@@ -494,7 +495,13 @@ def assess_plan(
     if mutation_indices:
         first_mutation = min(mutation_indices)
 
-        if inspection_index is None or inspection_index > first_mutation:
+        if (
+            not allow_prior_evidence
+            and (
+                inspection_index is None
+                or inspection_index > first_mutation
+            )
+        ):
             issues.append(
                 "Inspection must occur before the first file modification."
             )
