@@ -54,6 +54,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "edit_file": "Edit a file by replacing text. argument = 'filename|||old_text|||new_text'.",
     "code_search": "Search project source files for a symbol, string, or error message.",
     "code_test": "Validate project code. argument = JSON such as {\"mode\":\"compile\",\"path\":\"main.py\"} or {\"mode\":\"pytest\",\"path\":\"tests/test_x.py\"}.",
+    "code_diagnose": "Run a broader JARVIS project diagnostic pass: Python compilation, available tests, and optional static checks. Argument is JSON.",
     "code_checkpoint": "Create a safe checkpoint of JARVIS project source files before autonomous edits.",
     "code_restore_checkpoint": "Restore the latest JARVIS source checkpoint after an unsuccessful repair.",
     "delete_file": "Delete a file. argument = filename.",
@@ -104,7 +105,7 @@ def _planner_prompt() -> str:
         for name, desc in AVAILABLE_TOOLS.items()
     )
     return f"""
-You are JARVIS's task planner â€” a general-purpose personal AI assistant that can use desktop, browser, system, information, and software tools. Coding is one capability, not your default persona.
+You are JARVIS's task planner â€” an expert software engineer and systems architect.
 
 Your job: convert a user request into a list of tool calls.
 
@@ -159,6 +160,32 @@ refactor, modify, patch, or test software:
     before reporting that the task could not be completed.
 13. For multi-step repairs, keep working through the task instead of returning
     code or instructions for the user to apply manually.
+14. Treat software work as an iterative engineering loop: inspect, diagnose,
+    plan the smallest safe change, checkpoint, modify, validate, inspect failures,
+    and repeat until the requested behavior is verified.
+15. When the user asks JARVIS to diagnose or repair itself, prefer
+    code_diagnose first when the failure or target is not already known.
+16. Use validation output as evidence. Never replace a failing implementation
+    with a guessed fix without reading the relevant source and understanding the
+    failure.
+17. For code creation, do not stop after writing files. Run an appropriate
+    validation step and repair the generated implementation when validation fails.
+
+AUTONOMOUS SOFTWARE ENGINEERING LOOP:
+
+For coding, debugging, repair, and self-diagnosis tasks, JARVIS should
+behave like a careful senior engineer working directly in the project:
+
+1. Discover the real project files and relevant symbols.
+2. Run the narrowest useful diagnostic first.
+3. Read the exact source involved in the failure.
+4. Form a concrete hypothesis from the evidence.
+5. Create a checkpoint before modifying source.
+6. Apply the smallest targeted change.
+7. Re-run focused tests, then broader validation when appropriate.
+8. If validation fails, treat the failure output as new evidence and iterate.
+9. Stop only when the requested behavior is verified, or when the evidence
+   shows that the problem cannot be safely completed.
 
 GENERIC BROWSER DOM RULES:
 
@@ -354,6 +381,12 @@ CODE_REPAIR_TERMS = (
     "modify",
     "patch",
     "resolve",
+    "broken",
+    "not working",
+    "doesn't work",
+    "doesnt work",
+    "self-heal",
+    "self heal",
 )
 
 CODE_DIAGNOSTIC_TERMS = (
@@ -362,12 +395,22 @@ CODE_DIAGNOSTIC_TERMS = (
     "inspect",
     "investigate",
     "test",
+    "broken",
+    "not working",
+    "doesn't work",
+    "doesnt work",
+    "crash",
+    "crashed",
+    "failure",
 )
 
 SOFTWARE_DOMAIN_TERMS = (
     "code",
     "script",
     "software",
+    "jarvis",
+    "assistant",
+    "runtime",
     "project",
     "automation",
     "browser",
@@ -384,6 +427,7 @@ SOFTWARE_DOMAIN_TERMS = (
 
 CODE_INSPECTION_TOOLS = {
     "code_search",
+    "code_diagnose",
     "read_file",
     "list_files",
     "find_file",
@@ -404,7 +448,20 @@ def _normalized_words(text: str) -> str:
 
 def is_software_repair_request(text: str) -> bool:
     normalized = _normalized_words(text)
-    return (
+
+    explicit_self_repair = any(
+        phrase in normalized
+        for phrase in (
+            "fix yourself",
+            "repair yourself",
+            "self diagnose and fix",
+            "self-diagnose and fix",
+            "fix your own code",
+            "repair your own code",
+        )
+    )
+
+    return explicit_self_repair or (
         any(term in normalized for term in CODE_REPAIR_TERMS)
         and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
     )
@@ -412,7 +469,20 @@ def is_software_repair_request(text: str) -> bool:
 
 def is_software_diagnostic_request(text: str) -> bool:
     normalized = _normalized_words(text)
-    return (
+
+    explicit_self_diagnostic = any(
+        phrase in normalized
+        for phrase in (
+            "diagnose yourself",
+            "self diagnose",
+            "self-diagnose",
+            "diagnose your own code",
+            "check your own code",
+            "inspect your own code",
+        )
+    )
+
+    return explicit_self_diagnostic or (
         any(term in normalized for term in CODE_DIAGNOSTIC_TERMS)
         and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
     )
