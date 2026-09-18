@@ -818,10 +818,7 @@ Last tool: {active_context.get('last_tool', 'none')}
     # This prevents the model from restarting list_files/code_search after
     # the target source has already been inspected.
     # --------------------------------------------------------
-    if (
-        planning_request
-        and "REPAIR PHASE RULES:" in planning_request
-    ):
+    if "REPAIR PHASE RULES:" in user_command:
         system_content += """
 
 REPAIR HANDOFF MODE — HIGH PRIORITY:
