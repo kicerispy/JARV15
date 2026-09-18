@@ -749,6 +749,44 @@ def create_plan(
                     "resolved_command": resolved_command,
                 }
 
+    # ========================================================
+    # DETERMINISTIC BAREHANDS DISPLAY ROUTER
+    # ========================================================
+    #
+    # Display requests should never depend on the planner model choosing
+    # between jarvis_status and a Barehands presentation tool. The user
+    # explicitly asked for a display action, so route it directly.
+    # ========================================================
+
+    if (
+        "barehands" in normalized_command
+        and (
+            "display" in normalized_command
+            or "glass board" in normalized_command
+            or "show" in normalized_command
+            or "present" in normalized_command
+            or "put" in normalized_command
+            or "place" in normalized_command
+        )
+        and "status" in normalized_command
+        and (
+            "card" in normalized_command
+            or "status" in normalized_command
+        )
+    ):
+        return {
+            "goal": "show JARVIS status on Barehands",
+            "steps": [
+                {
+                    "tool": "barehands_present",
+                    "argument": (
+                        "JARVIS Status|||"
+                        "JARVIS status requested on the Barehands display."
+                    ),
+                }
+            ],
+        }
+
     context_str = ""
     if active_context:
         context_str = f"""
