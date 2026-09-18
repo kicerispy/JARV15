@@ -448,22 +448,16 @@ def process_command(
                 task_controller.cancel_current()
             )
 
-        if not background_cancelled:
-            state.task_state.cancel()
-
-        state.continuous_mode = (
-            True
-            if background_cancelled
-            else False
-        )
-        state.pending_input = None
-        state.active_context.clear()
-
-        logger.info(
-            "JARVIS: Command cancelled."
-        )
-
         if background_cancelled:
+
+            state.continuous_mode = True
+            state.pending_input = None
+            state.active_context.clear()
+
+            logger.info(
+                "JARVIS: Background task cancellation requested."
+            )
+
             reply = "Stopping the current task."
 
             conversation.add_message(
@@ -474,6 +468,32 @@ def process_command(
             speak_callback(reply)
 
             return "cancelled"
+
+        if not state.task_state.is_active():
+
+            logger.info(
+                "JARVIS: No active task to cancel."
+            )
+
+            reply = "There is nothing to stop."
+
+            conversation.add_message(
+                "assistant",
+                reply,
+            )
+
+            speak_callback(reply)
+
+            return "done"
+
+        state.task_state.cancel()
+        state.continuous_mode = False
+        state.pending_input = None
+        state.active_context.clear()
+
+        logger.info(
+            "JARVIS: Command cancelled."
+        )
 
         state.task_state.finish()
 
