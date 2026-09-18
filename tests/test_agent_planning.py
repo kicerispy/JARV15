@@ -1,5 +1,6 @@
 from agent_core import JarvisAgent
 from planner import assess_plan, is_software_repair_request
+from state import TaskState
 
 
 def valid_repair_plan():
