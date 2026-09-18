@@ -767,16 +767,10 @@ class JarvisAgent:
             r"java|cpp|c|h|go|rs|rb|php)"
         )
 
-        direct_matches = re.findall(
-            rf"[A-Za-z0-9][A-Za-z0-9_.-]*\.{extension_pattern}\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if direct_matches:
-            return direct_matches[-1]
-
+        # Prefer a filename introduced by a contextual phrase such as
+        # "in X.py" or "file X.py". This preserves multi-word filenames.
         spaced_match = re.search(
-            rf"\b(?:in|of|called|named|file)\s+"
+            rf"\b(?:in|of|called|named|file|target)\s+"
             rf"([A-Za-z0-9][A-Za-z0-9 _-]*\.{extension_pattern})\b",
             text,
             flags=re.IGNORECASE,
@@ -785,15 +779,31 @@ class JarvisAgent:
         if spaced_match:
             return " ".join(
                 str(spaced_match.group(1)).strip().split()
-            )
+            ).rstrip(".,!?")
 
+        # Voice transcription may spell the extension as "dot py".
         dotted_match = re.search(
-            rf"\b(?:in|of|called|named|file)\s+"
+            rf"\b(?:in|of|called|named|file|target)\s+"
             rf"([A-Za-z0-9][A-Za-z0-9 _-]*?)\s+dot\s+"
             rf"({extension_pattern})\b",
             text,
             flags=re.IGNORECASE,
         )
+
+        if dotted_match:
+            stem = " ".join(
+                str(dotted_match.group(1)).strip().split()
+            )
+            return f"{stem}.{dotted_match.group(2).lower()}"
+
+        # Finally accept a conventional single-token filename anywhere.
+        direct_matches = re.findall(
+            rf"[A-Za-z0-9][A-Za-z0-9_.-]*\.{extension_pattern}\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if direct_matches:
+            return direct_matches[-1].rstrip(".,!?")
 
         if dotted_match:
             stem = " ".join(
