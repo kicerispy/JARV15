@@ -1096,6 +1096,69 @@ class JarvisAgent:
             f"{task.task_id}"
         )
 
+        # A self-diagnostic repair request is a special case: the target is
+        # the JARVIS project itself, so there is no single filename to discover.
+        # Start with a deterministic full-project diagnostic instead of asking
+        # the general planner to invent a workflow. If the diagnostic finds
+        # actionable failures, the existing evidence-driven repair handoff
+        # will take over.
+        if (
+            planning_request is None
+            and is_software_repair_request(task.request)
+            and is_software_diagnostic_request(task.request)
+            and not (
+                require_repair_plan
+                or require_code_read
+                or require_code_test
+                or require_code_diagnose
+            )
+        ):
+            deterministic_plan = {
+                "goal": "full JARVIS project diagnostic",
+                "jarvis_internal_phase": True,
+                "steps": [
+                    {
+                        "tool": "code_diagnose",
+                        "argument": json.dumps(
+                            {
+                                "path": "",
+                                "run_tests": True,
+                                "run_lint": True,
+                                "run_types": False,
+                                "timeout": 180,
+                            }
+                        ),
+                    }
+                ],
+            }
+
+            deterministic_plan = validate_plan(
+                deterministic_plan
+            )
+
+            diagnostic_issues = assess_plan(
+                task.request,
+                deterministic_plan,
+                require_modification=False,
+                require_code_diagnose=True,
+            )
+
+            if not diagnostic_issues:
+                logger.info(
+                    "JARVIS AGENT: Self-repair request detected; "
+                    "starting deterministic full-project diagnostic "
+                    "without planner call."
+                )
+                task = self._install_phase_plan(
+                    task,
+                    deterministic_plan,
+                )
+                task.observations.append(
+                    "Deterministic self-repair entry point: full-project "
+                    "diagnostic started without an LLM planning call."
+                )
+                return task
+
         # A repair request that explicitly names an existing file does not
         # need an LLM to rediscover the entry point. Start with deterministic
         # file discovery; the LLM remains responsible for the evidence-based
