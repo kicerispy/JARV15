@@ -62,6 +62,8 @@ class AgentStep:
 
     error: Optional[str] = None
 
+    initial_acknowledged: bool = False
+
     verified: bool = False
 
     observation: str = ""
@@ -985,10 +987,12 @@ class JarvisAgent:
                     speak_callback,
                 )
             )
-            self._announce(
-                "I'm on it. I'll keep you updated and let you know when it's finished.",
-                speak_callback,
-            )
+
+            if not task.initial_acknowledged:
+                self._announce(
+                    "I'm on it. I'll keep you updated and let you know when it's finished.",
+                    speak_callback,
+                )
         else:
             task_state.set_progress_callback(None)
 
