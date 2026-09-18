@@ -1498,14 +1498,21 @@ def execute_plan(
 
             if not multi_step:
 
+                # Inspection tools can return large source/results. Keep
+                # those details in execution state, not in TTS or chat history.
+                spoken_message = _spoken_execution_summary(
+                    tool_name,
+                    message,
+                )
+
                 add_assistant_message(
-                    message
+                    spoken_message
                 )
 
                 task_state.finish()
 
                 return speak_result(
-                    message,
+                    spoken_message,
                     speak_callback,
                 )
 
@@ -1576,8 +1583,22 @@ def execute_plan(
             result_message=final_tool_message,
         )
 
+        final_tool = executable_steps[-1]
+
+        final_tool_name = str(
+            final_tool.get(
+                "tool",
+                "",
+            )
+            or ""
+        ).strip()
+
+        # Keep raw inspection output in execution state only.
         add_assistant_message(
-            final_tool_message
+            _spoken_execution_summary(
+                final_tool_name,
+                final_tool_message,
+            )
         )
 
         task_state.finish()
@@ -1588,27 +1609,11 @@ def execute_plan(
         # ----------------------------------------------------
 
         spoken_message = _spoken_execution_summary(
-            str(
-                final_tool.get(
-                    "tool",
-                    "",
-                )
-                or ""
-            ).strip(),
+            final_tool_name,
             final_tool_message,
         )
 
         if executable_steps:
-
-            final_tool = executable_steps[-1]
-
-            final_tool_name = str(
-                final_tool.get(
-                    "tool",
-                    "",
-                )
-                or ""
-            ).strip()
 
             if final_tool_name in BROWSER_TOOLS:
 
@@ -1754,14 +1759,30 @@ def execute_plan(
 
     if final_tool_message:
 
+        final_tool_name = ""
+
+        if executable_steps:
+            final_tool_name = str(
+                executable_steps[-1].get(
+                    "tool",
+                    "",
+                )
+                or ""
+            ).strip()
+
+        spoken_message = _spoken_execution_summary(
+            final_tool_name,
+            final_tool_message,
+        )
+
         add_assistant_message(
-            final_tool_message
+            spoken_message
         )
 
         task_state.finish()
 
         return speak_result(
-            final_tool_message,
+            spoken_message,
             speak_callback,
         )
 
