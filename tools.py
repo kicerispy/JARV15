@@ -1999,8 +1999,8 @@ def system_status():
     health = runtime_health.collect_health()
 
     return (
-        f"CPU usage is {cpu}%.\\n"
-        f"RAM usage is {ram.percent}%.\\n\\n"
+        f"CPU usage is {cpu}%.\n"
+        f"RAM usage is {ram.percent}%.\n\n"
         + runtime_health.format_health(health)
     )
 
