@@ -730,14 +730,28 @@ class JarvisAgent:
         target = self._latest_verified_source_target(task)
 
         if require_code_test and target:
+            request_lower = str(task.request or "").lower()
+            smoke_test = (
+                "browser" in request_lower
+                or "automation" in request_lower
+            ) and target.lower().endswith("browser_controller.py")
+
             return {
-                "goal": "diagnostic validation",
+                "goal": (
+                    "browser runtime diagnostic"
+                    if smoke_test
+                    else "diagnostic validation"
+                ),
                 "steps": [
                     {
                         "tool": "code_test",
                         "argument": json.dumps(
                             {
-                                "mode": "compile",
+                                "mode": (
+                                    "browser_smoke"
+                                    if smoke_test
+                                    else "compile"
+                                ),
                                 "path": target,
                             }
                         ),
