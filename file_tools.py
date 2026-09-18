@@ -156,9 +156,18 @@ def list_files(folder: str = ".") -> str:
         return f"Error: {e}"
 
 
+def _normalize_filename_for_search(value: str) -> str:
+    """Normalize human/voice-transcribed filenames for conservative matching."""
+    return re.sub(r"[^a-z0-9]", "", str(value or "").strip().lower())
+
+
 def find_file(filename: str, location: str = ".") -> str:
     """
-    Search for a file by name (case-insensitive substring match).
+    Search for a file by name.
+
+    Supports both normal case-insensitive substring matching and a
+    conservative normalized-name fallback so spoken punctuation/underscores
+    can be omitted without preventing discovery.
     """
     if not filename or not filename.strip():
         return "Filename cannot be empty."
@@ -171,11 +180,30 @@ def find_file(filename: str, location: str = ".") -> str:
 
     matches: List[str] = []
     filename_lower = filename.lower()
+    normalized_query = _normalize_filename_for_search(filename)
 
     try:
         for root, dirs, files in os.walk(search_dir):
+            dirs[:] = [
+                name
+                for name in dirs
+                if not _is_ignored_list_entry(name)
+            ]
+
             for file in files:
-                if filename_lower in file.lower():
+                if _is_discovery_noise(file):
+                    continue
+
+                lower_file = file.lower()
+
+                if filename_lower in lower_file:
+                    matches.append(str(Path(root) / file))
+                    continue
+
+                if (
+                    normalized_query
+                    and normalized_query in _normalize_filename_for_search(file)
+                ):
                     matches.append(str(Path(root) / file))
     except OSError as e:
         logger.error(f"File search error: {e}")
