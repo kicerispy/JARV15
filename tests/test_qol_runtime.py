@@ -263,6 +263,40 @@ def test_browser_search_and_click_summaries_are_concise():
     ) == "Opened result 2: Awesome Browser Automation GitHub https://github.com/example."
 
 
+def test_task_completion_summaries_are_natural_and_concise():
+    from tool_executor import _spoken_execution_summary
+
+    assert _spoken_execution_summary(
+        "search_website",
+        "Searching Google for Wi-Fi Skeleton.",
+    ) == "Google search complete."
+
+    assert _spoken_execution_summary(
+        "browser_search_google",
+        "Google search action completed. Title: Wi-Fi Skeleton - Google Search URL: https://google.com",
+    ) == "Google search complete."
+
+    assert _spoken_execution_summary(
+        "read_file",
+        "long source file contents ...",
+    ) == "I inspected the relevant source file."
+
+    assert _spoken_execution_summary(
+        "write_file",
+        "Wrote 1 file successfully.",
+    ) == "The file is written."
+
+    assert _spoken_execution_summary(
+        "open_program",
+        "Program launched successfully.",
+    ) == "The application is open."
+
+    assert _spoken_execution_summary(
+        "unknown_tool",
+        "Tool completed.",
+    ) == "Done."
+
+
 def test_tts_status_exposes_runtime_provider():
     source = Path("voice.py").read_text(encoding="utf-8-sig")
 
