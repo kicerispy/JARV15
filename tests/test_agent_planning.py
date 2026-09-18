@@ -296,6 +296,68 @@ def test_prior_evidence_can_satisfy_repair_inspection_gate():
     assert with_evidence == []
 
 
+class EvidenceAwareDiagnosticFallbackPlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        if len(self.calls) == 1:
+            return {
+                "goal": "inspect browser automation",
+                "steps": [],
+            }
+
+        return {
+            "goal": "inspect browser automation",
+            "steps": [
+                {
+                    "tool": "code_search",
+                    "argument": "browser",
+                },
+            ],
+        }
+
+
+def test_required_diagnostic_phase_falls_back_to_verified_source_target():
+    planner = EvidenceAwareDiagnosticFallbackPlanner()
+    agent = JarvisAgent(planner=planner)
+
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+    task.evidence = [
+        {
+            "attempt": 1,
+            "tool": "read_file",
+            "target": "browser_controller.py",
+            "success": True,
+            "verified": True,
+            "detail": "10: def browser_connect():",
+        }
+    ]
+
+    planned = agent.plan_task(
+        task,
+        require_code_test=True,
+    )
+
+    assert planned.status == "ready"
+    assert len(planner.calls) == 2
+    assert [step.tool for step in planned.steps] == [
+        "code_test",
+    ]
+    assert planned.steps[0].argument == (
+        '{"mode": "compile", "path": "browser_controller.py"}'
+    )
+
+
 class EvidenceAwareRepairPlanner:
     def __call__(
         self,
