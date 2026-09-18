@@ -675,21 +675,7 @@ def format_browser_result(
             "",
         )
 
-        parts = [
-            "Google search action completed."
-        ]
-
-        if title:
-            parts.append(
-                f"Title: {title}"
-            )
-
-        if url:
-            parts.append(
-                f"URL: {url}"
-            )
-
-        return " ".join(parts)
+        return "Google search complete."
 
     if tool_name == "browser_click_first_bing_result":
 
@@ -854,6 +840,7 @@ def format_browser_result(
     if tool_name == "browser_click_result":
         index = result.get("index", 1)
         title = str(result.get("result_title", "")).strip()
+        title = " ".join(title.split())
         if title:
             return f"Opened result {index}: {title}."
         return f"Opened result {index}."
