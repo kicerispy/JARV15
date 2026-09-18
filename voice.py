@@ -1154,7 +1154,9 @@ def speak(text):
             # Final status.
             # ------------------------------------------------
 
-            if _interrupted_event.is_set():
+            interrupted = _interrupted_event.is_set()
+
+            if interrupted:
 
                 print(
                     "JARVIS TTS: "
@@ -1172,6 +1174,8 @@ def speak(text):
                 "JARVIS TTS PERF: "
                 f"total={time.perf_counter() - t_total_start:.3f}s"
             )
+
+            return interrupted
 
 
         except Exception as e:
@@ -1194,6 +1198,8 @@ def speak(text):
 
             except Exception:
                 pass
+
+            return False
 
 
 # ============================================================
