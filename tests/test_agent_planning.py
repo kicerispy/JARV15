@@ -1017,6 +1017,38 @@ def test_requested_file_target_extractor_preserves_multi_word_names():
     )
 
 
+def test_existing_explicit_repair_target_skips_initial_planner_call():
+    class TrackingPlanner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(
+            self,
+            request,
+            active_context=None,
+            history_text="",
+        ):
+            self.calls.append(request)
+            return {
+                "goal": "unexpected planner call",
+                "steps": [],
+            }
+
+    planner = TrackingPlanner()
+    agent = JarvisAgent(planner=planner)
+
+    task = agent.create_task(
+        "repair agent_core.py",
+    )
+
+    planned = agent.plan_task(task)
+
+    assert planned.status == "ready"
+    assert [step.tool for step in planned.steps] == ["find_file"]
+    assert planned.steps[0].argument == "agent_core.py"
+    assert planner.calls == []
+
+
 def test_initial_repair_plan_recovers_named_target_after_planner_failure():
     class EmptyPlanner:
         def __init__(self):
