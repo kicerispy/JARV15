@@ -1723,8 +1723,9 @@ def main():
     def listen_serialized(
         initial_audio=None,
         mode="wake",
+        interrupt_event=None,
     ):
-        """Serialize microphone capture with background TTS."""
+        """Serialize microphone capture with optional background-task interruption."""
         if listen is None:
             return None
 
@@ -1732,6 +1733,7 @@ def main():
             return listen(
                 initial_audio=initial_audio,
                 mode=mode,
+                interrupt_event=interrupt_event,
             )
 
     # ==================================================
@@ -1803,6 +1805,29 @@ def main():
 
             if state.continuous_mode:
 
+                controller = state.task_controller
+
+                # If a background task already finished before this follow-up
+                # capture begins, deliver its queued completion immediately
+                # instead of opening a 10-second microphone timeout.
+                if (
+                    controller is not None
+                    and not controller.has_active_task()
+                    and controller.consume_completion_signal()
+                ):
+                    controller.drain_speech(speak)
+                    state.continuous_mode = False
+                    continue
+
+                # A still-running task may finish while we are waiting for
+                # speech. Clear any stale signal before handing the live event
+                # to the microphone loop so only a new completion interrupts it.
+                completion_event = None
+                if controller is not None:
+                    controller.clear_completion_signal()
+                    if controller.has_active_task():
+                        completion_event = controller.completion_event
+
                 logger.info(
                     "JARVIS: Listening for follow-up..."
                 )
@@ -1822,7 +1847,8 @@ def main():
                     listen_start = perf_now()
 
                     current_input = listen_serialized(
-                        mode="continuous"
+                        mode="continuous",
+                        interrupt_event=completion_event,
                     )
 
                     logger.info(
@@ -1850,6 +1876,14 @@ def main():
                     current_input = None
 
                 if current_input is None:
+
+                    if (
+                        controller is not None
+                        and controller.consume_completion_signal()
+                    ):
+                        controller.drain_speech(speak)
+                        state.continuous_mode = False
+                        continue
 
                     state.continuous_mode = False
 
