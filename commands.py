@@ -1593,6 +1593,98 @@ def create_plan(user_request):
 
 
 # ==================================================
+# Compatibility constants
+# ==================================================
+#
+# Older tests and integrations import these names directly. Keep them as
+# immutable tuples derived from the same canonical phrases used by the
+# parser functions below so the public compatibility surface stays stable.
+# ==================================================
+
+CANCEL_COMMANDS = (
+    "stop",
+    "stop talking",
+    "stop speaking",
+    "cancel",
+    "cancel that",
+    "cancel it",
+    "never mind",
+    "nevermind",
+    "that's enough",
+    "thats enough",
+    "enough",
+)
+
+END_CONVERSATION_COMMANDS = (
+    "go to sleep",
+    "go back to sleep",
+    "sleep",
+    "to sleep",
+    "back to sleep",
+    "go sleep",
+    "end conversation",
+    "end the conversation",
+    "conversation off",
+    "stop listening",
+    "stop listening to me",
+    "that's all",
+    "thats all",
+    "we're done",
+    "were done",
+    "we are done",
+    "goodbye jarvis",
+)
+
+DIRECT_PREFIXES = (
+    "open ",
+    "close ",
+    "launch ",
+    "start ",
+    "go to ",
+    "search ",
+    "find ",
+    "click ",
+    "open ",
+    "play ",
+    "pause ",
+    "resume ",
+    "type ",
+    "press ",
+    "scroll ",
+)
+
+CONTEXTUAL_PHRASES = (
+    "click it",
+    "open it",
+    "play it",
+    "select it",
+    "use it",
+    "that one",
+    "this one",
+    "the first one",
+    "the second one",
+    "the last one",
+    "same one",
+    "do that",
+    "do it",
+    "try that",
+    "try it",
+    "go there",
+    "open that",
+    "click that",
+    "play that",
+    "select that",
+)
+
+REFERENCE_WORDS = (
+    "it",
+    "that",
+    "this",
+    "one",
+    "there",
+)
+
+# ==================================================
 # Compatibility helpers expected by main.py
 # ==================================================
 
