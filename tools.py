@@ -2043,6 +2043,19 @@ def dev_command(argument=""):
             "message": "Developer command cannot be empty.",
         }
 
+    shell_operators = ("&&", "||", ";", "|", ">", "<")
+    if any(operator in command_text for operator in shell_operators):
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "command": command_text,
+            "message": (
+                "Shell operators are not allowed in developer commands. "
+                "Use one developer command at a time."
+            ),
+        }
+
     executable = argv[0].strip().lower()
     allowed = {
         "python",
@@ -2088,7 +2101,7 @@ def dev_command(argument=""):
     elif executable in {"pytest", "pytest.exe"}:
         argv = [sys.executable, "-m", "pytest", *argv[1:]]
     elif executable in {"ruff", "ruff.exe"}:
-        argv = [sys.executable, "-m", "ruff", *argv[1:]}
+        argv = [sys.executable, "-m", "ruff", *argv[1:]]
     elif executable in {"mypy", "mypy.exe"}:
         argv = [sys.executable, "-m", "mypy", *argv[1:]]
 
