@@ -130,6 +130,7 @@ BROWSER_STATE_TOOLS = {
     "browser_click_first_bing_result",
     "browser_goto",
     "browser_page_info",
+    "browser_click_first_result",
 }
 
 
