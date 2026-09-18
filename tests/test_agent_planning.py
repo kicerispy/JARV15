@@ -992,6 +992,61 @@ class MalformedRequiredReadPlanner:
         }
 
 
+def test_initial_repair_plan_recovers_named_target_after_planner_failure():
+    class EmptyPlanner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(
+            self,
+            request,
+            active_context=None,
+            history_text="",
+        ):
+            self.calls.append(request)
+            return {"goal": "", "steps": []}
+
+    agent = JarvisAgent(planner=EmptyPlanner())
+
+    task = agent.create_task(
+        "diagnose and repair Jarvis Autonomous Test Target.py",
+    )
+
+    planned = agent.plan_task(task)
+
+    assert planned.status == "ready"
+    assert len(planned.steps) == 1
+    assert planned.steps[0].tool == "find_file"
+    assert planned.steps[0].argument == (
+        "Jarvis Autonomous Test Target.py"
+    )
+
+
+def test_voice_dotted_filename_is_recovered_for_initial_repair():
+    class EmptyPlanner:
+        def __call__(
+            self,
+            request,
+            active_context=None,
+            history_text="",
+        ):
+            return {"goal": "", "steps": []}
+
+    agent = JarvisAgent(planner=EmptyPlanner())
+
+    task = agent.create_task(
+        "diagnose and repair Jarvis Autonomous Test Target dot py",
+    )
+
+    planned = agent.plan_task(task)
+
+    assert planned.status == "ready"
+    assert planned.steps[0].tool == "find_file"
+    assert planned.steps[0].argument == (
+        "Jarvis Autonomous Test Target.py"
+    )
+
+
 def test_required_source_read_rejects_empty_plan_and_recovers_target_from_discovery():
     planner = MalformedRequiredReadPlanner()
     agent = JarvisAgent(planner=planner)
