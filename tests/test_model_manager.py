@@ -9,7 +9,7 @@ class ModelManagerTests(unittest.TestCase):
         manager = ModelManager()
 
         self.assertEqual(manager.chat_model, "qwen3.5:9b")
-        self.assertEqual(manager.planner_model, "qwen2.5vl:3b")
+        self.assertEqual(manager.planner_model, "qwen3.5:9b")
         self.assertEqual(manager.coding_model, "gemma4:26b")
 
     def test_chat_generation_defaults_are_centralized(self):
@@ -19,7 +19,7 @@ class ModelManagerTests(unittest.TestCase):
 
         self.assertFalse(manager.chat_think)
         self.assertEqual(manager.chat_num_gpu, 40)
-        self.assertEqual(manager.chat_num_predict, 100)
+        self.assertEqual(manager.chat_num_predict, 220)
 
 
 if __name__ == "__main__":
