@@ -174,6 +174,15 @@ def test_browser_click_result_dispatch_does_not_hit_json_scope_error(monkeypatch
         "query": "JARVIS",
     }
 
+    calls.clear()
+    result = tools.run_browser_tool(
+        "browser_click_result",
+        '{"number":2,"site":"google","query":"JARVIS"}',
+    )
+
+    assert result.success is True
+    assert calls["index"] == 2
+
 
 def test_browser_dom_dispatch_accepts_llm_python_dict_syntax(monkeypatch):
     import browser_controller
@@ -212,6 +221,22 @@ def test_planner_canonicalizes_python_literal_browser_arguments():
     })
 
     assert plan["steps"][0]["argument"] == '{"role":"organic-result"}'
+
+
+def test_browser_result_format_is_specific():
+    from tool_executor import format_browser_result
+
+    message = format_browser_result(
+        "browser_click_result",
+        {
+            "success": True,
+            "verified": True,
+            "index": 2,
+            "result_title": "JARVIS Browser Automation",
+        },
+    )
+
+    assert message == "Opened result 2: JARVIS Browser Automation."
 
 
 def test_tts_status_exposes_runtime_provider():
