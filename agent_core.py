@@ -231,6 +231,37 @@ class JarvisAgent:
         return task
 
     # ======================================================
+    # Progress Reporting
+    # ======================================================
+
+    @staticmethod
+    def _announce(message: str, speak_callback) -> None:
+        """Give the user a concise milestone update without exposing internals."""
+        try:
+            if speak_callback:
+                speak_callback(message)
+        except Exception as exc:
+            logger.debug(
+                f"JARVIS AGENT: Progress announcement skipped: {exc}"
+            )
+
+    def _should_report_progress(self, task: AgentTask) -> bool:
+        request = task.request.lower()
+        progress_terms = (
+            "fix",
+            "debug",
+            "repair",
+            "diagnose",
+            "refactor",
+            "investigate",
+            "inspect",
+        )
+        return (
+            len(task.steps) > 1
+            or any(term in request for term in progress_terms)
+        )
+
+    # ======================================================
     # Build Steps
     # ======================================================
 
@@ -944,6 +975,14 @@ class JarvisAgent:
             or time.time()
         )
 
+        report_progress = self._should_report_progress(task)
+
+        if report_progress:
+            self._announce(
+                "I'm on it. I'll keep you updated and let you know when it's finished.",
+                speak_callback,
+            )
+
         while True:
 
             result = self._execute_once(
@@ -985,6 +1024,12 @@ class JarvisAgent:
                     "JARVIS AGENT: Task completed "
                     f"after {task.replan_count} replan(s)."
                 )
+
+                if report_progress:
+                    self._announce(
+                        "The task is complete.",
+                        speak_callback,
+                    )
 
                 return task
 
@@ -1044,6 +1089,12 @@ class JarvisAgent:
                         "Maximum replans reached."
                     )
 
+                    if report_progress:
+                        self._announce(
+                            "I wasn't able to complete the task.",
+                            speak_callback,
+                        )
+
                     return task
 
                 # --------------------------------------------
@@ -1063,6 +1114,12 @@ class JarvisAgent:
                     f"({task.replan_count}/"
                     f"{task.max_replans})..."
                 )
+
+                if report_progress:
+                    self._announce(
+                        "That approach didn't work as expected. I'm adjusting the plan and trying again.",
+                        speak_callback,
+                    )
 
                 planning_request = (
                     self._build_replan_request(
