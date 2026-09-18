@@ -93,7 +93,12 @@ def test_validate_plan_accepts_code_diagnose_json():
     )
 
     assert plan["steps"][0]["tool"] == "code_diagnose"
-    assert plan["steps"][0]["argument"] == '{"run_tests": false}'
+
+    import json
+
+    assert json.loads(
+        plan["steps"][0]["argument"]
+    ) == {"run_tests": False}
 
 from code_gen import is_complex_code_request
 
