@@ -354,7 +354,7 @@ def test_required_diagnostic_phase_falls_back_to_verified_source_target():
         "code_test",
     ]
     assert planned.steps[0].argument == (
-        '{"mode": "compile", "path": "browser_controller.py"}'
+        '{"mode": "browser_smoke", "path": "browser_controller.py"}'
     )
 
 
