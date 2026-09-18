@@ -1104,6 +1104,13 @@ def execute_plan(
             f"Running {tool_name}"
         )
 
+        _report_tool_progress(
+            task_state,
+            tool_name,
+            index,
+            len(executable_steps),
+        )
+
         # ----------------------------------------------------
         # Track the exact step currently being executed.
         # ----------------------------------------------------
