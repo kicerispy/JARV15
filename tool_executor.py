@@ -1197,6 +1197,12 @@ def _spoken_execution_summary(
         "edit_file": "The file is updated.",
         "delete_file": "The file is deleted.",
         "open_program": "The application is open.",
+        "click_screen": "I clicked the target.",
+        "double_click_screen": "I double-clicked the target.",
+        "right_click_screen": "I right-clicked the target.",
+        "move_mouse": "I moved to the target.",
+        "scroll_screen": "I scrolled the screen.",
+        "capture_screen": "I captured the screen.",
         "browser_connect": "The browser is connected.",
         "browser_search_google": "Google search complete.",
         "browser_search_bing": "Bing search complete.",
@@ -1259,6 +1265,12 @@ def _spoken_execution_summary(
 
     if tool in {"code_test", "verify_screen"}:
         return text or "Validation complete."
+
+    if tool == "wait":
+        return "Done."
+
+    if tool in {"type_text", "press_key"}:
+        return "Done."
 
     if text in {"Tool completed.", "Browser action completed."}:
         return "Done."
