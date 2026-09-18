@@ -94,10 +94,11 @@ class BackgroundTaskController:
             )
 
             self._thread = thread
-            thread.start()
 
             if initial_message:
                 self._queue_speech(initial_message)
+
+            thread.start()
 
             logger.info(
                 "JARVIS TASK CONTROLLER: "
