@@ -1073,6 +1073,38 @@ class EvidencePhaseExecutor:
         return "done"
 
 
+def test_clean_diagnostic_does_not_trigger_speculative_repair():
+    planner = EvidencePhasePlanner()
+    executor = EvidencePhaseExecutor()
+    agent = JarvisAgent(
+        planner=planner,
+        executor=executor,
+    )
+
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+
+    planned = agent.plan_task(task)
+
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner.calls) == 2
+    assert len(executor.calls) == 2
+    assert all(
+        step["tool"] != "edit_file"
+        for execution in executor.calls
+        for step in execution["steps"]
+    )
+    assert "no reproducible defect" in completed.execution_result.lower()
+
+
 def test_verified_evidence_prevents_redundant_source_phase():
     planner = EvidencePhasePlanner()
     executor = EvidencePhaseExecutor()
@@ -1094,8 +1126,11 @@ def test_verified_evidence_prevents_redundant_source_phase():
     )
 
     assert completed.status == "completed"
-    assert len(planner.calls) == 3
-    assert len(executor.calls) == 3
+    assert len(planner.calls) == 2
+    assert len(executor.calls) == 2
     assert executor.calls[1]["steps"][0]["tool"] == "code_test"
-    assert executor.calls[2]["steps"][0]["tool"] == "code_checkpoint"
+    assert (
+        completed.execution_result
+        == "Diagnostic validation passed; no reproducible defect was found, so no code change was made."
+    )
 
