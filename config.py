@@ -25,6 +25,11 @@ PLANNER_MODEL = os.environ.get(
 
 CODING_MODEL = os.environ.get(
     "JARVIS_CODING_MODEL",
+    "qwen2.5-coder:14b",
+)
+
+CODING_FALLBACK_MODEL = os.environ.get(
+    "JARVIS_CODING_FALLBACK_MODEL",
     "gemma4:26b",
 )
 
