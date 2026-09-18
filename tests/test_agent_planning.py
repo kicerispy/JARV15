@@ -1158,3 +1158,135 @@ def test_self_repair_requests_get_extended_bounded_budget():
         "diagnose your own code"
     ) is True
     assert task.max_replans == 5
+
+
+def test_failed_diagnostic_routes_directly_to_repair_handoff():
+    class DiagnosticThenRepairPlanner:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, request, active_context=None, history_text=""):
+            self.calls.append(request)
+
+            if len(self.calls) == 1:
+                return {
+                    "goal": "inspect target",
+                    "steps": [
+                        {
+                            "tool": "read_file",
+                            "argument": "broken_module.py",
+                        },
+                        {
+                            "tool": "code_diagnose",
+                            "argument": '{"path":"broken_module.py"}',
+                        },
+                    ],
+                }
+
+            assert "[JARVIS_INTERNAL_PHASE:REPAIR]" in request
+            assert "Actionable failures:" in request
+            return {
+                "goal": "repair broken module",
+                "steps": [
+                    {"tool": "code_checkpoint", "argument": ""},
+                    {
+                        "tool": "edit_file",
+                        "argument": "broken_module.py|||old|||new",
+                    },
+                    {
+                        "tool": "code_test",
+                        "argument": '{"mode":"compile","path":"broken_module.py"}',
+                    },
+                ],
+            }
+
+    class DiagnosticFailingExecutor:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, plan, active_context, task_state, speak_callback):
+            import tool_executor
+            from tool_result import ToolResult
+
+            self.calls.append(plan)
+            tool_executor.LAST_EXECUTION_TRACE = []
+
+            for index, step in enumerate(plan.get("steps", []), start=1):
+                tool = step["tool"]
+                argument = step.get("argument", "")
+
+                if tool == "read_file":
+                    result = ToolResult(
+                        success=True,
+                        tool=tool,
+                        data="def broken(:\\n    pass\\n",
+                    )
+                    message = "Source inspection completed."
+                    success = True
+                    verified = True
+                elif tool == "code_diagnose":
+                    result = ToolResult(
+                        success=False,
+                        tool=tool,
+                        data={
+                            "success": False,
+                            "verified": False,
+                            "mode": "diagnose",
+                            "path": "broken_module.py",
+                            "failures": [
+                                "compile:broken_module.py failed (exit 1): SyntaxError: invalid syntax"
+                            ],
+                        },
+                        error="compile:broken_module.py failed (exit 1): SyntaxError: invalid syntax",
+                    )
+                    message = "Project diagnostic found actionable issues."
+                    success = False
+                    verified = False
+                else:
+                    result = ToolResult(
+                        success=True,
+                        tool=tool,
+                        data="ok",
+                    )
+                    message = "completed"
+                    success = True
+                    verified = True
+
+                tool_executor.LAST_EXECUTION_TRACE.append(
+                    {
+                        "index": index,
+                        "tool": tool,
+                        "argument": argument,
+                        "status": "completed" if success else "failed",
+                        "success": success,
+                        "verified": verified,
+                        "result": result,
+                        "message": message,
+                    }
+                )
+
+            return "failed" if any(
+                not entry["success"]
+                for entry in tool_executor.LAST_EXECUTION_TRACE
+            ) else "done"
+
+    planner = DiagnosticThenRepairPlanner()
+    executor = DiagnosticFailingExecutor()
+    agent = JarvisAgent(planner=planner, executor=executor)
+
+    task = agent.create_task(
+        "diagnose and repair broken_module.py",
+    )
+
+    planned = agent.plan_task(task)
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner.calls) == 2
+    assert len(executor.calls) == 2
+    assert executor.calls[1]["steps"][0]["tool"] == "code_checkpoint"
