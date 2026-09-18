@@ -84,6 +84,43 @@ def extract_filename(text: str) -> str:
     return "output.txt"
 
 
+
+def is_complex_code_request(text: str) -> bool:
+    """Identify coding requests that should use the full agent workflow."""
+    normalized = str(text or "").strip().lower()
+
+    if not normalized:
+        return False
+
+    complexity_markers = (
+        "project",
+        "codebase",
+        "repository",
+        "repo",
+        "multi-file",
+        "multiple files",
+        "full app",
+        "full application",
+        "full website",
+        "dashboard",
+        "backend",
+        "frontend",
+        "database",
+        "api",
+        "integrate",
+        "integration",
+        "feature",
+        "refactor",
+        "architecture",
+        "plugin",
+        "module",
+        "system",
+        "jarvis",
+        "game",
+    )
+
+    return any(marker in normalized for marker in complexity_markers)
+
 def generate_code(user_request: str) -> Optional[Tuple[str, str]]:
     """
     Generate code based on the user's request.
