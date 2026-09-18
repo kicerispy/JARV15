@@ -65,9 +65,28 @@ class TaskState:
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _progress_callback: Any = field(default=None, repr=False, compare=False)
 
-    def start(self, description: str, total_steps: int) -> None:
-        """Start a new task."""
+    def prepare(self, description: str, total_steps: int) -> None:
+        """Reserve the task state for a queued background task."""
         with self._lock:
+            self.active = True
+            self.cancelled = False
+            self.status = "starting"
+            self.description = description
+            self.total_steps = total_steps
+            self.current_step = 0
+            self.current_tool = None
+            self.last_result = None
+            self.last_error = None
+            self.attempts = 0
+            self.recovery_count = 0
+
+    def start(self, description: str, total_steps: int) -> bool:
+        """Start a task unless cancellation was requested while it was queued."""
+        with self._lock:
+            if self.status == "cancelled" and self.cancelled:
+                self.active = False
+                return False
+
             self.active = True
             self.cancelled = False
             self.status = "running"
@@ -79,6 +98,7 @@ class TaskState:
             self.last_error = None
             self.attempts = 0
             self.recovery_count = 0
+            return True
 
     def update_step(self, step_number: int, tool_name: str) -> None:
         """Update the current step progress."""
@@ -196,6 +216,13 @@ class JarvisState:
         self.task_state = TaskState()
         self.pending_input: Optional[str] = None
         self.continuous_mode: bool = False
+
+        # Serialize microphone capture and TTS so background
+        # task announcements cannot talk over the listener.
+        self.io_lock = threading.RLock()
+
+        # Initialized by main.py after JarvisAgent is created.
+        self.task_controller: Any = None
 
     def reset(self) -> None:
         """Reset all state."""
