@@ -36,6 +36,7 @@ import json
 import re
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -757,7 +758,7 @@ class JarvisAgent:
     def _infer_requested_file_target(
         request: str,
     ) -> Optional[str]:
-        """Extract a likely source filename from a voice/typed repair request."""
+        """Recover an explicitly requested project filename."""
         text = str(request or "").strip()
         if not text:
             return None
@@ -767,49 +768,95 @@ class JarvisAgent:
             r"java|cpp|c|h|go|rs|rb|php)"
         )
 
-        # Prefer a filename introduced by a contextual phrase such as
-        # "in X.py" or "file X.py". This preserves multi-word filenames.
-        spaced_match = re.search(
-            rf"\b(?:in|of|called|named|file|target)\s+"
-            rf"([A-Za-z0-9][A-Za-z0-9 _-]*\.{extension_pattern})\b",
+        # Whisper frequently transcribes ".py" as "dot py". Normalize that
+        # spelling before comparing against real project filenames.
+        normalized_text = re.sub(
+            rf"\bdot\s+({extension_pattern})\b",
+            lambda match: "." + match.group(1).lower(),
             text,
             flags=re.IGNORECASE,
         )
 
-        if spaced_match:
+        def normalized_key(value: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+        request_key = normalized_key(normalized_text)
+
+        # First, match against real project files. This safely handles
+        # underscores, spaces, hyphens, casing, and voice transcription
+        # artifacts without asking the LLM to guess a path.
+        ignored_parts = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "jarvis_cuda",
+            "venv",
+            ".venv",
+            "node_modules",
+            "build",
+            "dist",
+            ".jarvis_checkpoints",
+        }
+
+        project_root = Path.cwd().resolve()
+        matches = []
+
+        try:
+            for path in project_root.rglob("*"):
+                if not path.is_file():
+                    continue
+                if any(part in ignored_parts for part in path.parts):
+                    continue
+
+                filename_key = normalized_key(path.name)
+                if (
+                    filename_key
+                    and len(filename_key) >= 5
+                    and filename_key in request_key
+                ):
+                    matches.append(path.name)
+
+                    if len(matches) > 1:
+                        break
+        except OSError:
+            matches = []
+
+        if len(matches) == 1:
+            return matches[0]
+
+        # Conservative fallback for a newly mentioned file that does not
+        # exist yet. Prefer the text directly following a repair/fix phrase.
+        direct_match = re.search(
+            rf"\b(?:repair|fix)\s+"
+            rf"(?:the\s+)?"
+            rf"(.+?\.{extension_pattern})"
+            rf"(?=$|[.,!?])",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
+        if direct_match:
+            candidate = " ".join(
+                str(direct_match.group(1)).strip().split()
+            )
+            if candidate:
+                return candidate.rstrip(".,!?")
+
+        # Support the common "diagnose and repair X.py" phrasing.
+        command_match = re.search(
+            rf"\bdiagnose\s+and\s+repair\s+"
+            rf"([A-Za-z0-9][A-Za-z0-9 _-]*\.{extension_pattern})"
+            rf"(?=$|[.,!?])",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
+        if command_match:
             return " ".join(
-                str(spaced_match.group(1)).strip().split()
+                str(command_match.group(1)).strip().split()
             ).rstrip(".,!?")
-
-        # Voice transcription may spell the extension as "dot py".
-        dotted_match = re.search(
-            rf"\b(?:in|of|called|named|file|target)\s+"
-            rf"([A-Za-z0-9][A-Za-z0-9 _-]*?)\s+dot\s+"
-            rf"({extension_pattern})\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if dotted_match:
-            stem = " ".join(
-                str(dotted_match.group(1)).strip().split()
-            )
-            return f"{stem}.{dotted_match.group(2).lower()}"
-
-        # Finally accept a conventional single-token filename anywhere.
-        direct_matches = re.findall(
-            rf"[A-Za-z0-9][A-Za-z0-9_.-]*\.{extension_pattern}\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if direct_matches:
-            return direct_matches[-1].rstrip(".,!?")
-
-        if dotted_match:
-            stem = " ".join(
-                str(dotted_match.group(1)).strip().split()
-            )
-            return f"{stem}.{dotted_match.group(2).lower()}"
 
         return None
 
