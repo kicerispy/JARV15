@@ -209,3 +209,56 @@ def test_worker_speech_is_queued_until_main_loop_drains_it():
         lambda message: spoken.append(message) or False
     ) == 1
     assert spoken == ["Background task progress."]
+
+
+
+class EmptyPlanAgent:
+    def __init__(self):
+        self.planning_started = threading.Event()
+
+    def plan_task(self, task, history_text=""):
+        self.planning_started.set()
+        task.goal = "unable to plan"
+        task.steps = []
+        task.status = "ready"
+        return task
+
+
+def test_action_request_with_empty_plan_fails_without_chat_fallback():
+    agent = EmptyPlanAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+    spoken = []
+
+    task = type("Task", (), {
+        "task_id": "empty-plan-task",
+        "request": "inspect and fix the browser",
+        "goal": "",
+        "status": "created",
+        "steps": [],
+        "current_step": -1,
+        "replan_count": 0,
+        "error": None,
+        "started_at": None,
+        "completed_at": None,
+        "initial_acknowledged": False,
+    })()
+
+    assert controller.start_planning(
+        task,
+        {},
+        task_state,
+    ) is True
+
+    assert agent.planning_started.wait(timeout=1)
+    assert controller.wait_for_current(timeout=1) is True
+
+    assert controller.snapshot()["task_status"] == "failed"
+
+    controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    )
+
+    assert spoken == [
+        "I couldn't create an action plan for that request.",
+    ]
