@@ -38,7 +38,7 @@ class ChatGenerationConfigTests(unittest.TestCase):
         self.assertEqual(captured["model"], "qwen3.5:9b")
         self.assertFalse(captured["think"])
         self.assertEqual(captured["options"]["num_gpu"], 40)
-        self.assertEqual(captured["options"]["num_predict"], 100)
+        self.assertEqual(captured["options"]["num_predict"], 220)
 
 
 if __name__ == "__main__":
