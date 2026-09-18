@@ -72,3 +72,41 @@ def test_repair_quality_gate_rejects_checkpoint_targets():
         "internal/generated path" in issue
         for issue in issues
     )
+
+
+def test_failed_diagnostic_resolves_real_source_for_deterministic_read_phase(tmp_path, monkeypatch):
+    from agent_core import JarvisAgent
+
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "jarvis_autonomous_test_target.py"
+    source.write_text("def add_numbers(a, b)\n    return a + b\n", encoding="utf-8")
+
+    agent = JarvisAgent()
+    task = agent.create_task(
+        "Run a full diagnostic on yourself and fix any real problems."
+    )
+    task.evidence = [
+        {
+            "tool": "code_diagnose",
+            "target": ".",
+            "success": False,
+            "verified": False,
+            "detail": (
+                "compile_all failed: .\\jarvis_autonomous_test_target.py: "
+                "SyntaxError: expected ':'"
+            ),
+        }
+    ]
+
+    plan = agent._build_phase_fallback_plan(
+        task,
+        require_code_read=True,
+    )
+
+    assert plan is not None
+    assert plan["steps"] == [
+        {
+            "tool": "read_file",
+            "argument": "jarvis_autonomous_test_target.py",
+        }
+    ]
