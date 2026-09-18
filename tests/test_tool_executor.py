@@ -197,6 +197,207 @@ class ToolExecutorFailureTests(unittest.TestCase):
         self.assertEqual(trace[2]["status"], "completed")
 
 
+    def test_browser_dom_retry_reobserves_and_recovers(self):
+        import tool_executor
+        from tool_result import ToolResult
+
+        calls = []
+
+        def fake_browser_tool(tool_name, argument):
+            calls.append(tool_name)
+
+            if tool_name == "browser_click_element":
+                if calls.count("browser_click_element") == 1:
+                    return ToolResult(
+                        success=False,
+                        tool=tool_name,
+                        error="element detached",
+                        retryable=True,
+                    )
+
+                return ToolResult(
+                    success=True,
+                    tool=tool_name,
+                    data={
+                        "success": True,
+                        "verified": True,
+                        "message": "Button clicked.",
+                    },
+                )
+
+            if tool_name == "browser_wait_for_element":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "found": True,
+                    "visible": True,
+                }
+
+            raise AssertionError(f"Unexpected browser tool: {tool_name}")
+
+        browser_states = [
+            {
+                "success": True,
+                "url": "https://example.com/form",
+                "title": "Example Form",
+            },
+            {
+                "success": True,
+                "url": "https://example.com/form",
+                "title": "Example Form",
+            },
+        ]
+
+        with mock.patch.object(
+            tool_executor,
+            "run_browser_tool",
+            side_effect=fake_browser_tool,
+        ), mock.patch(
+            "browser_controller.browser_page_info",
+            side_effect=browser_states,
+        ), mock.patch.object(
+            tool_executor.time,
+            "sleep",
+        ):
+            result = tool_executor._execute_browser_with_fallback(
+                "browser_click_element",
+                '{"text":"Submit"}',
+            )
+
+        self.assertIsInstance(result, ToolResult)
+        self.assertTrue(result.success)
+        self.assertEqual(
+            calls,
+            [
+                "browser_click_element",
+                "browser_wait_for_element",
+                "browser_click_element",
+            ],
+        )
+        self.assertEqual(
+            result.data["recovery"]["recovered_by"],
+            "reobserve_retry",
+        )
+        self.assertEqual(
+            result.data["recovery"]["observed_before"]["title"],
+            "Example Form",
+        )
+
+    def test_browser_result_click_uses_alternate_strategy(self):
+        import tool_executor
+
+        calls = []
+
+        def fake_browser_tool(tool_name, argument):
+            calls.append(tool_name)
+
+            if tool_name == "browser_click_first_result":
+                return {
+                    "success": False,
+                    "verified": False,
+                    "retryable": True,
+                    "error": "specialized first-result click failed",
+                }
+
+            if tool_name == "browser_click_result":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "index": 1,
+                    "site": "google",
+                    "result_title": "Recovered Result",
+                    "after_url": "https://example.com/recovered",
+                }
+
+            raise AssertionError(f"Unexpected browser tool: {tool_name}")
+
+        browser_state = {
+            "success": True,
+            "url": "https://www.google.com/search?q=test",
+            "title": "test - Google Search",
+        }
+
+        with mock.patch.object(
+            tool_executor,
+            "run_browser_tool",
+            side_effect=fake_browser_tool,
+        ), mock.patch(
+            "browser_controller.browser_page_info",
+            return_value=browser_state,
+        ), mock.patch.object(
+            tool_executor.time,
+            "sleep",
+        ):
+            result = tool_executor._execute_browser_with_fallback(
+                "browser_click_first_result",
+                '{"site":"google","query":"test"}',
+            )
+
+        self.assertEqual(
+            calls,
+            [
+                "browser_click_first_result",
+                "browser_click_first_result",
+                "browser_click_result",
+            ],
+        )
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertEqual(
+            result["recovery"]["recovered_by"],
+            "browser_click_result",
+        )
+
+    def test_browser_failed_verification_observes_without_double_clicking(self):
+        import tool_executor
+
+        calls = []
+
+        def fake_browser_tool(tool_name, argument):
+            calls.append(tool_name)
+            return {
+                "success": True,
+                "verified": False,
+                "error": "navigation target was unexpected",
+                "before_url": "https://example.com/start",
+                "after_url": "https://example.com/other",
+            }
+
+        observed = {
+            "success": True,
+            "url": "https://example.com/other",
+            "title": "Unexpected Page",
+        }
+
+        with mock.patch.object(
+            tool_executor,
+            "run_browser_tool",
+            side_effect=fake_browser_tool,
+        ), mock.patch(
+            "browser_controller.browser_page_info",
+            return_value=observed,
+        ):
+            result = tool_executor._execute_browser_with_fallback(
+                "browser_click_result",
+                '{"index":1,"site":"youtube"}',
+            )
+
+        self.assertEqual(
+            calls,
+            [
+                "browser_click_result",
+            ],
+        )
+        self.assertEqual(
+            result["recovery"]["recovered_by"],
+            "state_observation",
+        )
+        self.assertEqual(
+            result["recovery"]["observed_after"]["title"],
+            "Unexpected Page",
+        )
+
+
     def test_non_retryable_safe_tool_runs_only_once(self):
         import tool_executor
         from state import ActiveContext, TaskState
