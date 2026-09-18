@@ -1858,10 +1858,18 @@ def execute_plan(
 
                 task_state.finish()
 
-                return speak_result(
+                speak_status = speak_result(
                     spoken_message,
                     speak_callback,
                 )
+
+                if (
+                    speak_status == "done"
+                    and hasattr(task_state, "mark_completion_spoken")
+                ):
+                    task_state.mark_completion_spoken()
+
+                return speak_status
 
             # -------------------------------------------------
             # Multi-step task continues.
@@ -2095,10 +2103,18 @@ def execute_plan(
                         f"fallback: {e}"
                     )
 
-        return speak_result(
+        speak_status = speak_result(
             spoken_message,
             speak_callback,
         )
+
+        if (
+            speak_status == "done"
+            and hasattr(task_state, "mark_completion_spoken")
+        ):
+            task_state.mark_completion_spoken()
+
+        return speak_status
 
     # ========================================================
     # FALLBACK COMPLETION
