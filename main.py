@@ -10,7 +10,7 @@ import sys
 import time
 from typing import Optional
 
-from code_gen import handle_code_generation, is_code_request
+from code_gen import handle_code_generation, is_code_request, is_complex_code_request
 from response_pipeline import speak_response
 from agent_core import JarvisAgent
 
@@ -1107,7 +1107,7 @@ def process_command(
         f"{perf_now() - code_check_start:.3f}s"
     )
 
-    if code_request:
+    if code_request and not is_complex_code_request(user_input):
 
         code_start = perf_now()
 
