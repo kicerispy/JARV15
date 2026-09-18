@@ -775,3 +775,68 @@ def test_code_test_progress_does_not_claim_a_change_was_applied():
 
     assert "Step 3 of 3. I'm running the validation now." == messages["message"]
     assert "change is in place" not in messages["message"].lower()
+
+class MalformedRequiredReadPlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        # Simulate Ollama/create_plan returning an empty plan after malformed JSON.
+        return {
+            "goal": "",
+            "steps": [],
+        }
+
+
+def test_required_source_read_rejects_empty_plan_and_recovers_target_from_discovery():
+    planner = MalformedRequiredReadPlanner()
+    agent = JarvisAgent(planner=planner)
+
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+    task.evidence = [
+        {
+            "attempt": 1,
+            "tool": "code_search",
+            "target": "browser controller",
+            "success": True,
+            "verified": True,
+            "detail": (
+                "browser_controller.py:705: "
+                "print('JARVIS browser controller loaded.')"
+            ),
+        },
+        {
+            "attempt": 1,
+            "tool": "list_files",
+            "target": ".",
+            "success": True,
+            "verified": True,
+            "detail": (
+                "- planner.py\n"
+                "- browser_controller.py\n"
+                "- tool_executor.py"
+            ),
+        },
+    ]
+
+    planned = agent.plan_task(
+        task,
+        require_code_read=True,
+    )
+
+    assert planned.status == "ready"
+    assert len(planner.calls) == 2
+    assert [step.tool for step in planned.steps] == [
+        "read_file",
+    ]
+    assert planned.steps[0].argument == "browser_controller.py"
+
