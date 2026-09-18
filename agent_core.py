@@ -2616,10 +2616,6 @@ class JarvisAgent:
                 if (
                     is_software_repair_request(task.request)
                     and latest_diagnostic is not None
-                    and self._has_verified_evidence(
-                        task,
-                        {"code_search", "read_file"},
-                    )
                 ):
                     has_source_read = self._has_verified_evidence(
                         task,
@@ -2633,8 +2629,9 @@ class JarvisAgent:
                         )
                     else:
                         logger.info(
-                            "JARVIS AGENT: Diagnostic failure captured with target discovery; "
-                            "repair planner must read the verified source before editing."
+                            "JARVIS AGENT: Diagnostic failure captured from the project-wide "
+                            "diagnostic; switching directly to focused repair planning with "
+                            "mandatory source inspection."
                         )
 
                     self.state["replans"] = task.replan_count
