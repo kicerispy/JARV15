@@ -841,6 +841,32 @@ def browser_spoken_message(
 
         return "I inspected the current browser page."
 
+    if tool_name == "browser_click_first_result":
+
+        result_title = str(
+            result.get(
+                "result_title",
+                "",
+            )
+        ).strip()
+
+        site = str(
+            result.get(
+                "site",
+                "",
+            )
+        ).strip().lower()
+
+        if result.get("success") and result_title:
+            if site == "youtube":
+                return f"Opened {result_title}."
+            return f"Opened {result_title}."
+
+        if result.get("success"):
+            return "I opened the first browser result."
+
+        return "I couldn't open the first browser result."
+
     if tool_name == "browser_connect":
 
         return "The browser is connected."
