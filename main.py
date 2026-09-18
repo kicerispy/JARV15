@@ -1570,6 +1570,9 @@ def main():
 
     whisper_start = perf_now()
 
+    voice_speak = None
+    tts_status = None
+
     try:
 
         from speech import listen
@@ -1601,12 +1604,48 @@ def main():
         listen = None
 
     # ==================================================
+    # PRELOAD PIPER
+    # ==================================================
+
+    tts_start = perf_now()
+
+    try:
+
+        from voice import (
+            speak as voice_speak,
+            tts_status,
+        )
+
+        status = tts_status()
+
+        logger.info(
+            "JARVIS: Piper ready. "
+            f"Inference = "
+            f"{'CUDA' if status.get('cuda') else 'CPU'}."
+        )
+
+        logger.info(
+            f"PERF: Piper preload: "
+            f"{perf_now() - tts_start:.3f}s"
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"JARVIS: Piper initialization failed: {e}"
+        )
+
+        logger.info(
+            f"PERF: Piper initialization failure: "
+            f"{perf_now() - tts_start:.3f}s"
+        )
+
+    # ==================================================
     # ONLINE
     # ==================================================
 
     logger.info(
-        f"JARVIS online. Welcome back, "
-        f"{user_name}."
+        f"JARVIS online. Welcome back."
     )
 
     logger.info(
@@ -1634,7 +1673,11 @@ def main():
 
         try:
 
-            from voice import speak as voice_speak
+            if voice_speak is None:
+                logger.warning(
+                    "JARVIS: TTS is unavailable."
+                )
+                return False
 
             with state.io_lock:
                 result = speak_response(
