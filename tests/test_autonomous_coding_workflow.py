@@ -153,7 +153,7 @@ def test_dev_command_rejects_shell_operators_as_invalid_arguments():
 
 def test_validate_plan_resolves_voice_transcribed_filename(tmp_path, monkeypatch):
     target = tmp_path / "jarvis_autonomous_test_target.py"
-    target.write_text("def add_numbers(a, b):\\n    return a + b\\n", encoding="utf-8")
+    target.write_text("def add_numbers(a, b):\n    return a + b\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     plan = validate_plan(
@@ -170,4 +170,4 @@ def test_validate_plan_resolves_voice_transcribed_filename(tmp_path, monkeypatch
 
     assert plan["steps"][0]["tool"] == "read_file"
     assert plan["steps"][0]["argument"] == "jarvis_autonomous_test_target.py"
-\n
+
