@@ -1009,6 +1009,13 @@ def test_requested_file_target_extractor_preserves_multi_word_names():
         == "Jarvis Autonomous Test Target.py"
     )
 
+    assert (
+        JarvisAgent._infer_requested_file_target(
+            "repair jarvis-autonomous-test-target.py"
+        )
+        == "jarvis-autonomous-test-target.py"
+    )
+
 
 def test_initial_repair_plan_recovers_named_target_after_planner_failure():
     class EmptyPlanner:
