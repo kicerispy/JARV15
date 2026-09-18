@@ -525,7 +525,13 @@ def process_command(
         user_input
     ):
 
-        state.task_state.finish()
+        if (
+            task_controller is not None
+            and task_controller.has_active_task()
+        ):
+            task_controller.cancel_current()
+        else:
+            state.task_state.finish()
 
         reply = "Shutting down. Goodbye."
 
@@ -1834,7 +1840,13 @@ def main():
             "JARVIS: Shutdown requested."
         )
 
-        state.task_state.finish()
+        if (
+            state.task_controller is not None
+            and state.task_controller.has_active_task()
+        ):
+            state.task_controller.cancel_current()
+        else:
+            state.task_state.finish()
 
         speak(
             "Goodbye."
