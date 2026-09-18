@@ -82,6 +82,17 @@ def log_perf(
     return perf_now()
 
 
+def shutdown_background_tasks(state: JarvisState) -> None:
+    """Cancel and drain any active background task before runtime teardown."""
+    controller = getattr(state, "task_controller", None)
+
+    if controller is not None and controller.has_active_task():
+        controller.cancel_current()
+        controller.wait_for_current()
+    else:
+        state.task_state.finish()
+
+
 # ============================================================
 # PROFILE
 # ============================================================
@@ -1781,6 +1792,7 @@ def main():
 
                 if result == "shutdown":
 
+                    shutdown_background_tasks(state)
                     break
 
                 continue
@@ -1857,6 +1869,7 @@ def main():
 
                 if result == "shutdown":
 
+                    shutdown_background_tasks(state)
                     break
 
                 continue
@@ -1992,15 +2005,7 @@ def main():
 
             if result == "shutdown":
 
-                if (
-                    state.task_controller is not None
-                    and state.task_controller.has_active_task()
-                ):
-                    state.task_controller.cancel_current()
-                    state.task_controller.wait_for_current()
-                else:
-                    state.task_state.finish()
-
+                shutdown_background_tasks(state)
                 break
 
     except KeyboardInterrupt:
@@ -2009,13 +2014,7 @@ def main():
             "JARVIS: Shutdown requested."
         )
 
-        if (
-            state.task_controller is not None
-            and state.task_controller.has_active_task()
-        ):
-            state.task_controller.cancel_current()
-        else:
-            state.task_state.finish()
+        shutdown_background_tasks(state)
 
         speak(
             "Goodbye."
