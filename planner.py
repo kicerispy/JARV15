@@ -497,6 +497,31 @@ def _normalized_words(text: str) -> str:
     )
 
 
+def is_explicit_self_repair_request(text: str) -> bool:
+    """Return True only for requests explicitly aimed at JARVIS's own code."""
+    normalized = _normalized_words(text)
+
+    return any(
+        phrase in normalized
+        for phrase in (
+            "fix yourself",
+            "repair yourself",
+            "diagnose yourself and fix",
+            "diagnose yourself and repair",
+            "run a full diagnostic on yourself and fix",
+            "run a full diagnostic on yourself and repair",
+            "audit yourself and fix",
+            "audit your own code and fix",
+            "find bugs in your own code and fix",
+            "check your own code and fix",
+            "fix your own code",
+            "repair your own code",
+            "fix your own software",
+            "repair your own software",
+        )
+    )
+
+
 def is_software_repair_request(text: str) -> bool:
     normalized = _normalized_words(text)
 
