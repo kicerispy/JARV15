@@ -794,9 +794,28 @@ class JarvisAgent:
         task: AgentTask,
         require_code_read: bool = False,
         require_code_test: bool = False,
+        require_code_diagnose: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Build a deterministic minimal plan when a required phase dead-ends."""
         target = self._latest_verified_source_target(task)
+
+        if require_code_diagnose and target:
+            return {
+                "goal": "targeted diagnostic",
+                "steps": [
+                    {
+                        "tool": "code_diagnose",
+                        "argument": json.dumps(
+                            {
+                                "path": target,
+                                "run_tests": False,
+                                "run_lint": False,
+                                "run_types": False,
+                            }
+                        ),
+                    }
+                ],
+            }
 
         if require_code_test and target:
             request_lower = str(task.request or "").lower()
@@ -849,6 +868,7 @@ class JarvisAgent:
         require_repair_plan: bool = False,
         require_code_read: bool = False,
         require_code_test: bool = False,
+        require_code_diagnose: bool = False,
     ) -> AgentTask:
 
         task.status = "planning"
@@ -856,6 +876,8 @@ class JarvisAgent:
         phase_marker = ""
         if require_repair_plan:
             phase_marker = "[JARVIS_INTERNAL_PHASE:REPAIR]\n"
+        elif require_code_diagnose:
+            phase_marker = "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]\n"
         elif require_code_test:
             phase_marker = "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]\n"
         elif require_code_read:
@@ -947,6 +969,7 @@ class JarvisAgent:
                 require_modification=enforce_change_workflow,
                 require_code_read=require_code_read,
                 require_code_test=require_code_test,
+                require_code_diagnose=require_code_diagnose,
                 allow_prior_evidence=(
                     (
                         self._has_verified_evidence(
@@ -1035,11 +1058,17 @@ class JarvisAgent:
                                 else
                                 (
                                     "The corrected plan must include "
-                                    "code_test before proceeding."
-                                    if require_code_test
+                                    "code_diagnose before proceeding."
+                                    if require_code_diagnose
                                     else
-                                    "Use the observed code and do not "
-                                    "invent filenames."
+                                    (
+                                        "The corrected plan must include "
+                                        "code_test before proceeding."
+                                        if require_code_test
+                                        else
+                                        "Use the observed code and do not "
+                                        "invent filenames."
+                                    )
                                 )
                             ),
                             "Do not invent filenames. Discover the actual "
@@ -1074,6 +1103,7 @@ class JarvisAgent:
                     task,
                     require_code_read=require_code_read,
                     require_code_test=require_code_test,
+                    require_code_diagnose=require_code_diagnose,
                 )
 
                 if fallback_plan is not None:
@@ -1214,9 +1244,27 @@ class JarvisAgent:
         task: AgentTask,
     ) -> str:
 
+        has_failed_diagnostic = any(
+            isinstance(evidence, dict)
+            and str(evidence.get("tool", "") or "").strip() == "code_diagnose"
+            and not evidence.get("success")
+            for evidence in task.evidence
+        )
+
+        if has_failed_diagnostic:
+            opening = (
+                "The previous diagnostic phase produced actionable "
+                "failure evidence. You are now handing that evidence "
+                "directly to the repair planner."
+            )
+        else:
+            opening = (
+                "The previous investigation phase has completed successfully. "
+                "You are now handing evidence to the repair planner."
+            )
+
         lines = [
-            "The previous investigation phase has completed successfully.",
-            "You are now handing evidence to the repair planner.",
+            opening,
             "",
             f"Original request: {task.request}",
             f"Goal: {task.goal}",
@@ -2041,7 +2089,8 @@ class JarvisAgent:
                             has_source_read and has_code_test
                         ),
                         require_code_read=not has_source_read,
-                        require_code_test=(
+                        require_code_test=False,
+                        require_code_diagnose=(
                             has_source_read and not has_code_test
                         ),
                     )
