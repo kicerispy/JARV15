@@ -25,6 +25,48 @@ class ModelManagerTests(unittest.TestCase):
         self.assertEqual(manager.chat_num_predict, 220)
 
 
+    def test_chat_generation_routes_through_manager(self):
+        from model_manager import ModelManager
+        import model_manager
+
+        captured = {}
+
+        def fake_chat(**kwargs):
+            captured.update(kwargs)
+            return {"message": {"content": "hello"}}
+
+        with mock.patch.object(model_manager, "config"):
+            with mock.patch("ollama.chat", side_effect=fake_chat):
+                manager = ModelManager(
+                    chat_model="test-chat",
+                    chat_think=False,
+                    chat_num_gpu=2,
+                    chat_num_predict=33,
+                )
+                result = manager.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(result["message"]["content"], "hello")
+        self.assertEqual(captured["model"], "test-chat")
+        self.assertEqual(captured["options"], {"num_gpu": 2, "num_predict": 33})
+        self.assertFalse(captured["think"])
+
+    def test_planner_generation_uses_planner_role(self):
+        from model_manager import ModelManager
+        import model_manager
+
+        captured = {}
+
+        def fake_chat(**kwargs):
+            captured.update(kwargs)
+            return {"message": {"content": "{}"}}
+
+        with mock.patch("ollama.chat", side_effect=fake_chat):
+            manager = ModelManager(planner_model="test-planner")
+            manager.planner([{"role": "user", "content": "plan"}])
+
+        self.assertEqual(captured["model"], "test-planner")
+        self.assertEqual(captured["format"], "json")
+
     def test_warmup_coding_model_uses_tiny_generation(self):
         from model_manager import ModelManager
         import model_manager
