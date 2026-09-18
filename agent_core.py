@@ -32,6 +32,7 @@ The existing tool_executor.py remains responsible for:
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -101,6 +102,13 @@ class AgentTask:
     execution_result: Any = None
 
     observations: List[str] = field(
+        default_factory=list
+    )
+
+    # Structured execution evidence kept separate from user-facing
+    # progress text. Raw source/test output stays here and is bounded
+    # before it is sent back to the planner.
+    evidence: List[Dict[str, Any]] = field(
         default_factory=list
     )
 
@@ -344,6 +352,207 @@ class JarvisAgent:
             if isinstance(step, dict)
         )
 
+    @staticmethod
+    def _extract_tool_data(result: Any) -> Any:
+        """Return the raw data carried by a normalized ToolResult."""
+        data = getattr(result, "data", None)
+
+        if data is not None:
+            return data
+
+        return result
+
+    @staticmethod
+    def _compact_text(value: Any, limit: int = 5000) -> str:
+        """Bound internal evidence so one tool cannot flood planner context."""
+        text = str(value or "").strip()
+
+        if len(text) <= limit:
+            return text
+
+        return (
+            text[:limit]
+            + "\n... [evidence truncated by JARVIS] ..."
+        )
+
+    @staticmethod
+    def _source_excerpt(
+        source: str,
+        request: str,
+        max_chars: int = 9000,
+    ) -> str:
+        """Extract a useful, line-numbered source excerpt for the repair planner."""
+        source = str(source or "")
+        lines = source.splitlines()
+
+        if len(source) <= max_chars:
+            return "\n".join(
+                f"{index}: {line}"
+                for index, line in enumerate(lines, start=1)
+            )
+
+        raw_terms = re.findall(
+            r"[A-Za-z_][A-Za-z0-9_.-]{3,}",
+            str(request or "").lower(),
+        )
+
+        stop_words = {
+            "inspect",
+            "find",
+            "problem",
+            "fix",
+            "repair",
+            "debug",
+            "diagnose",
+            "test",
+            "the",
+            "and",
+            "with",
+            "this",
+            "that",
+            "from",
+            "into",
+            "before",
+            "after",
+            "actual",
+            "source",
+        }
+
+        terms = {
+            term
+            for term in raw_terms
+            if term not in stop_words
+        }
+
+        selected = set(range(min(len(lines), 50)))
+
+        if terms:
+            for index, line in enumerate(lines):
+                lowered = line.lower()
+
+                if any(
+                    term in lowered
+                    for term in terms
+                ):
+                    start = max(0, index - 3)
+                    end = min(len(lines), index + 4)
+                    selected.update(
+                        range(start, end)
+                    )
+
+        selected.update(
+            range(
+                max(0, len(lines) - 40),
+                len(lines),
+            )
+        )
+
+        ordered = sorted(selected)
+        chunks = []
+        total = 0
+
+        for index in ordered:
+            line = f"{index + 1}: {lines[index]}"
+
+            if total + len(line) + 1 > max_chars:
+                break
+
+            chunks.append(line)
+            total += len(line) + 1
+
+        if not chunks:
+            chunks = [
+                f"{index + 1}: {lines[index]}"
+                for index in range(
+                    min(len(lines), 40)
+                )
+            ]
+
+        return "\n".join(chunks)
+
+    def _build_evidence_packet(
+        self,
+        task: AgentTask,
+        max_chars: int = 18000,
+    ) -> str:
+        """Build bounded, repair-focused evidence for the next planner phase."""
+        sections = [
+            "Evidence gathered from completed execution phases:",
+            "",
+            "Treat the evidence below as observations. Do not invent facts "
+            "that are not supported by it.",
+        ]
+
+        total = sum(len(line) + 1 for line in sections)
+
+        for index, evidence in enumerate(
+            task.evidence,
+            start=1,
+        ):
+            if not isinstance(evidence, dict):
+                continue
+
+            tool = str(
+                evidence.get("tool", "")
+                or ""
+            ).strip()
+
+            header = f"\nEvidence {index}: {tool or 'tool'}"
+
+            body_parts = []
+
+            target = str(
+                evidence.get("target", "")
+                or ""
+            ).strip()
+
+            if target:
+                body_parts.append(
+                    f"Target: {target}"
+                )
+
+            status = (
+                "verified"
+                if evidence.get("verified")
+                else (
+                    "completed"
+                    if evidence.get("success")
+                    else "failed"
+                )
+            )
+
+            body_parts.append(
+                f"Status: {status}"
+            )
+
+            detail = str(
+                evidence.get("detail", "")
+                or ""
+            ).strip()
+
+            if detail:
+                body_parts.append(detail)
+
+            block = header + "\n" + "\n".join(body_parts)
+
+            if total + len(block) + 1 > max_chars:
+                sections.append(
+                    "",
+                    "[Additional evidence omitted to keep the repair context bounded.]",
+                )
+                break
+
+            sections.append(block)
+            total += len(block) + 1
+
+        if not task.evidence:
+            sections.extend([
+                "",
+                "No structured evidence was captured.",
+            ])
+
+        return "\n".join(sections)
+
     # ======================================================
     # Planning
     # ======================================================
@@ -578,41 +787,25 @@ class JarvisAgent:
 
         lines = [
             "The previous investigation phase has completed successfully.",
-            "Now create the next phase for the original task.",
+            "You are now handing evidence to the repair planner.",
             "",
             f"Original request: {task.request}",
             f"Goal: {task.goal}",
             "",
-            "Observed findings:",
+            self._build_evidence_packet(task),
+            "",
+            "REPAIR PHASE RULES:",
+            "1. Do not repeat generic discovery or list the project again.",
+            "2. Use the concrete evidence above to identify the defect and target file.",
+            "3. If one small targeted source read is still required, request that specific file/region only.",
+            "4. Otherwise create a repair plan with code_checkpoint BEFORE the first modification.",
+            "5. Modify the existing target with the smallest safe change.",
+            "6. Run code_test AFTER the modification.",
+            "7. Never claim success unless validation succeeds.",
+            "8. Never invent filenames, functions, or errors that are not supported by the evidence.",
+            "",
+            "Return ONLY JSON.",
         ]
-
-        if task.observations:
-            lines.extend(
-                f"- {observation}"
-                for observation in task.observations
-            )
-        else:
-            lines.append(
-                "- No additional observation text was recorded."
-            )
-
-        lines.extend(
-            [
-                "",
-                "Required workflow for the next phase:",
-                "1. Read the actual source when it has not yet been read.",
-                "2. Run code_test before editing when diagnostic validation is still needed.",
-                "3. If the task requires a fix, create code_checkpoint before changing files.",
-                "4. Make the smallest targeted modification.",
-                "5. Run code_test after the modification.",
-                "6. Do not report success unless the requested outcome is validated.",
-                "",
-                "Do not invent filenames. Discover the real target file "
-                "from the project observations before editing.",
-                "",
-                "Return ONLY JSON.",
-            ]
-        )
 
         return "\n".join(lines)
 
@@ -633,18 +826,8 @@ class JarvisAgent:
             f"Original request: {task.request}",
             f"Goal: {task.goal}",
             "",
-            "Previous observations:",
+            self._build_evidence_packet(task),
         ]
-
-        if task.observations:
-            for observation in task.observations:
-                lines.append(
-                    f"- {observation}"
-                )
-        else:
-            lines.append(
-                "- No reliable observation was recorded."
-            )
 
         # Include current browser state when available.
         browser_state = task.active_context.get(
@@ -750,22 +933,35 @@ class JarvisAgent:
 
         trace = get_last_execution_trace()
 
-        result_text = str(execution_result)
+        result_text = self._compact_text(
+            self._extract_tool_data(execution_result),
+            limit=1600,
+        )
 
-        # Overall execution result.
+        # Keep high-level observations concise. Detailed source/test data
+        # is stored in the structured evidence packet below.
         task.observations.append(
             f"Execution attempt {attempt}: {result_text}"
         )
 
-        # Structured step observations.
+        # Structured step observations and bounded evidence.
         for entry in trace:
             index = entry.get("index", -1)
-            tool = entry.get("tool", "")
-            argument = entry.get("argument", "")
+            tool = str(
+                entry.get("tool", "")
+                or ""
+            ).strip()
+            argument = str(
+                entry.get("argument", "")
+                or ""
+            ).strip()
             status = entry.get("status", "")
-            verified = entry.get("verified", False)
+            verified = bool(
+                entry.get("verified", False)
+            )
             message = entry.get("message", "")
             success = entry.get("success")
+            raw_result = entry.get("result")
 
             if success is True:
                 outcome = "completed"
@@ -792,10 +988,106 @@ class JarvisAgent:
                 f" {outcome} {verification}"
             )
 
-            if message:
-                detail += f" — {message}"
+            concise_message = self._compact_text(
+                (
+                    "Source inspection completed."
+                    if tool == "read_file" and success
+                    else
+                    "Project code search completed."
+                    if tool == "code_search" and success
+                    else
+                    message
+                ),
+                limit=800,
+            )
+
+            if concise_message:
+                detail += f" — {concise_message}"
 
             task.observations.append(detail)
+
+            # Build structured evidence for the next planner phase.
+            data = self._extract_tool_data(raw_result)
+
+            evidence = {
+                "attempt": attempt,
+                "tool": tool,
+                "target": argument,
+                "success": success is True,
+                "verified": verified,
+                "detail": "",
+            }
+
+            if tool == "read_file" and success:
+                source = str(data or "")
+                evidence["detail"] = (
+                    "Source excerpt with line numbers:\n"
+                    + self._source_excerpt(
+                        source,
+                        task.request,
+                    )
+                )
+
+            elif tool == "code_search":
+                evidence["detail"] = self._compact_text(
+                    data,
+                    limit=6000,
+                )
+
+            elif tool == "code_test":
+                if isinstance(data, dict):
+                    parts = [
+                        str(
+                            data.get("message")
+                            or "Code test completed."
+                        ),
+                        f"Mode: {data.get('mode', '')}",
+                        f"Path: {data.get('path', '')}",
+                    ]
+
+                    stdout = str(
+                        data.get("stdout")
+                        or ""
+                    ).strip()
+
+                    stderr = str(
+                        data.get("stderr")
+                        or ""
+                    ).strip()
+
+                    if stdout:
+                        parts.append(
+                            "stdout:\n"
+                            + self._compact_text(
+                                stdout,
+                                limit=3500,
+                            )
+                        )
+
+                    if stderr:
+                        parts.append(
+                            "stderr:\n"
+                            + self._compact_text(
+                                stderr,
+                                limit=3500,
+                            )
+                        )
+
+                    evidence["detail"] = "\n".join(parts)
+
+                else:
+                    evidence["detail"] = self._compact_text(
+                        data,
+                        limit=5000,
+                    )
+
+            else:
+                evidence["detail"] = self._compact_text(
+                    message,
+                    limit=1600,
+                )
+
+            task.evidence.append(evidence)
 
         # Capture actual browser state.
         if _is_browser_trace(trace):
