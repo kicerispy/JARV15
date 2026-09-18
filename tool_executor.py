@@ -5,6 +5,8 @@ Optimized for low latency while preserving reliable execution
 for multi-step computer-control tasks.
 """
 
+import ast
+import json
 import time
 from typing import Any, Dict
 
@@ -91,11 +93,16 @@ def _execute_browser_with_fallback(
             return result
 
         if tool_name in {"browser_click_element", "browser_click_result"}:
-            import json
             payload = {}
+            raw_argument = str(argument or "{}").strip()
             try:
-                payload = json.loads(str(argument or "{}"))
-            except Exception:
+                payload = json.loads(raw_argument)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    payload = ast.literal_eval(raw_argument)
+                except (ValueError, SyntaxError):
+                    payload = {}
+            if not isinstance(payload, dict):
                 payload = {}
 
             if tool_name == "browser_click_element":
