@@ -1807,26 +1807,19 @@ def main():
 
                 controller = state.task_controller
 
-                # If a background task already finished before this follow-up
-                # capture begins, deliver its queued completion immediately
-                # instead of opening a 10-second microphone timeout.
-                if (
-                    controller is not None
-                    and not controller.has_active_task()
-                    and controller.consume_completion_signal()
-                ):
-                    controller.drain_speech(speak)
-                    state.continuous_mode = False
-                    continue
-
-                # A still-running task may finish while we are waiting for
-                # speech. Clear any stale signal before handing the live event
-                # to the microphone loop so only a new completion interrupts it.
+                # Prepare the completion event atomically with the active-task
+                # check. This prevents a task from finishing between those
+                # operations and having its wake-up signal accidentally cleared.
                 completion_event = None
                 if controller is not None:
-                    controller.clear_completion_signal()
-                    if controller.has_active_task():
-                        completion_event = controller.completion_event
+                    completion_event, already_completed = (
+                        controller.prepare_followup_wait()
+                    )
+
+                    if already_completed:
+                        controller.drain_speech(speak)
+                        state.continuous_mode = False
+                        continue
 
                 logger.info(
                     "JARVIS: Listening for follow-up..."
