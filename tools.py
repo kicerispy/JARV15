@@ -1813,6 +1813,7 @@ def code_search(argument=""):
 
 def code_test(argument=""):
     """Run a safe Python compile check or pytest command inside the project."""
+    import ast
     import json
     import sys
 
@@ -1823,14 +1824,30 @@ def code_test(argument=""):
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
-            payload = {
-                "mode": "compile",
-                "path": raw,
-            }
+            try:
+                candidate = ast.literal_eval(raw)
+
+                if isinstance(candidate, dict):
+                    payload = candidate
+                else:
+                    payload = {
+                        "mode": "compile",
+                        "path": raw,
+                    }
+            except (ValueError, SyntaxError):
+                payload = {
+                    "mode": "compile",
+                    "path": raw,
+                }
 
     mode = str(
         payload.get("mode", "compile")
     ).strip().lower()
+
+    # Qwen sometimes emits py_compile while the public tool contract
+    # uses compile. Accept the harmless alias at the tool boundary.
+    if mode in {"py_compile", "python_compile"}:
+        mode = "compile"
 
     target = str(
         payload.get("path", "")
@@ -2073,6 +2090,28 @@ def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
                     error=result,
                     retryable=False,
                 )
+
+        code_test_errors = (
+            "Code test refused:",
+            "Code test target not found:",
+            "Compile mode requires",
+            "Unsupported code test mode.",
+            "Code test timed out",
+            "Code test failed to start:",
+            "Code validation failed.",
+        )
+
+        if (
+            tool_name == "code_test"
+            and stripped.startswith(code_test_errors)
+        ):
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                data=result,
+                error=result,
+                retryable=False,
+            )
 
         return ToolResult(
             success=True,
