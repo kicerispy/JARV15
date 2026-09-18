@@ -1,43 +1,50 @@
-"""
-JARVIS system status monitoring.
-"""
+"""JARVIS runtime and computer status."""
+
+from __future__ import annotations
+
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
 import psutil
 
 from logger import logger
+import runtime_health
 
 
 _start_time = time.time()
 
 
-def get_status(model: str = "unknown") -> str:
-    """
-    Get JARVIS's current status including system metrics.
+def collect_status() -> Dict[str, Any]:
+    """Collect fast system and subsystem status without blocking probes."""
+    health = runtime_health.collect_health()
+    return {
+        "health": health,
+        "cpu": psutil.cpu_percent(interval=None),
+        "ram": psutil.virtual_memory().percent,
+        "uptime": int(time.time() - _start_time),
+    }
 
-    Args:
-        model: The name of the current LLM model.
 
-    Returns:
-        A formatted status string.
-    """
+def get_status(model: str = "") -> str:
     try:
-        cpu = psutil.cpu_percent(interval=1)
-        ram = psutil.virtual_memory()
-        uptime = int(time.time() - _start_time)
+        status = collect_status()
+        health = status["health"]
 
-        return f"""
-JARVIS Status:
-
-Model: {model}
-
-CPU: {cpu}%
-
-RAM: {ram.percent}%
-
-Uptime: {uptime} seconds
-"""
-    except Exception as e:
-        logger.error(f"Failed to get status: {e}")
-        return "I couldn't retrieve the system status."
+        model_text = model.strip() if model else "configured models"
+        return (
+            "JARVIS Status:\n"
+            f"System: {health.get('overall', 'UNKNOWN')}\n"
+            f"CPU: {status['cpu']}%\n"
+            f"RAM: {status['ram']}%\n"
+            f"Uptime: {status['uptime']} seconds\n\n"
+            f"Ollama: {'READY' if health.get('ollama') else 'OFFLINE'}\n"
+            f"Whisper: {'READY' if health.get('whisper') else 'NOT LOADED'}\n"
+            f"Piper: {'READY' if health.get('piper') else 'NOT LOADED'}\n"
+            f"Wake word: {'READY' if health.get('wake_word') else 'STANDBY'}\n"
+            f"Browser: {health.get('browser', 'STANDBY')}\n"
+            f"Barehands: {'READY' if health.get('barehands') else 'STANDBY'}\n"
+            f"Models: {model_text}"
+        )
+    except Exception as exc:
+        logger.error(f"Failed to get JARVIS status: {exc}")
+        return "I couldn't retrieve the JARVIS status."
