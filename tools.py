@@ -2266,7 +2266,13 @@ def run_browser_tool(
 
         return normalize(
             browser_click_result(
-                index=payload.get("index", 1),
+                index=payload.get(
+                    "index",
+                    payload.get(
+                        "number",
+                        payload.get("result_number", 1),
+                    ),
+                ),
                 site=payload.get("site", ""),
                 query=payload.get("query", ""),
             )
