@@ -1802,14 +1802,18 @@ class JarvisAgent:
                     )
                 ):
 
-                    has_source_read = any(
-                        step.tool == "read_file"
-                        for step in task.steps
+                    has_source_read = (
+                        self._has_verified_evidence(
+                            task,
+                            {"read_file"},
+                        )
                     )
 
-                    has_code_test = any(
-                        step.tool == "code_test"
-                        for step in task.steps
+                    has_code_test = (
+                        self._has_verified_evidence(
+                            task,
+                            {"code_test"},
+                        )
                     )
 
                     if not has_source_read:
