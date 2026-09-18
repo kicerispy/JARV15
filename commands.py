@@ -1736,7 +1736,10 @@ def is_remember_command(text):
         "do not forget ",
     )
 
-    return normalized.startswith(remember_phrases)
+    return (
+        normalized == "remember"
+        or normalized.startswith(remember_phrases)
+    )
 
 
 def is_shutdown_command(text):
@@ -1746,6 +1749,8 @@ def is_shutdown_command(text):
     normalized = normalize_command(text).lower()
 
     shutdown_commands = {
+        "quit",
+        "exit",
         "shutdown",
         "shut down",
         "shutdown jarvis",
