@@ -538,7 +538,15 @@ def assess_plan(
                     "browser_controller.py target. browser_automation.py does not exist."
                 )
 
-    if inspection_index is None and not allow_prior_evidence:
+    # A standalone diagnostic-test phase is intentionally allowed to
+    # operate on already-verified source evidence. The runtime controller
+    # uses this phase only after source inspection has completed, so requiring
+    # another inspection tool here would reject the diagnostic plan itself.
+    if (
+        inspection_index is None
+        and not allow_prior_evidence
+        and not require_code_test
+    ):
         issues.append(
             "The repair plan must inspect the relevant project code "
             "before attempting to fix it."
