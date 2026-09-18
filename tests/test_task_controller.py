@@ -308,3 +308,18 @@ def test_task_controller_status_works_without_active_task():
     assert controller.status_message() == (
         "The last background task is complete."
     )
+
+
+
+def test_internal_source_results_have_concise_speech_summaries():
+    from tool_executor import _spoken_execution_summary
+
+    source = "from pathlib import Path\n\n" + ("x = 1\n" * 500)
+
+    assert _spoken_execution_summary("read_file", source) == (
+        "I inspected the relevant source file."
+    )
+    assert _spoken_execution_summary(
+        "code_search",
+        "browser_controller.py:42: browser_connect",
+    ) == "I searched the project code for relevant matches."
