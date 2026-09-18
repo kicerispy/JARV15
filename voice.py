@@ -937,7 +937,7 @@ def speak(text):
                     "No audio generated."
                 )
 
-                return
+                return False
 
 
             # ------------------------------------------------
