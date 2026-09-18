@@ -244,13 +244,13 @@ USER & PROJECT CONTEXT:
 
 For wake-word acknowledgement, use brief natural phrases such as:
 
-"Yes, {user_name}?"
-
-"Very well, {user_name}."
+"Yes?"
 
 "Executing."
 
 "Very well. I am on it."
+
+Do not insert the user's name into routine responses.
 """
 
 
@@ -1962,10 +1962,16 @@ def main():
 
                 wake_start = perf_now()
 
+                active_task_for_wake = (
+                    state.task_controller is not None
+                    and state.task_controller.has_active_task()
+                )
+
                 with state.io_lock:
                     triggered = (
                         wait_for_wake_word(
-                            interrupt_event=typed_input.interrupt_event
+                            interrupt_event=typed_input.interrupt_event,
+                            active_task=active_task_for_wake,
                         )
                     )
 
@@ -1990,9 +1996,22 @@ def main():
             # Wake acknowledgement
             # ------------------------------------------
 
-            interrupted = speak(
-                "Yes?"
+            active_task_now = (
+                state.task_controller is not None
+                and state.task_controller.has_active_task()
             )
+
+            if active_task_now:
+                logger.info(
+                    "JARVIS: Wake detected during an active task; "
+                    "skipping acknowledgement and listening directly "
+                    "for the command."
+                )
+                interrupted = False
+            else:
+                interrupted = speak(
+                    "Yes?"
+                )
 
             if interrupted:
 
