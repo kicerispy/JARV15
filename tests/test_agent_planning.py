@@ -693,3 +693,23 @@ def test_repair_handoff_tells_planner_to_use_evidence_and_stop_generic_discovery
     assert "code_checkpoint BEFORE" in request
     assert "code_test AFTER" in request
     assert "Do not invent filenames" in request
+
+
+def test_code_test_progress_does_not_claim_a_change_was_applied():
+    import tool_executor
+
+    messages = {}
+
+    class FakeTaskState:
+        def report_progress(self, message):
+            messages["message"] = message
+
+    tool_executor._report_tool_progress(
+        FakeTaskState(),
+        "code_test",
+        3,
+        3,
+    )
+
+    assert "Step 3 of 3. I'm running the validation now." == messages["message"]
+    assert "change is in place" not in messages["message"].lower()
