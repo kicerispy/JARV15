@@ -1263,8 +1263,12 @@ def _spoken_execution_summary(
     if tool == "task_history":
         return text or "Task history is ready."
 
-    if tool in {"code_test", "verify_screen"}:
-        return text or "Validation complete."
+    if tool in {"code_test", "code_diagnose", "verify_screen"}:
+        return text or (
+            "Project diagnostics complete."
+            if tool == "code_diagnose"
+            else "Validation complete."
+        )
 
     if tool == "wait":
         return "Done."
