@@ -36,6 +36,29 @@ def test_software_repair_detection():
     ) is False
 
 
+def test_validate_plan_preserves_internal_phase_metadata():
+    plan = validate_plan(
+        {
+            "goal": "inspect verified target source",
+            "jarvis_internal_phase": True,
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "browser_controller.py",
+                }
+            ],
+        }
+    )
+
+    assert plan.get("jarvis_internal_phase") is True
+    assert plan["steps"] == [
+        {
+            "tool": "read_file",
+            "argument": "browser_controller.py",
+        }
+    ]
+
+
 def test_repair_plan_requires_inspection_checkpoint_and_test():
     issues = assess_plan(
         "inspect the browser automation and fix the problem",
