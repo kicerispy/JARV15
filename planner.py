@@ -1547,7 +1547,12 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                         model=fallback_model,
                         messages=messages,
                         format="json",
-                        options={"temperature": 0},
+                        options={
+                            "temperature": 0,
+                            "num_predict": 240,
+                            "num_ctx": 8192,
+                        },
+                        keep_alive="15m",
                     )
                     fallback_content = (
                         fallback_response
@@ -1605,7 +1610,12 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                         model=fallback_model,
                         messages=messages,
                         format="json",
-                        options={"temperature": 0},
+                        options={
+                            "temperature": 0,
+                            "num_predict": 240,
+                            "num_ctx": 8192,
+                        },
+                        keep_alive="15m",
                     )
                     fallback_content = (
                         fallback_response
