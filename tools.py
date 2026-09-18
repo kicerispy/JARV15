@@ -2368,6 +2368,18 @@ def _run_tool_raw(
         )
 
     # --------------------------------------------------------
+    # AUTONOMOUS CODE CHECKPOINTS
+    # --------------------------------------------------------
+
+    elif tool_name == "code_checkpoint":
+
+        return code_checkpoint(argument)
+
+    elif tool_name == "code_restore_checkpoint":
+
+        return code_restore_checkpoint(argument)
+
+    # --------------------------------------------------------
     # CODE INSPECTION / VALIDATION
     # --------------------------------------------------------
 
