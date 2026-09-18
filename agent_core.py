@@ -834,6 +834,7 @@ class JarvisAgent:
         require_code_read: bool = False,
         require_code_test: bool = False,
         require_code_diagnose: bool = False,
+        require_repair_plan: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Build a deterministic minimal plan when a required phase dead-ends."""
         target = self._latest_verified_source_target(task)
@@ -1170,6 +1171,7 @@ class JarvisAgent:
                     require_code_read=require_code_read,
                     require_code_test=require_code_test,
                     require_code_diagnose=require_code_diagnose,
+                    require_repair_plan=require_repair_plan,
                 )
 
                 if fallback_plan is not None:
@@ -1180,6 +1182,7 @@ class JarvisAgent:
                         require_modification=require_repair_plan,
                         require_code_read=require_code_read,
                         require_code_test=require_code_test,
+                        require_code_diagnose=require_code_diagnose,
                         allow_prior_evidence=(
                             (
                                 self._has_verified_evidence(
@@ -1202,6 +1205,7 @@ class JarvisAgent:
                                 require_repair_plan
                                 or require_code_read
                                 or require_code_test
+                                or require_code_diagnose
                             )
                             else False
                         ),
