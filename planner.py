@@ -177,6 +177,27 @@ refactor, modify, patch, or test software:
 existing file/search/test tools cannot perform the required step. Never use
 shell operators, pipes, or command chaining; pass one developer command.
 
+INTERNAL PHASE OVERRIDES:
+
+JARVIS may prepend an internal phase marker to a planning request. When one is
+present, it is authoritative and overrides generic planning preferences:
+
+- [JARVIS_INTERNAL_PHASE:SOURCE_READ]
+  Return a minimal inspection plan containing read_file for the verified target.
+  Do not edit files and do not add unrelated discovery steps.
+
+- [JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]
+  Return a minimal diagnostic plan containing code_diagnose for the verified
+  target. Do not use code_test instead. Do not edit files. Prefer a narrow
+  targeted diagnostic argument such as:
+  {"path":"target.py","run_tests":false,"run_lint":false,"run_types":false}
+
+- [JARVIS_INTERNAL_PHASE:REPAIR]
+  Use the verified evidence supplied in the request. Return the smallest safe
+  repair plan with code_checkpoint before mutation and code_test after mutation.
+  Do not repeat generic discovery unless the evidence explicitly shows that
+  another focused source read is required.
+
 DEVELOPER COMMAND RULES:
 
 - Use dev_command for dependency installation, targeted test execution,
@@ -559,6 +580,7 @@ def assess_plan(
     require_modification: Optional[bool] = None,
     require_code_read: bool = False,
     require_code_test: bool = False,
+    require_code_diagnose: bool = False,
     allow_prior_evidence: bool = False,
 ) -> List[str]:
     """
@@ -741,6 +763,19 @@ def assess_plan(
             "The next diagnostic phase must run code_test so the "
             "implementation can be validated before deciding whether to edit."
         )
+
+    if require_code_diagnose:
+        diagnose_indices = [
+            index
+            for index, tool in enumerate(tool_names)
+            if tool == "code_diagnose"
+        ]
+
+        if not diagnose_indices:
+            issues.append(
+                "The required diagnostic phase must run code_diagnose "
+                "against the verified target before any repair decision."
+            )
 
     # Browser automation needs a behavioral smoke test, not only a syntax
     # check. Once browser automation is the active repair domain, require the
