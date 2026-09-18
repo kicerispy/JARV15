@@ -554,7 +554,7 @@ def assess_plan(
     test_indices = [
         index
         for index, tool in enumerate(tool_names)
-        if tool == "code_test"
+        if tool in {"code_test", "code_diagnose"}
     ]
 
     # --------------------------------------------------------
