@@ -10,6 +10,57 @@ from typing import List, Optional
 from logger import logger
 
 
+IGNORED_LIST_DIRECTORIES = {
+    ".git",
+    ".venv",
+    "venv",
+    "jarvis_cuda",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".nox",
+    ".cache",
+    ".eggs",
+    "build",
+    "dist",
+}
+
+IGNORED_LIST_FILE_TOKENS = (
+    ".before_",
+    ".backup",
+    "_backup",
+    ".bak",
+    ".broken_",
+    ".working_",
+)
+
+IGNORED_LIST_RUNTIME_FILES = {
+    "input.wav",
+    "jarvis_memory.db",
+    "conversation_history.json",
+    "jarvis_history.json",
+    "task_state.json",
+}
+
+
+def _is_discovery_noise(name: str) -> bool:
+    lowered = str(name or "").strip().lower()
+    return (
+        lowered in IGNORED_LIST_RUNTIME_FILES
+        or any(token in lowered for token in IGNORED_LIST_FILE_TOKENS)
+    )
+
+
+def _is_ignored_list_entry(name: str) -> bool:
+    lowered = str(name or "").strip().lower()
+    return (
+        lowered in IGNORED_LIST_DIRECTORIES
+        or _is_discovery_noise(lowered)
+    )
+
+
 def _sanitize_folder_name(name: str) -> str:
     """Sanitize a folder name to prevent path traversal."""
     # Remove any path separators and dangerous characters
@@ -87,8 +138,17 @@ def list_files(folder: str = ".") -> str:
         if not items:
             return "The folder is empty."
 
-        result = "Files found:\n"
-        for item in items:
+        filtered_items = [
+            item
+            for item in items
+            if not _is_ignored_list_entry(item)
+        ]
+
+        if not filtered_items:
+            return "No relevant project files found."
+
+        result = "Relevant project files:\n"
+        for item in filtered_items:
             result += f"- {item}\n"
         return result.strip()
     except OSError as e:
