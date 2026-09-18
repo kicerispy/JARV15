@@ -180,8 +180,11 @@ class ToolExecutorFailureTests(unittest.TestCase):
                 "current_date",
             ],
         )
+        # TaskState counters describe the current step. The trace keeps
+        # the retry accounting for earlier steps, so step 2 remains
+        # observable after execution advances to step 3.
         self.assertEqual(task_state.attempts, 1)
-        self.assertEqual(task_state.recovery_count, 1)
+        self.assertEqual(task_state.recovery_count, 0)
 
         trace = tool_executor.get_last_execution_trace()
         self.assertEqual(len(trace), 3)
