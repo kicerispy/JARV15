@@ -111,3 +111,59 @@ def test_failed_self_diagnostic_hands_off_directly_to_repair_planner():
     assert completed.status == "completed"
     assert len(planner_calls) == 1
     assert len(execution_calls) == 2
+
+
+
+def test_clean_self_diagnostic_does_not_call_planner():
+    request = (
+        "Run a full diagnostic on yourself, identify any real problems you find, "
+        "and fix them. Then run the relevant tests to verify the repairs."
+    )
+
+    planner_calls = []
+
+    def unexpected_planner(*args, **kwargs):
+        planner_calls.append(True)
+        raise AssertionError("planner should not run after a clean self-diagnostic")
+
+    agent = JarvisAgent(planner=unexpected_planner)
+    task = agent.create_task(request)
+    task.status = "ready"
+    task.planner_result = {
+        "goal": "full JARVIS project diagnostic",
+        "jarvis_internal_phase": True,
+        "steps": [
+            {
+                "tool": "code_diagnose",
+                "argument": (
+                    '{"path":"","run_tests":true,"run_lint":true,'
+                    '"run_types":false,"timeout":180}'
+                ),
+            }
+        ],
+    }
+    task.steps = agent._build_steps(task.planner_result)
+
+    def fake_execute_once(task_arg, active_context, task_state, speak_callback):
+        task_arg.evidence.append({
+            "tool": "code_diagnose",
+            "target": ".",
+            "success": True,
+            "verified": True,
+            "detail": "Project diagnostic passed.",
+        })
+        return "done"
+
+    agent._execute_once = fake_execute_once
+
+    task_state = __import__("state").TaskState()
+    completed = agent.execute_task(
+        task,
+        active_context={},
+        task_state=task_state,
+        speak_callback=lambda message: None,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner_calls) == 0
+    assert "no reproducible defect" in completed.execution_result
