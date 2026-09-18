@@ -1974,8 +1974,6 @@ def execute_plan(
             # is responsible for the final user-facing outcome.
             return "failed"
 
-            return "failed"
-
     # ========================================================
     # MULTI-STEP COMPLETION
     # ========================================================
