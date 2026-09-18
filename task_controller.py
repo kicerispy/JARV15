@@ -158,9 +158,6 @@ class BackgroundTaskController:
         active_context: Any,
         task_state: Any,
         history_text: str = "",
-        fallback_callback: Optional[
-            Callable[[Callable[[str], bool]], Any]
-        ] = None,
     ) -> bool:
         """Plan and execute a task entirely in the background."""
         if task is None:
@@ -190,7 +187,6 @@ class BackgroundTaskController:
                 active_context,
                 task_state,
                 history_text,
-                fallback_callback,
             ),
             initial_message=(
                 "I'm on it. I'll keep you updated and let you know when it's finished."
@@ -326,16 +322,8 @@ class BackgroundTaskController:
         active_context: Any,
         task_state: Any,
         history_text: str,
-        fallback_callback: Optional[
-            Callable[[Callable[[str], bool]], Any]
-        ],
     ) -> None:
         """Plan first, then execute, without blocking the main loop."""
-        worker_speak = lambda message: self._background_speak(
-            self._queue_speech,
-            message,
-        )
-
         try:
             if task_state.is_cancelled():
                 task.status = "cancelled"
@@ -354,29 +342,30 @@ class BackgroundTaskController:
                 task_state.finish()
                 return
 
-            if (
-                planned.status == "conversation"
-                or not getattr(planned, "steps", None)
-            ):
-                task.status = "conversation"
+            if planned.status == "conversation":
+                task.status = "failed"
+                task.error = (
+                    "The planner classified an Agent-routed request "
+                    "as conversation."
+                )
                 task.completed_at = time.time()
+                task_state.fail(task.error)
+                self._queue_speech(
+                    "I couldn't create an action plan for that request."
+                )
+                return
 
-                if fallback_callback is not None:
-                    try:
-                        fallback_callback(worker_speak)
-                    except Exception as exc:
-                        logger.warning(
-                            "JARVIS TASK CONTROLLER: "
-                            f"Conversation fallback failed: {exc}"
-                        )
-                        task.status = "failed"
-                        task.error = str(exc)
-                        task_state.fail(str(exc))
-                        self._queue_speech(
-                            "I wasn't able to process that request."
-                        )
-
-                task_state.finish()
+            if not getattr(planned, "steps", None):
+                task.status = "failed"
+                task.error = (
+                    "The planner returned no executable steps "
+                    "for an action request."
+                )
+                task.completed_at = time.time()
+                task_state.fail(task.error)
+                self._queue_speech(
+                    "I couldn't create an action plan for that request."
+                )
                 return
 
             if planned.status == "failed":
