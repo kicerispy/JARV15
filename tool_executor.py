@@ -31,6 +31,8 @@ BROWSER_TOOLS = {
     "browser_click_first_bing_result",
     "browser_goto",
     "browser_page_info",
+    "browser_click_result",
+    "browser_back",
 }
 
 
@@ -52,6 +54,90 @@ def run_browser_tool(
         tool_name,
         argument,
     )
+
+
+# ============================================================
+# BROWSER FALLBACK / CONTEXT
+# ============================================================
+
+def _unwrap_result_data(result: Any) -> Any:
+    if isinstance(result, ToolResult):
+        return result.data
+    return result
+
+
+def _execute_browser_with_fallback(
+    tool_name: str,
+    argument: str,
+) -> Any:
+    """Execute a browser action and use desktop vision for click fallback."""
+    result = run_browser_tool(tool_name, argument)
+
+    try:
+        unsuccessful = isinstance(result, ToolResult) and not result.success
+        if isinstance(result, dict):
+            unsuccessful = not bool(result.get("success", False))
+
+        if not unsuccessful:
+            return result
+
+        if tool_name in {"browser_click_element", "browser_click_result"}:
+            import json
+            payload = {}
+            try:
+                payload = json.loads(str(argument or "{}"))
+            except Exception:
+                payload = {}
+
+            if tool_name == "browser_click_element":
+                target = (
+                    str(payload.get("text") or "").strip()
+                    or str(payload.get("role") or "").strip()
+                    or str(payload.get("selector") or "").strip()
+                )
+            else:
+                index = payload.get("index", 1)
+                ordinal = "last" if int(index) < 0 else str(index)
+                target = f"{ordinal} search result"
+                if payload.get("site"):
+                    target += f" on {payload['site']}"
+
+            if target:
+                try:
+                    from screen_vision import click_screen_target
+                    fallback = click_screen_target(target)
+                    if isinstance(fallback, dict) and fallback.get("success"):
+                        return ToolResult(
+                            success=True,
+                            tool=tool_name,
+                            data={
+                                **fallback,
+                                "original_browser_failure": (
+                                    str(
+                                        getattr(result, "error", "")
+                                        or (
+                                            result.get("error", "")
+                                            if isinstance(result, dict)
+                                            else ""
+                                        )
+                                    )
+                                ),
+                                "recovered_by": "desktop_vision",
+                            },
+                            observation=fallback,
+                        )
+                except Exception as fallback_error:
+                    logger.debug(
+                        "JARVIS: Desktop fallback unavailable: %s",
+                        fallback_error,
+                    )
+    except Exception as exc:
+        logger.debug(
+            "JARVIS: Browser fallback evaluation failed: %s",
+            exc,
+        )
+
+    return result
 
 
 # ============================================================
@@ -90,6 +176,38 @@ SCREEN_VERIFY_INTERVAL = 0.20
 # ============================================================
 # CONTEXT UPDATE
 # ============================================================
+
+def _update_browser_active_context(
+    tool_name: str,
+    result: Any,
+    active_context: ActiveContext,
+) -> None:
+    """Copy useful browser observations into ActiveContext."""
+    raw = _unwrap_result_data(result)
+    if not isinstance(raw, dict):
+        return
+
+    if tool_name in BROWSER_TOOLS:
+        active_context.last_tool = tool_name
+        active_context.last_action = tool_name
+
+    if raw.get("url"):
+        active_context.page_url = str(raw.get("url"))
+    if raw.get("after_url"):
+        active_context.page_url = str(raw.get("after_url"))
+    if raw.get("title"):
+        active_context.page_title = str(raw.get("title"))
+    if raw.get("after_title"):
+        active_context.page_title = str(raw.get("after_title"))
+    if raw.get("result_title"):
+        active_context.last_result_title = str(raw.get("result_title"))
+    if raw.get("result_url"):
+        active_context.last_result_url = str(raw.get("result_url"))
+    if raw.get("element_text"):
+        active_context.last_element = str(raw.get("element_text"))
+    elif raw.get("text") and tool_name == "browser_extract_text":
+        active_context.last_element = str(raw.get("text"))[:500]
+
 
 def update_active_context(
     plan: Dict[str, Any],
@@ -138,6 +256,29 @@ def update_active_context(
         # ----------------------------------------------------
         # Website search
         # ----------------------------------------------------
+
+        if tool_name in {
+            "browser_page_info",
+            "browser_connect",
+            "browser_goto",
+            "browser_search_google",
+            "browser_search_bing",
+            "browser_click_first_bing_result",
+            "browser_click_first_result",
+            "browser_click_result",
+            "browser_back",
+            "browser_click_element",
+            "browser_fill_element",
+            "browser_press_key",
+            "browser_wait_for_element",
+            "browser_extract_text",
+        }:
+            active_context.last_tool = tool_name
+            active_context.last_action = tool_name
+            if result_message:
+                active_context.last_result = str(result_message)
+
+            raw = result_message if isinstance(result_message, dict) else None
 
         if tool_name == "search_website":
 
@@ -614,6 +755,61 @@ def format_browser_result(
             )
 
         return " ".join(parts)
+
+    if tool_name == "browser_find_element":
+        found = bool(result.get("found"))
+        visible = bool(result.get("visible"))
+        element_text = str(result.get("element_text", "")).strip()
+        if found and visible:
+            return (
+                "Browser element found"
+                + (f": {element_text}" if element_text else ".")
+            )
+        if found:
+            return "Browser element exists but is not visible."
+        return "The requested browser element was not found."
+
+    if tool_name == "browser_click_element":
+        if result.get("navigated"):
+            return (
+                "Browser element clicked and navigation succeeded"
+                + (
+                    f" to {result.get('after_title')}."
+                    if result.get("after_title")
+                    else "."
+                )
+            )
+        return "Browser element clicked successfully."
+
+    if tool_name == "browser_fill_element":
+        return (
+            "Browser input filled successfully."
+            if result.get("verified", True)
+            else "Browser input was filled, but its value could not be verified."
+        )
+
+    if tool_name == "browser_press_key":
+        return (
+            f"Pressed {result.get('key', 'the key')} in the browser."
+        )
+
+    if tool_name == "browser_wait_for_element":
+        return "The browser element is visible."
+
+    if tool_name == "browser_extract_text":
+        extracted = str(result.get("text", "") or "").strip()
+        return extracted or "The browser element contains no readable text."
+
+    if tool_name == "browser_click_result":
+        index = result.get("index", 1)
+        title = str(result.get("result_title", "")).strip()
+        if title:
+            return f"Opened result {index}: {title}."
+        return f"Opened result {index}."
+
+    if tool_name == "browser_back":
+        title = str(result.get("after_title", "")).strip()
+        return f"Returned to {title}." if title else "Went back in the browser."
 
     if tool_name == "browser_connect":
 
@@ -1298,7 +1494,7 @@ def execute_plan(
                 task_state.recovery_count = 0
 
                 if tool_name in BROWSER_TOOLS:
-                    result = run_browser_tool(
+                    result = _execute_browser_with_fallback(
                         tool_name,
                         argument,
                     )
@@ -1410,6 +1606,13 @@ def execute_plan(
             # Record the normalized result in task state.
             # ------------------------------------------------
 
+            if tool_name in BROWSER_TOOLS:
+                _update_browser_active_context(
+                    tool_name,
+                    result,
+                    active_context,
+                )
+
             if success and verified:
                 task_state.record_result(result)
             else:
@@ -1474,22 +1677,27 @@ def execute_plan(
                                 f"{result.get('after_url')}"
                             )
 
-                active_context.clear()
-
-                add_assistant_message(
-                    message
-                )
-
-                speak_status = speak_result(
-                    message,
-                    speak_callback,
-                )
-
-                if speak_status == 'interrupted':
-                    return 'interrupted'
+                if tool_name in BROWSER_TOOLS:
+                    # Preserve browser state so Agent Core can replan from the
+                    # page that actually remains open after a failed action.
+                    active_context.last_tool = tool_name
+                    active_context.last_result = str(message)
+                    active_context.last_action = f"failed:{tool_name}"
+                    try:
+                        from browser_controller import browser_page_info
+                        page_info = browser_page_info()
+                        if isinstance(page_info, dict) and page_info.get("success"):
+                            active_context.page_url = page_info.get("url")
+                            active_context.page_title = page_info.get("title")
+                    except Exception:
+                        pass
+                else:
+                    active_context.clear()
 
                 task_state.fail(message)
 
+                # Do not speak intermediate failures here. Agent Core owns
+                # recovery/replanning and should only report the final outcome.
                 return 'failed'
 
             # =================================================
