@@ -183,6 +183,106 @@ def test_discovery_plan_is_allowed_before_repair_phase():
     assert issues == []
 
 
+def test_prior_evidence_can_satisfy_repair_inspection_gate():
+    repair_plan = {
+        "goal": "apply evidence-backed browser repair",
+        "steps": [
+            {
+                "tool": "code_checkpoint",
+                "argument": "",
+            },
+            {
+                "tool": "edit_file",
+                "argument": "browser_controller.py|||old|||new",
+            },
+            {
+                "tool": "code_test",
+                "argument": '{"mode":"compile","path":"browser_controller.py"}',
+            },
+        ],
+    }
+
+    without_evidence = assess_plan(
+        "inspect the browser automation and fix the problem",
+        repair_plan,
+        require_modification=True,
+    )
+
+    assert any(
+        "inspect" in issue.lower()
+        for issue in without_evidence
+    )
+
+    with_evidence = assess_plan(
+        "inspect the browser automation and fix the problem",
+        repair_plan,
+        require_modification=True,
+        allow_prior_evidence=True,
+    )
+
+    assert with_evidence == []
+
+
+class EvidenceAwareRepairPlanner:
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        return {
+            "goal": "apply evidence-backed browser repair",
+            "steps": [
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": "browser_controller.py|||old|||new",
+                },
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                },
+            ],
+        }
+
+
+def test_plan_task_passes_prior_evidence_to_repair_quality_gate():
+    agent = JarvisAgent(
+        planner=EvidenceAwareRepairPlanner(),
+    )
+    task = agent.create_task(
+        "inspect the browser automation and fix the problem"
+    )
+    task.evidence = [
+        {
+            "attempt": 1,
+            "tool": "read_file",
+            "target": "browser_controller.py",
+            "success": True,
+            "verified": True,
+            "detail": "10: def browser_connect():",
+        }
+    ]
+
+    planned = agent.plan_task(
+        task,
+        require_repair_plan=True,
+    )
+
+    assert planned.status == "ready"
+    assert [
+        step.tool
+        for step in planned.steps
+    ] == [
+        "code_checkpoint",
+        "edit_file",
+        "code_test",
+    ]
+
+
 def test_repair_phase_requires_modification_and_validation():
     issues = assess_plan(
         "inspect the browser automation and fix the problem",
