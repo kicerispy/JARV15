@@ -753,7 +753,7 @@ def test_repair_task_can_require_a_diagnostic_test_phase():
                 },
                 {
                     "tool": "code_test",
-                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                    "argument": '{"mode":"browser_smoke","path":"browser_controller.py"}',
                 },
             ],
         },
@@ -979,7 +979,7 @@ class EvidencePhasePlanner:
                 "steps": [
                     {
                         "tool": "code_test",
-                        "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                        "argument": '{"mode":"browser_smoke","path":"browser_controller.py"}',
                     },
                 ],
             }
