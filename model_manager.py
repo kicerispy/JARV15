@@ -24,6 +24,8 @@ class ModelManager:
     chat_num_gpu: int = config.CHAT_NUM_GPU
     chat_num_predict: int = config.CHAT_NUM_PREDICT
 
+    coding_num_ctx: int = config.CODING_NUM_CTX
+
     def warmup_coding_model(self) -> bool:
         """Load the coding model into Ollama's resident cache for fast repairs."""
         if not config.PRELOAD_CODING_MODEL:
@@ -44,7 +46,7 @@ class ModelManager:
             options={
                 "temperature": 0,
                 "num_predict": 1,
-                "num_ctx": 1024,
+                "num_ctx": self.coding_num_ctx,
             },
             keep_alive=config.CODING_MODEL_KEEP_ALIVE,
         )
