@@ -536,9 +536,11 @@ class JarvisAgent:
             block = header + "\n" + "\n".join(body_parts)
 
             if total + len(block) + 1 > max_chars:
-                sections.append(
-                    "",
-                    "[Additional evidence omitted to keep the repair context bounded.]",
+                sections.extend(
+                    [
+                        "",
+                        "[Additional evidence omitted to keep the repair context bounded.]",
+                    ]
                 )
                 break
 
