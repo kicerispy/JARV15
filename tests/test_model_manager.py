@@ -10,7 +10,8 @@ class ModelManagerTests(unittest.TestCase):
 
         self.assertEqual(manager.chat_model, "qwen3.5:9b")
         self.assertEqual(manager.planner_model, "qwen3.5:9b")
-        self.assertEqual(manager.coding_model, "gemma4:26b")
+        self.assertEqual(manager.coding_model, "qwen2.5-coder:14b")
+        self.assertEqual(manager.coding_fallback_model, "gemma4:26b")
 
     def test_chat_generation_defaults_are_centralized(self):
         from model_manager import ModelManager
