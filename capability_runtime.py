@@ -32,16 +32,19 @@ def _looks_complex(text: str) -> bool:
 
 
 def _weather_location(text: str) -> Optional[str]:
-    normalized = _normalize(text)
+    original = str(text or "").strip()
+    normalized = _normalize(original)
 
     for prefix in _WEATHER_PREFIXES:
         if normalized.startswith(prefix):
-            location = normalized[len(prefix):].strip()
+            location = original[len(prefix):].strip()
             location = re.sub(
-                r"\s+(?:right now|today|tomorrow|now)$",
+                r"\s+(?:right now|today|tomorrow|now)\s*[?.!,]*$",
                 "",
                 location,
+                flags=re.IGNORECASE,
             ).strip()
+            location = location.rstrip("?.!,").strip()
             return location or None
 
     return None
