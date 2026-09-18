@@ -168,7 +168,7 @@ def test_background_planning_does_not_block_caller():
         lambda message: spoken.append(message) or False
     ) == 1
     assert spoken == [
-        "I'm on it. I'll keep you updated and let you know when it's finished."
+        "On it."
     ]
 
     agent.release_planning.set()
