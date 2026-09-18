@@ -38,6 +38,10 @@ from smart_router import route_command
 from memory import create_memory
 from planner import create_plan
 from state import JarvisState
+from task_controller import (
+    BackgroundTaskController,
+    is_task_status_request,
+)
 from tool_executor import execute_plan
 
 
@@ -405,7 +409,15 @@ def process_command(
 
         state.continuous_mode = False
         state.active_context.clear()
-        state.task_state.finish()
+
+        # Do not mark an active background task as complete just
+        # because the conversational mode is ending.
+        if (
+            task_controller is None
+            or not task_controller.has_active_task()
+        ):
+            state.task_state.finish()
+
         state.pending_input = None
 
         logger.info(
@@ -423,14 +435,39 @@ def process_command(
         user_input
     ):
 
-        state.task_state.cancel()
-        state.continuous_mode = False
+        background_cancelled = False
+
+        if task_controller is not None:
+            background_cancelled = (
+                task_controller.cancel_current()
+            )
+
+        if not background_cancelled:
+            state.task_state.cancel()
+
+        state.continuous_mode = (
+            True
+            if background_cancelled
+            else False
+        )
         state.pending_input = None
         state.active_context.clear()
 
         logger.info(
             "JARVIS: Command cancelled."
         )
+
+        if background_cancelled:
+            reply = "Stopping the current task."
+
+            conversation.add_message(
+                "assistant",
+                reply,
+            )
+
+            speak_callback(reply)
+
+            return "cancelled"
 
         state.task_state.finish()
 
@@ -440,6 +477,45 @@ def process_command(
         )
 
         return "cancelled"
+
+    # ==================================================
+    # BACKGROUND TASK STATUS
+    # ==================================================
+
+    task_controller = getattr(
+        state,
+        "task_controller",
+        None,
+    )
+
+    if (
+        task_controller is not None
+        and task_controller.has_active_task()
+        and is_task_status_request(user_input)
+    ):
+
+        reply = task_controller.status_message()
+
+        conversation.add_message(
+            "assistant",
+            reply,
+        )
+
+        logger.info(
+            f"JARVIS TASK CONTROLLER: {reply}"
+        )
+
+        interrupted = speak_callback(
+            reply
+        )
+
+        if interrupted:
+            state.pending_input = _listen_after_barge_in()
+
+            if state.pending_input:
+                return "interrupted"
+
+        return "done"
 
     # ==================================================
     # SHUTDOWN
@@ -741,31 +817,59 @@ def process_command(
 
                 agent_task.status = "ready"
 
-                agent_task = (
-                    jarvis_agent.execute_task(
+                if task_controller is not None:
+                    started = task_controller.start(
                         agent_task,
                         state.active_context,
                         state.task_state,
                         speak_callback,
                         history_text="",
                     )
-                )
 
-                result = (
-                    "done"
-                    if agent_task.status == "completed"
-                    else (
-                        "cancelled"
-                        if agent_task.status == "cancelled"
-                        else "failed"
+                    if not started:
+                        reply = (
+                            "I'm already handling another task."
+                        )
+                        conversation.add_message(
+                            "assistant",
+                            reply,
+                        )
+                        speak_callback(reply)
+                        return "done"
+
+                    result = "task_started"
+
+                    logger.info(
+                        "JARVIS AGENT: Fast task queued in "
+                        "background controller."
                     )
-                )
 
-                logger.info(
-                    "JARVIS AGENT: Fast task "
-                    f"status={agent_task.status}, "
-                    f"replans={agent_task.replan_count}"
-                )
+                else:
+                    agent_task = (
+                        jarvis_agent.execute_task(
+                            agent_task,
+                            state.active_context,
+                            state.task_state,
+                            speak_callback,
+                            history_text="",
+                        )
+                    )
+
+                    result = (
+                        "done"
+                        if agent_task.status == "completed"
+                        else (
+                            "cancelled"
+                            if agent_task.status == "cancelled"
+                            else "failed"
+                        )
+                    )
+
+                    logger.info(
+                        "JARVIS AGENT: Fast task "
+                        f"status={agent_task.status}, "
+                        f"replans={agent_task.replan_count}"
+                    )
 
                 logger.info(
                     f"PERF: fast multi-step execution: "
@@ -1175,12 +1279,40 @@ def process_command(
 
     else:
 
-        result = jarvis_agent.execute_task(
-            agent_task,
-            state.active_context,
-            state.task_state,
-            speak_callback,
-        )
+        if task_controller is not None:
+
+            started = task_controller.start(
+                agent_task,
+                state.active_context,
+                state.task_state,
+                speak_callback,
+                history_text=history_text,
+            )
+
+            if not started:
+                result = (
+                    "I'm already handling another task."
+                )
+
+                speak_callback(result)
+
+                return "done"
+
+            result = "task_started"
+
+            logger.info(
+                "JARVIS AGENT: Task queued in "
+                "background controller."
+            )
+
+        else:
+
+            result = jarvis_agent.execute_task(
+                agent_task,
+                state.active_context,
+                state.task_state,
+                speak_callback,
+            )
 
     logger.info(
         f"PERF: agent execution: {perf_now() - execution_start:.3f}s"
@@ -1309,6 +1441,9 @@ def main():
     )
 
     state = JarvisState()
+    state.task_controller = BackgroundTaskController(
+        jarvis_agent
+    )
 
     conversation = ConversationHistory()
 
@@ -1389,10 +1524,11 @@ def main():
 
             from voice import speak as voice_speak
 
-            result = speak_response(
-                text,
-                voice_speak,
-            )
+            with state.io_lock:
+                result = speak_response(
+                    text,
+                    voice_speak,
+                )
 
             logger.info(
                 f"PERF: TTS call: "
@@ -1413,6 +1549,24 @@ def main():
             )
 
             return False
+
+    # ==================================================
+    # SERIALIZED LISTENING
+    # ==================================================
+
+    def listen_serialized(
+        initial_audio=None,
+        mode="wake",
+    ):
+        """Serialize microphone capture with background TTS."""
+        if listen is None:
+            return None
+
+        with state.io_lock:
+            return listen(
+                initial_audio=initial_audio,
+                mode=mode,
+            )
 
     # ==================================================
     # STARTUP MESSAGE
@@ -1489,7 +1643,7 @@ def main():
 
                     listen_start = perf_now()
 
-                    current_input = listen(
+                    current_input = listen_serialized(
                         mode="continuous"
                     )
 
@@ -1557,9 +1711,10 @@ def main():
 
                 wake_start = perf_now()
 
-                triggered = (
-                    wait_for_wake_word()
-                )
+                with state.io_lock:
+                    triggered = (
+                        wait_for_wake_word()
+                    )
 
                 logger.info(
                     f"PERF: wake listener cycle: "
@@ -1614,7 +1769,7 @@ def main():
 
                 listen_start = perf_now()
 
-                current_input = listen(
+                current_input = listen_serialized(
                     mode="wake"
                 )
 
