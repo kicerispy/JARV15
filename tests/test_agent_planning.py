@@ -47,6 +47,7 @@ def test_repair_plan_requires_inspection_checkpoint_and_test():
     assert any("inspect" in issue.lower() for issue in issues)
     assert any("checkpoint" in issue.lower() for issue in issues)
     assert any("code_test" in issue.lower() for issue in issues)
+    assert any("modification" in issue.lower() for issue in issues)
 
 
 def test_valid_repair_plan_passes_quality_gate():
@@ -138,3 +139,21 @@ def test_agent_fails_when_corrective_plan_is_still_unsafe():
     assert planner.calls == 2
     assert planned.status == "failed"
     assert "Planner quality validation failed" in planned.error
+
+
+def test_diagnostic_only_request_does_not_require_modification():
+    issues = assess_plan(
+        "inspect the browser automation and test it",
+        {
+            "goal": "inspect browser automation",
+            "steps": [
+                {"tool": "code_search", "argument": "browser"},
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                },
+            ],
+        },
+    )
+
+    assert issues == []
