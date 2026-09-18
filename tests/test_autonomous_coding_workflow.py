@@ -94,3 +94,14 @@ def test_validate_plan_accepts_code_diagnose_json():
 
     assert plan["steps"][0]["tool"] == "code_diagnose"
     assert plan["steps"][0]["argument"] == '{"run_tests": false}'
+
+from code_gen import is_complex_code_request
+
+
+def test_complex_code_requests_use_full_agent_workflow():
+    assert is_complex_code_request(
+        "build a full JARVIS browser automation project"
+    ) is True
+    assert is_complex_code_request(
+        "write a simple Python script called hello.py"
+    ) is False
