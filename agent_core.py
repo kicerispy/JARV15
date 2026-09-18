@@ -755,6 +755,61 @@ class JarvisAgent:
         return None
 
     @staticmethod
+    def _requested_file_exists(requested_target: Optional[str]) -> bool:
+        """Return True when a requested filename matches an existing project file."""
+        if not requested_target:
+            return False
+
+        target_key = re.sub(
+            r"[^a-z0-9]",
+            "",
+            str(requested_target).lower(),
+        )
+
+        if not target_key:
+            return False
+
+        ignored_parts = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "jarvis_cuda",
+            "venv",
+            ".venv",
+            "node_modules",
+            "build",
+            "dist",
+            ".jarvis_checkpoints",
+        }
+
+        try:
+            project_root = Path.cwd().resolve()
+
+            for path in project_root.rglob("*"):
+                if not path.is_file():
+                    continue
+
+                if any(part in ignored_parts for part in path.parts):
+                    continue
+
+                filename_key = re.sub(
+                    r"[^a-z0-9]",
+                    "",
+                    path.name.lower(),
+                )
+
+                if filename_key == target_key:
+                    return True
+
+        except OSError:
+            return False
+
+        return False
+
+
+    @staticmethod
     def _infer_requested_file_target(
         request: str,
     ) -> Optional[str]:
@@ -1035,6 +1090,44 @@ class JarvisAgent:
             "JARVIS AGENT: Planning task "
             f"{task.task_id}"
         )
+
+        # A repair request that explicitly names an existing file does not
+        # need an LLM to rediscover the entry point. Start with deterministic
+        # file discovery; the LLM remains responsible for the evidence-based
+        # repair decision after diagnosis.
+        if (
+            planning_request is None
+            and is_software_repair_request(task.request)
+            and not (
+                require_repair_plan
+                or require_code_read
+                or require_code_test
+                or require_code_diagnose
+            )
+        ):
+            requested_target = self._infer_requested_file_target(
+                task.request
+            )
+
+            if self._requested_file_exists(requested_target):
+                deterministic_plan = self._build_phase_fallback_plan(
+                    task
+                )
+
+                if deterministic_plan is not None:
+                    logger.info(
+                        "JARVIS AGENT: Explicit existing repair target found; "
+                        "starting deterministic discovery without planner call."
+                    )
+                    task = self._install_phase_plan(
+                        task,
+                        deterministic_plan,
+                    )
+                    task.observations.append(
+                        "Deterministic repair entry point: explicit existing "
+                        "target file was discovered without an LLM planning call."
+                    )
+                    return task
 
         # Give an incomplete plan one corrective planning pass in general.
         # For a repair request that already names an existing target file,
