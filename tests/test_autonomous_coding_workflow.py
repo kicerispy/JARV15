@@ -7,6 +7,7 @@ from planner import (
     validate_plan,
 )
 from tools import code_diagnose
+from file_tools import find_file
 
 
 def test_code_diagnose_returns_structured_success(monkeypatch):
@@ -171,3 +172,13 @@ def test_validate_plan_resolves_voice_transcribed_filename(tmp_path, monkeypatch
     assert plan["steps"][0]["tool"] == "read_file"
     assert plan["steps"][0]["argument"] == "jarvis_autonomous_test_target.py"
 
+
+
+def test_find_file_resolves_spoken_filename_without_underscores(tmp_path, monkeypatch):
+    target = tmp_path / "jarvis_autonomous_test_target.py"
+    target.write_text("pass\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = find_file("Jarvis autonomous test target.py")
+
+    assert "jarvis_autonomous_test_target.py" in result
