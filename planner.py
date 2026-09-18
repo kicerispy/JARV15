@@ -23,6 +23,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
+    "browser_self_test": "Run a focused runtime smoke test of JARVIS browser automation, including generic DOM controls and the live Google result selector.",
     "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role.",
     "browser_click_element": "Click a browser DOM element by CSS selector, visible text, or ARIA role.",
     "browser_fill_element": "Fill a browser input by CSS selector, visible text, or ARIA role. Argument is JSON.",
@@ -885,8 +886,20 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         print("JARVIS DEBUG: planner -> calling Ollama", flush=True)
         planner_start = time.perf_counter()
 
+        planner_model = (
+            MODEL_MANAGER.coding_model
+            if "REPAIR PHASE RULES:" in user_command
+            else PLANNER_MODEL
+        )
+
+        if "REPAIR PHASE RULES:" in user_command:
+            print(
+                f"JARVIS DEBUG: repair planner -> using {planner_model}",
+                flush=True,
+            )
+
         response = chat(
-            model=PLANNER_MODEL,
+            model=planner_model,
             messages=messages,
             format="json"
         )
