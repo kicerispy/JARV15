@@ -36,15 +36,58 @@ class JarvisContext:
             "has_config": False,
         }
 
-        excluded_dirs = {"__pycache__", ".git", "jarvis_cuda", "venv", ".venv", "node_modules", ".eggs", "build", "dist", ".pytest_cache", ".mypy_cache"}
+        excluded_dirs = {
+            "__pycache__",
+            ".git",
+            "jarvis_cuda",
+            "venv",
+            ".venv",
+            "node_modules",
+            ".eggs",
+            "build",
+            "dist",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".tox",
+            ".nox",
+            ".cache",
+        }
+
+        ignored_file_tokens = (
+            ".before_",
+            ".backup",
+            "_backup",
+            ".bak",
+            ".broken_",
+            ".working_",
+        )
+
+        ignored_runtime_files = {
+            "input.wav",
+            "jarvis_memory.db",
+            "conversation_history.json",
+            "jarvis_history.json",
+            "task_state.json",
+        }
 
         try:
             for path in Path(".").rglob("*"):
                 if not path.is_file():
                     continue
+
                 parts = set(path.parts)
                 if parts & excluded_dirs:
                     continue
+
+                name = path.name.lower()
+
+                if (
+                    name in ignored_runtime_files
+                    or any(token in name for token in ignored_file_tokens)
+                ):
+                    continue
+
                 info["files"].append(str(path))
                 info["file_count"] += 1
 
