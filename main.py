@@ -1247,6 +1247,49 @@ def process_command(
             state.active_context.to_dict(),
         )
 
+        if task_controller is not None:
+
+            def background_conversation_fallback(worker_speak):
+                return handle_normal_conversation(
+                    planning_input,
+                    state.active_context,
+                    system_prompt,
+                    worker_speak,
+                )
+
+            started = task_controller.start_planning(
+                agent_task,
+                state.active_context,
+                state.task_state,
+                history_text=history_text,
+                fallback_callback=(
+                    background_conversation_fallback
+                ),
+            )
+
+            logger.info(
+                f"PERF: background task submission: "
+                f"{perf_now() - planner_start:.3f}s"
+            )
+
+            if not started:
+
+                reply = (
+                    "I'm already handling another task. "
+                    "Say stop first if you'd like me to cancel it."
+                )
+
+                speak_callback(reply)
+                return "done"
+
+            result = "task_started"
+
+            run_memory_analysis_background(
+                user_input
+            )
+
+            return result
+
         jarvis_agent.plan_task(
             agent_task,
             history_text=history_text,
@@ -1624,6 +1667,18 @@ def main():
     try:
 
         while True:
+
+            # ------------------------------------------
+            # Background task speech
+            #
+            # Worker announcements are drained here so they
+            # never compete with microphone capture.
+            # ------------------------------------------
+
+            if state.task_controller is not None:
+                state.task_controller.drain_speech(
+                    speak
+                )
 
             # ------------------------------------------
             # Pending barge-in command
