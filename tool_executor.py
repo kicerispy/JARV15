@@ -1576,12 +1576,23 @@ def execute_plan(
                     dict,
                 ):
 
-                    result = dict(
-                        result
-                    )
-
-                    result["message"] = (
-                        browser_message
+                    result = ToolResult(
+                        success=result.success,
+                        tool=result.tool,
+                        data=(
+                            {
+                                **result.data,
+                                "message": browser_message,
+                            }
+                            if isinstance(result.data, dict)
+                            else {
+                                "message": browser_message,
+                                "result": result.data,
+                            }
+                        ),
+                        error=result.error,
+                        retryable=result.retryable,
+                        observation=result.observation,
                     )
 
                     # A browser controller reporting success is
