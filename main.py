@@ -11,6 +11,7 @@ import time
 from typing import Optional
 
 from code_gen import handle_code_generation, is_code_request
+from response_pipeline import speak_response
 from agent_core import JarvisAgent
 
 from commands import (
@@ -193,7 +194,7 @@ You are calm, precise, intelligent, and efficient.
 
 Keep answers concise unless the user asks for more detail.
 
-Address the user naturally as {user_name} when appropriate.
+Address the user naturally when appropriate. Do not repeat the user's name unnecessarily.
 
 Use saved memories and recent conversation context when relevant.
 
@@ -221,8 +222,7 @@ USER & PROJECT CONTEXT:
 
 {context_str}
 
-Acknowledge the user naturally during wake-word interactions
-with phrases such as:
+For wake-word acknowledgement, use brief natural phrases such as:
 
 "Yes, {user_name}?"
 
@@ -1389,8 +1389,9 @@ def main():
 
             from voice import speak as voice_speak
 
-            result = voice_speak(
-                text
+            result = speak_response(
+                text,
+                voice_speak,
             )
 
             logger.info(
