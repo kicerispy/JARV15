@@ -309,6 +309,160 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
 
 
 # ==========================================================
+# Planner Quality Gates
+# ==========================================================
+
+CODE_REPAIR_TERMS = (
+    "fix",
+    "debug",
+    "repair",
+    "refactor",
+    "modify",
+    "patch",
+    "resolve",
+)
+
+SOFTWARE_DOMAIN_TERMS = (
+    "code",
+    "script",
+    "software",
+    "project",
+    "automation",
+    "browser",
+    "python",
+    "javascript",
+    "program",
+    "bug",
+    "error",
+    "exception",
+    "traceback",
+    ".py",
+    ".js",
+)
+
+CODE_INSPECTION_TOOLS = {
+    "code_search",
+    "read_file",
+    "list_files",
+    "find_file",
+}
+
+CODE_MUTATION_TOOLS = {
+    "write_file",
+    "edit_file",
+    "delete_file",
+}
+
+
+def _normalized_words(text: str) -> str:
+    return " ".join(
+        str(text or "").strip().lower().split()
+    )
+
+
+def is_software_repair_request(text: str) -> bool:
+    normalized = _normalized_words(text)
+    return (
+        any(term in normalized for term in CODE_REPAIR_TERMS)
+        and any(term in normalized for term in SOFTWARE_DOMAIN_TERMS)
+    )
+
+
+def assess_plan(
+    user_command: str,
+    plan: Dict[str, Any],
+) -> List[str]:
+    """
+    Return planner-quality issues for code/automation repair tasks.
+
+    These are pre-execution guardrails: an incomplete candidate plan is
+    rejected and given one chance to be repaired by the planner.
+    """
+    steps = (
+        plan.get("steps", [])
+        if isinstance(plan, dict)
+        else []
+    )
+
+    if not is_software_repair_request(user_command):
+        return []
+
+    tool_names = [
+        str(
+            step.get("tool", "")
+            or ""
+        ).strip()
+        for step in steps
+        if isinstance(step, dict)
+    ]
+
+    issues: List[str] = []
+
+    inspection_index = next(
+        (
+            index
+            for index, tool in enumerate(tool_names)
+            if tool in CODE_INSPECTION_TOOLS
+        ),
+        None,
+    )
+
+    mutation_indices = [
+        index
+        for index, tool in enumerate(tool_names)
+        if tool in CODE_MUTATION_TOOLS
+    ]
+
+    checkpoint_index = next(
+        (
+            index
+            for index, tool in enumerate(tool_names)
+            if tool == "code_checkpoint"
+        ),
+        None,
+    )
+
+    test_indices = [
+        index
+        for index, tool in enumerate(tool_names)
+        if tool == "code_test"
+    ]
+
+    if inspection_index is None:
+        issues.append(
+            "The repair plan must inspect the relevant project code "
+            "before attempting to fix it."
+        )
+
+    if mutation_indices:
+        first_mutation = min(mutation_indices)
+
+        if inspection_index is None or inspection_index > first_mutation:
+            issues.append(
+                "Inspection must occur before the first file modification."
+            )
+
+        if checkpoint_index is None or checkpoint_index > first_mutation:
+            issues.append(
+                "A code_checkpoint must occur before autonomous "
+                "file modification work."
+            )
+
+        if not test_indices or max(test_indices) < max(mutation_indices):
+            issues.append(
+                "The repair plan must run code_test after the final file "
+                "modification."
+            )
+    elif not test_indices:
+        issues.append(
+            "A software repair plan must include code_test so the result "
+            "can be validated."
+        )
+
+    return issues
+
+
+# ==========================================================
 # Plan Validation
 # ==========================================================
 
