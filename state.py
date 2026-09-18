@@ -100,6 +100,7 @@ class TaskState:
     recovery_count: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _progress_callback: Any = field(default=None, repr=False, compare=False)
+    completion_spoken: bool = False
 
     def prepare(self, description: str, total_steps: int) -> None:
         """Reserve the task state for a queued background task."""
@@ -115,6 +116,7 @@ class TaskState:
             self.last_error = None
             self.attempts = 0
             self.recovery_count = 0
+            self.completion_spoken = False
 
     def start(self, description: str, total_steps: int) -> bool:
         """Start a task unless cancellation was requested while it was queued."""
@@ -183,6 +185,16 @@ class TaskState:
         """Record a recovery attempt."""
         with self._lock:
             self.recovery_count += 1
+
+    def mark_completion_spoken(self) -> None:
+        """Record that a final user-facing completion message was delivered."""
+        with self._lock:
+            self.completion_spoken = True
+
+    def was_completion_spoken(self) -> bool:
+        """Return whether a final user-facing completion message was delivered."""
+        with self._lock:
+            return self.completion_spoken
 
     def complete(self) -> None:
         """Mark the current task as completed."""
