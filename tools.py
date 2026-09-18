@@ -24,6 +24,9 @@ import jarvis_status
 import screen_vision
 import web_summary
 import web_tools
+import runtime_health
+import startup_manager
+import task_memory
 
 from config import (
     DEFAULT_WEATHER_LOCATION,
@@ -2035,6 +2038,8 @@ BROWSER_TOOLS = {
     "browser_click_first_bing_result",
     "browser_goto",
     "browser_page_info",
+    "browser_click_result",
+    "browser_back",
 }
 
 
@@ -2178,6 +2183,8 @@ def run_browser_tool(
         browser_search_bing,
         browser_click_first_bing_result,
         browser_click_first_result,
+        browser_click_result,
+        browser_back,
         browser_goto,
         browser_page_info,
     )
@@ -2218,6 +2225,29 @@ def run_browser_tool(
                 query=payload.get("query", ""),
             )
         )
+
+    if tool_name == "browser_click_result":
+        payload = {}
+        if argument:
+            try:
+                payload = json.loads(argument)
+            except json.JSONDecodeError as exc:
+                return ToolResult(
+                    success=False,
+                    tool=tool_name,
+                    error=f"Result browser argument must be valid JSON: {exc}",
+                )
+
+        return normalize(
+            browser_click_result(
+                index=payload.get("index", 1),
+                site=payload.get("site", ""),
+                query=payload.get("query", ""),
+            )
+        )
+
+    if tool_name == "browser_back":
+        return normalize(browser_back())
 
     if tool_name == "browser_goto":
         return normalize(browser_goto(argument))
@@ -2468,6 +2498,30 @@ def _run_tool_raw(
     elif tool_name == "system_status":
 
         return system_status()
+
+    elif tool_name == "startup_status":
+
+        return startup_manager.status_text()
+
+    elif tool_name == "enable_startup":
+
+        return (
+            "JARVIS will start with Windows."
+            if startup_manager.enable_startup()
+            else "I couldn't enable Windows startup for JARVIS."
+        )
+
+    elif tool_name == "disable_startup":
+
+        return (
+            "JARVIS will no longer start with Windows."
+            if startup_manager.disable_startup()
+            else "I couldn't disable Windows startup for JARVIS."
+        )
+
+    elif tool_name == "task_history":
+
+        return task_memory.format_recent(5)
 
     # --------------------------------------------------------
     # FILE TOOLS
