@@ -916,6 +916,37 @@ def browser_spoken_message(
 
 
 
+def _spoken_execution_summary(
+    tool_name: str,
+    message: str,
+) -> str:
+    """
+    Keep internal inspection data out of speech while preserving it in
+    execution traces and task observations.
+    """
+    text = str(message or "").strip()
+
+    if tool_name == "read_file":
+        return "I inspected the relevant source file."
+
+    if tool_name == "code_search":
+        return "I searched the project code for relevant matches."
+
+    if tool_name == "find_file":
+        return "I located the relevant project file."
+
+    if tool_name == "list_files":
+        return "I inspected the project file list."
+
+    if tool_name in {
+        "code_checkpoint",
+        "code_restore_checkpoint",
+    }:
+        return text
+
+    return text
+
+
 def speak_result(
     message: str,
     speak_callback,
@@ -1556,7 +1587,16 @@ def execute_plan(
         # Detailed browser metadata remains available in logs.
         # ----------------------------------------------------
 
-        spoken_message = final_tool_message
+        spoken_message = _spoken_execution_summary(
+            str(
+                final_tool.get(
+                    "tool",
+                    "",
+                )
+                or ""
+            ).strip(),
+            final_tool_message,
+        )
 
         if executable_steps:
 
