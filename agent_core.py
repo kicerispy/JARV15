@@ -120,6 +120,8 @@ class AgentTask:
 
     error: Optional[str] = None
 
+    initial_acknowledged: bool = False
+
 
 # ==========================================================
 # JARVIS Agent
