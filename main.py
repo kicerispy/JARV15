@@ -1685,9 +1685,8 @@ def main():
     # ==================================================
 
     speak(
-        f"Welcome back, "
-        f"{user_name}. "
-        f"JARVIS is online."
+        "Welcome back. "
+        "JARVIS is online."
     )
 
     # ==================================================
@@ -1862,7 +1861,7 @@ def main():
             # ------------------------------------------
 
             interrupted = speak(
-                f"Yes, {user_name}?"
+                "Yes?"
             )
 
             if interrupted:
