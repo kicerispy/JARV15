@@ -1086,40 +1086,6 @@ def test_existing_explicit_repair_target_skips_initial_planner_call():
     assert planner.calls == []
 
 
-def test_explicit_existing_target_bypasses_initial_planner():
-    class TrackingPlanner:
-        def __init__(self):
-            self.calls = []
-
-        def __call__(
-            self,
-            request,
-            active_context=None,
-            history_text="",
-        ):
-            self.calls.append(request)
-            return {
-                "goal": "unexpected",
-                "steps": [],
-            }
-
-    planner = TrackingPlanner()
-    agent = JarvisAgent(planner=planner)
-
-    task = agent.create_task(
-        "diagnose and repair Jarvis Autonomous Test Target.py",
-    )
-
-    planned = agent.plan_task(task)
-
-    assert planned.status == "ready"
-    assert [step.tool for step in planned.steps] == ["find_file"]
-    assert planned.steps[0].argument == (
-        "Jarvis Autonomous Test Target.py"
-    )
-    assert planner.calls == []
-
-
 def test_initial_repair_plan_recovers_named_target_after_planner_failure():
     class EmptyPlanner:
         def __init__(self):
