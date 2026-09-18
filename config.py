@@ -77,6 +77,23 @@ OLLAMA_HOST = os.environ.get(
     "http://127.0.0.1:11434",
 )
 
+# Keep model transport recovery small and deterministic. The first failed
+# attempt should not make JARVIS feel sluggish, while a second attempt catches
+# transient Ollama/HTTP failures without creating long retry loops.
+OLLAMA_GENERATION_MAX_ATTEMPTS = int(
+    os.environ.get(
+        "JARVIS_OLLAMA_GENERATION_MAX_ATTEMPTS",
+        "2",
+    )
+)
+
+OLLAMA_GENERATION_RETRY_DELAY = float(
+    os.environ.get(
+        "JARVIS_OLLAMA_GENERATION_RETRY_DELAY",
+        "0.35",
+    )
+)
+
 
 # ============================================================
 # TEXT INPUT
