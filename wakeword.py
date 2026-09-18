@@ -103,6 +103,15 @@ STRONG_TRIGGER_THRESHOLD = max(
     WAKE_THRESHOLD + 0.12,
 )
 
+# While JARVIS is already performing a background task, require a
+# more confident single-frame wake prediction. This preserves voice
+# interruption for commands such as "stop" while reducing accidental
+# wakeups caused by speech/noise during long-running work.
+ACTIVE_TASK_STRONG_TRIGGER_THRESHOLD = max(
+    0.95,
+    STRONG_TRIGGER_THRESHOLD + 0.03,
+)
+
 # Only slightly below the trained threshold.
 # This is NOT allowed to trigger by itself.
 SOFT_THRESHOLD = max(
@@ -380,28 +389,25 @@ def get_wake_probability():
     )
 
 
-def wake_triggered(probability):
+def wake_triggered(probability, active_task=False):
     """
     Decide whether the wake word was spoken.
 
-    Trigger conditions:
+    Normal mode accepts the existing multi-frame confirmation rules.
 
-    1. One extremely strong prediction.
-
-    OR
-
-    2. Two predictions at or above the trained
-       threshold within the recent history.
-
-    OR
-
-    3. Two predictions close to the trained
-       threshold within the recent history AND
-       the current prediction is also moderately high.
-
-    This avoids letting several weak predictions
-    accidentally trigger JARVIS.
+    During an active background task, only one very high-confidence
+    prediction can trigger. This keeps spoken "stop"/status commands
+    available while filtering weaker accidental wakeups.
     """
+
+    if active_task:
+        if probability >= ACTIVE_TASK_STRONG_TRIGGER_THRESHOLD:
+            print(
+                "JARVIS: Strong wake prediction during active task."
+            )
+            return True
+
+        return False
 
     _score_history.append(
         probability
@@ -463,7 +469,10 @@ def wake_triggered(probability):
 # Main wake listener
 # ==================================================
 
-def wait_for_wake_word(interrupt_event=None):
+def wait_for_wake_word(
+    interrupt_event=None,
+    active_task=False,
+):
 
     global _last_wake_time
 
@@ -485,6 +494,12 @@ def wait_for_wake_word(interrupt_event=None):
         f"JARVIS: Strong trigger threshold="
         f"{STRONG_TRIGGER_THRESHOLD:.3f}"
     )
+
+    if active_task:
+        print(
+            f"JARVIS: Active-task wake threshold="
+            f"{ACTIVE_TASK_STRONG_TRIGGER_THRESHOLD:.3f}"
+        )
 
     print(
         f"JARVIS: Soft threshold="
@@ -599,7 +614,8 @@ def wait_for_wake_word(interrupt_event=None):
             # --------------------------------------------------
 
             if wake_triggered(
-                probability
+                probability,
+                active_task=active_task,
             ):
 
                 print(
