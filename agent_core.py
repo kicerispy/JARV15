@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from logger import logger
-from planner import create_plan, validate_plan
+from planner import assess_plan, create_plan, validate_plan
 from tool_executor import execute_plan
 from state import ActiveContext, TaskState
 
