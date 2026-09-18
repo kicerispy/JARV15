@@ -438,10 +438,13 @@ def browser_click_result(
     query: str = "",
 ) -> dict[str, Any]:
     """Click an ordinal Google or YouTube result through the DOM."""
-    try:
-        index = int(index)
-    except Exception:
-        index = 1
+    if isinstance(index, str) and index.strip().lower() in {"last", "final"}:
+        index = -1
+    else:
+        try:
+            index = int(index)
+        except Exception:
+            index = 1
 
     async def _click():
         page = await _init_browser()
