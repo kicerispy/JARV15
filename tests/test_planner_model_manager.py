@@ -135,6 +135,19 @@ class PlannerModelManagerTests(unittest.TestCase):
             planner.ModelManager().coding_model,
             "repair handoffs must use the centralized coding model",
         )
+        self.assertEqual(
+            captured.get("keep_alive"),
+            "15m",
+            "repair planner should keep the coding model warm",
+        )
+        self.assertEqual(
+            captured.get("options"),
+            {
+                "temperature": 0,
+                "num_predict": 240,
+                "num_ctx": 8192,
+            },
+        )
 
 
 if __name__ == "__main__":
