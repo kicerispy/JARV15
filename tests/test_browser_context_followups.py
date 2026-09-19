@@ -1,6 +1,6 @@
 import json
 
-from commands import should_resolve_context
+from commands import get_fast_command, should_resolve_context
 from context_resolver import _deterministic_followup
 from planner import create_plan
 from smart_router import route_command
@@ -119,3 +119,29 @@ def test_browser_native_search_preserves_query_context():
     assert context.page_url == (
         "https://www.google.com/search?q=Wi-Fi+skeleton"
     )
+
+
+def test_click_it_is_not_claimed_by_fast_click_handler():
+    assert get_fast_command("Click it") is None
+
+
+def test_click_it_after_selected_result_routes_to_dom_element():
+    context = make_context("google", "Wi-Fi skeleton")
+    context["last_result_title"] = "WiFi Skeleton"
+
+    resolved = _deterministic_followup(
+        "Click it",
+        context,
+    )
+    assert resolved == "click the browser element with visible text 'WiFi Skeleton'"
+
+    plan = create_plan(resolved, context)
+
+    assert plan["steps"] == [
+        {
+            "tool": "browser_click_element",
+            "argument": json.dumps({
+                "text": "WiFi Skeleton",
+            }),
+        }
+    ]
