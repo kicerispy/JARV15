@@ -741,19 +741,34 @@ def browser_page_snapshot() -> dict[str, Any]:
 
         spoken_preview = readable_text[:900]
         if results:
-            result_titles = [
-                str(item.get("title", "")).strip()
-                for item in results[:3]
-                if isinstance(item, dict) and item.get("title")
-            ]
+            result_titles = []
+            for item in results[:3]:
+                if not isinstance(item, dict):
+                    continue
+
+                title_text = " ".join(
+                    str(item.get("title", "") or "").split()
+                ).strip()
+
+                if title_text and title_text not in result_titles:
+                    result_titles.append(title_text)
+
             if result_titles:
                 ordinal_names = ("First", "Second", "Third")
                 spoken_parts = [
-                    f"I found {len(results)} search result{'s' if len(results) != 1 else ''}."
+                    f"I found {len(results)} result{'s' if len(results) != 1 else ''}."
                 ]
-                for ordinal, title_text in zip(ordinal_names, result_titles):
-                    spoken_parts.append(f"{ordinal}: {title_text[:180]}.")
-                spoken_preview = " ".join(spoken_parts)[:900]
+
+                for ordinal, title_text in zip(
+                    ordinal_names,
+                    result_titles,
+                ):
+                    compact_title = title_text[:90].rstrip()
+                    spoken_parts.append(
+                        f"{ordinal}: {compact_title}."
+                    )
+
+                spoken_preview = " ".join(spoken_parts)[:600]
 
         return {
             "success": True,
