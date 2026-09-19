@@ -1824,6 +1824,7 @@ def _spoken_execution_summary(
         "browser_press_key",
         "browser_wait_for_element",
         "browser_extract_text",
+        "browser_find_text",
         "browser_click_result",
     }:
         return text or "Browser action complete."
