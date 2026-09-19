@@ -1509,6 +1509,47 @@ def create_plan(
                 }
 
     # ========================================================
+    # DETERMINISTIC BROWSER ELEMENT REFERENCE ROUTER
+    # ========================================================
+    #
+    # The context resolver can resolve phrases such as "click it" to:
+    #   click the browser element with visible text '...'
+    #
+    # Keep that path model-free so a selected browser result does not
+    # fall back to the LLM planner or screen vision.
+    # ========================================================
+
+    visible_text_match = re.match(
+        r"^(?:click|open|play|select|choose|pick)\\s+"
+        r"the\\s+browser\\s+element\\s+with\\s+visible\\s+text\\s+"
+        r"(?P<quoted>['\"].+['\"])$",
+        user_command.strip(),
+        re.IGNORECASE,
+    )
+
+    if visible_text_match:
+        try:
+            visible_text = ast.literal_eval(
+                visible_text_match.group("quoted")
+            )
+        except (SyntaxError, ValueError):
+            visible_text = ""
+
+        if isinstance(visible_text, str) and visible_text.strip():
+            return {
+                "goal": "click referenced browser element",
+                "steps": [
+                    {
+                        "tool": "browser_click_element",
+                        "argument": json.dumps({
+                            "text": visible_text.strip(),
+                        }),
+                    }
+                ],
+                "resolved_command": user_command.strip(),
+            }
+
+    # ========================================================
     # DETERMINISTIC BAREHANDS DISPLAY ROUTER
     # ========================================================
     #
