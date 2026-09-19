@@ -1398,9 +1398,10 @@ def format_browser_result(
             excerpt = " ".join(
                 str(matches[0].get("excerpt", "") or "").split()
             )
-            if excerpt:
-                return f"Found '{query}' on the page: {excerpt[:500]}."
-            return f"I found '{query}' on the page."
+            # A find action should confirm the match without reading a large
+            # chunk of the page aloud. The full excerpt remains in the
+            # structured result for agent reasoning and follow-up tools.
+            return f"Found '{query}' on the page."
         if query:
             return f"I couldn't find '{query}' on the page."
         return "I couldn't find that text on the page."
