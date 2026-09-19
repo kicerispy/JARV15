@@ -1288,6 +1288,108 @@ def browser_click_first_result(site: str = "", query: str = "") -> dict[str, Any
         }
 
 
+def browser_find_text(
+    query: str,
+    context_chars: int = 120,
+    max_matches: int = 3,
+) -> dict[str, Any]:
+    """Find a text phrase in the current page and return nearby readable context."""
+    requested = " ".join(str(query or "").split()).strip()
+
+    if not requested:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "action": "find_text",
+            "error": "Text query cannot be empty.",
+        }
+
+    try:
+        context_chars = max(20, min(int(context_chars), 400))
+    except Exception:
+        context_chars = 120
+
+    try:
+        max_matches = max(1, min(int(max_matches), 10))
+    except Exception:
+        max_matches = 3
+
+    async def _find():
+        page = await _init_browser()
+
+        try:
+            body_text = await page.locator("body").evaluate(
+                """el => (
+                    el.innerText ||
+                    el.textContent ||
+                    ""
+                ).trim()"""
+            )
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "action": "find_text",
+                "query": requested,
+                "error": f"Could not read browser page text: {exc}",
+            }
+
+        readable = _snapshot_clean_text(body_text, max_chars=12000)
+        lowered = readable.lower()
+        needle = requested.lower()
+
+        matches = []
+        start = 0
+
+        while len(matches) < max_matches:
+            position = lowered.find(needle, start)
+            if position < 0:
+                break
+
+            left = max(0, position - context_chars)
+            right = min(
+                len(readable),
+                position + len(requested) + context_chars,
+            )
+
+            excerpt = " ".join(readable[left:right].split())
+            matches.append({
+                "match": requested,
+                "excerpt": excerpt[: max(40, context_chars * 2 + len(requested))],
+            })
+
+            next_start = position + max(len(requested), 1)
+            if next_start <= start:
+                break
+            start = next_start
+
+        return {
+            "success": True,
+            "verified": bool(matches),
+            "action": "find_text",
+            "query": requested,
+            "found": bool(matches),
+            "match_count": len(matches),
+            "matches": matches,
+            "url": page.url,
+            "title": (await page.title()).strip(),
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_find())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "action": "find_text",
+            "query": requested,
+            "error": str(exc),
+        }
+
+
 def browser_find_element(
     selector: str = "",
     text: str = "",
