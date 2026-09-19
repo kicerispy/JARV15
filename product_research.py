@@ -610,7 +610,9 @@ def _summary(
     analysis: dict[str, Any],
     source_count: int,
 ) -> str:
-    text = " ".join(
+    parts = []
+
+    summary = " ".join(
         str(
             analysis.get(
                 "summary",
@@ -620,15 +622,18 @@ def _summary(
         ).split()
     ).strip()
 
-    if not text:
-        best = (
-            analysis.get(
-                "best_match"
-            )
-            or {}
-        )
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
         name = str(
-            best.get(
+            choice.get(
                 "name",
                 "",
             )
@@ -636,7 +641,7 @@ def _summary(
         ).strip()
         reason = " ".join(
             str(
-                best.get(
+                choice.get(
                     "reason",
                     "",
                 )
@@ -644,17 +649,33 @@ def _summary(
             ).split()
         ).strip()
 
-        if name and reason:
-            text = f"{name}: {reason}"
-        elif name:
-            text = (
-                f"The strongest match I found is {name}."
+        if not name:
+            continue
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}"
             )
         else:
-            text = (
-                "I found online sources, but not enough "
-                "evidence for a confident conclusion."
+            parts.append(
+                f"{label}: {name}."
             )
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
 
     confidence = str(
         analysis.get(
@@ -669,18 +690,17 @@ def _summary(
         "medium",
         "low",
     }:
-        text += (
-            f" Confidence is {confidence}."
+        parts.append(
+            f"Confidence is {confidence}."
         )
 
     if source_count < MIN_CONFIDENT_SOURCES:
-        text += (
-            f" Only {source_count} usable independent "
+        parts.append(
+            f"Only {source_count} usable independent "
             "sources were available."
         )
 
-    return text[:1800]
-
+    return " ".join(parts)[:2200]
 
 def research_product(
     argument: str = "",
