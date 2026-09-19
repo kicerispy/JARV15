@@ -3521,6 +3521,19 @@ def _select_verified_budget_match(
 
     ranked.sort(key=lambda item: item[:-2], reverse=True)
     _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
 
     return {
         "name": name,
@@ -3532,7 +3545,11 @@ def _select_verified_budget_match(
             + " limit and broader supporting product evidence than the other "
             + "verified candidates."
         ),
-        "source_ids": [],
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
         "_offer": offer,
     }
 
@@ -3865,6 +3882,75 @@ def _enrich_product_price_comparisons(
                 "and no verified under-budget replacement was established."
             )
             choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
 
         analysis["budget_constraint"] = {
             "maximum": budget_value,
