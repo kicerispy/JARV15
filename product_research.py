@@ -28,6 +28,41 @@ MAX_SOURCES = 16
 MAX_PAGE_CHARS = 8000
 MIN_CONFIDENT_SOURCES = 4
 
+_PRODUCT_BRANDS = {
+    "apple", "sony", "bose", "sennheiser", "anker", "soundcore", "jbl",
+    "marshall", "shokz", "beats", "google", "samsung", "jabra",
+    "audio technica", "audio-technica", "bowers wilkins", "bowers & wilkins",
+    "steelseries", "audeze", "nothing", "skullcandy", "technics",
+    "beyerdynamic", "bang & olufsen", "master & dynamic", "master dynamic",
+}
+
+_GENERIC_PRODUCT_WORDS = {
+    "wireless", "wired", "bluetooth", "headphone", "headphones", "earbud",
+    "earbuds", "earphone", "earphones", "headset", "audio", "noise",
+    "cancelling", "canceling", "cancellation", "active", "hybrid", "over",
+    "on", "in", "ear", "premium", "budget", "best", "anc", "latest",
+    "flagship", "model", "product",
+}
+
+def _is_specific_product_name(value: Any) -> bool:
+    name = " ".join(str(value or "").split()).strip()
+    if len(name) < 5 or len(name) > 140:
+        return False
+    normalized = " ".join(name.lower().split())
+    words = normalized.split()
+    distinctive = [word for word in words if word not in _GENERIC_PRODUCT_WORDS]
+    has_brand = any(brand in normalized for brand in _PRODUCT_BRANDS)
+    has_model_token = any(re.search(r"\d", word) and len(word) >= 2 for word in words)
+    has_model_pattern = bool(re.search(r"\b[a-z]{1,8}[- ]?\d{1,5}[a-z0-9-]*\b", normalized, re.IGNORECASE) or re.search(r"\b[ivx]{2,4}\b", normalized, re.IGNORECASE))
+    if not distinctive:
+        return False
+    if not has_brand and not has_model_token and not has_model_pattern:
+        return False
+    if len(distinctive) == 1 and not (has_brand and has_model_token):
+        return False
+    return True
+
+
 RETAILERS = {
     "amazon.com",
     "bestbuy.com",
