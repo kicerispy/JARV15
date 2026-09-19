@@ -48,10 +48,11 @@ def _deterministic_followup(user_input: str, active_context: Dict[str, Any]) -> 
             active_context.get("last_result_url") or ""
         ).strip()
 
-        # Once a result has actually been selected, its canonical URL is the
-        # most reliable identity. Use it directly rather than searching the
-        # current DOM for a stale/full result-card text value.
-        if last_url:
+        # If the current page is already the selected result, there is no
+        # longer a search-result DOM element to click. Re-open its canonical
+        # URL deterministically. While still on the search page, preserve the
+        # selected result title so "click it" can target that visible result.
+        if last_url and current_url and current_url == last_url:
             return "open the previously selected browser result"
 
         if last_title:
