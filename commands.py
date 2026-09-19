@@ -855,6 +855,16 @@ def build_browser_dom_plan(user_request):
     """Build deterministic Playwright DOM actions from natural language."""
     normalized = normalize_command(user_request)
 
+    # Application launches are handled by the desktop command router below.
+    # Do not interpret "Open Chrome" as clicking a DOM element named Chrome.
+    if normalized.lower() in {
+        "open chrome",
+        "open google chrome",
+        "launch chrome",
+        "start chrome",
+    }:
+        return None
+
     # Find/inspect an element.
     match = re.match(
         r"^(?:find|locate|inspect|look\s+for)\s+(?:the\s+)?(.+?)$",
