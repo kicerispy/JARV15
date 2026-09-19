@@ -927,7 +927,7 @@ def looks_like_product_research_request(text: str) -> bool:
 
     budget_pattern = bool(
         re.search(
-            r"(?:under|below|less than|up to)\\s*\\$?\\s*[0-9]",
+            r"(?:under|below|less than|up to)\s*\$?\s*[0-9]",
             normalized,
             re.IGNORECASE,
         )
@@ -935,8 +935,8 @@ def looks_like_product_research_request(text: str) -> bool:
 
     best_product_question = bool(
         re.search(
-            r"\\b(?:best|top|cheapest)\\b.*"
-            r"\\b(?:product|products|model|models)\\b",
+            r"\b(?:best|top|cheapest)\b.*"
+            r"\b(?:product|products|model|models)\b",
             normalized,
             re.IGNORECASE,
         )
