@@ -247,6 +247,41 @@ def test_ordinal_result_clicks_route_to_browser_dom():
         }]
 
 
+def test_direct_url_navigation_routes_without_planner():
+    from commands import get_fast_command
+
+    for command, expected in (
+        (
+            "Go to https://www.python.org",
+            "https://www.python.org",
+        ),
+        (
+            "Visit www.python.org",
+            "https://www.python.org",
+        ),
+        (
+            "Open python.org",
+            "https://python.org",
+        ),
+    ):
+        plan = get_fast_command(command)
+        assert plan is not None
+        assert plan["steps"] == [{
+            "tool": "browser_goto",
+            "argument": expected,
+        }]
+
+
+def test_direct_url_planner_fallback_is_deterministic():
+    from planner import create_plan
+
+    plan = create_plan("Go to https://www.python.org")
+    assert plan["steps"] == [{
+        "tool": "browser_goto",
+        "argument": "https://www.python.org",
+    }]
+
+
 def test_open_chrome_remains_a_desktop_launch_command():
     from commands import get_fast_command
 
