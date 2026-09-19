@@ -69,6 +69,25 @@ def test_product_research_domain_normalization():
     assert _domain("https://www.example.com/product") == "example.com"
 
 
+
+def test_product_research_extracts_item_from_structured_full_request():
+    from product_research import _parse_argument
+
+    parsed = _parse_argument(
+        '{"request":"Find the best wireless headphones under $150, compare reviews and cheaper alternatives, and tell me which option gives me the best value"}'
+    )
+
+    assert parsed["item"] == "wireless headphones"
+    assert parsed["budget"] == 150.0
+
+
+def test_product_research_extracts_usable_search_url_only():
+    from product_research import _canonical_search_href
+
+    assert _canonical_search_href(
+        "https://www.google.com/url?q=https%3A%2F%2Fwww.rtings.com%2Fheadphones"
+    ) == "https://www.rtings.com/headphones"
+
 def test_product_research_tool_is_advertised():
     from planner import AVAILABLE_TOOLS
 
