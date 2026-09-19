@@ -4031,6 +4031,98 @@ def _enrich_product_price_comparisons(
     return analysis
 
 
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use the verified shortlist to explain the final recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        allowed.add(_normalized_name(name))
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({'name': name, 'fit': product.get('fit'), 'pros': product.get('pros') or [], 'cons': product.get('cons') or [], 'source_ids': product.get('source_ids') or [], 'verified_offers': [
+            {'seller': o.get('label'), 'price': o.get('price')}
+            for o in (offers or [])
+            if isinstance(o, dict) and o.get('exact_match') is True
+        ][:4]})
+    if not products:
+        return analysis
+    budget_note = ('Maximum budget: $' + format(float(budget), ',.2f') + '.' if isinstance(budget, (int, float)) else 'No explicit maximum budget.')
+    locked = {field: str((analysis.get(field) or {}).get('name') or '').strip() for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')}
+    prompt = (
+        'You are JARVIS final product-review editor.\n'
+        'Use ONLY the supplied evidence and verified shortlist. Do not add any product name that is not in the verified shortlist. Do not invent prices, ratings, specifications, features, or review claims.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n\n'
+        + 'VERIFIED SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n\n'
+        + 'LOCKED RECOMMENDATION NAMES:\n' + json.dumps(locked, ensure_ascii=False) + '\n\n'
+        + 'SOURCE EVIDENCE:\n' + json.dumps(_compact_evidence_for_synthesis(evidence, per_source_chars=1800), ensure_ascii=False) + '\n\n'
+        + 'Explain why the locked best match stands out over the other verified products. Describe supported tradeoffs such as comfort, portability, sound, ANC, battery, fit, ecosystem, or value. Also identify up to 4 different approaches from the verified shortlist, such as earbuds versus over-ear or comfort-focused versus ANC-focused. Return ONLY JSON with summary, confidence, reasons, product_updates, comparisons, adjacent_options, tradeoffs, warnings. adjacent_options entries must contain name, approach, why_consider, tradeoff, source_ids.'
+    )
+    try:
+        response = ModelManager().product_research([
+            {'role': 'system', 'content': 'Return only one valid JSON object. Do not invent facts.'},
+            {'role': 'user', 'content': prompt},
+        ])
+    except Exception as exc:
+        logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+        return analysis
+    final = _parse_json(_response_text(response))
+    if not final:
+        return analysis
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({'name': name, 'approach': ' '.join(str(option.get('approach') or '').split()).strip(), 'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(), 'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(), 'source_ids': option.get('source_ids') or []})
+    analysis['adjacent_options'] = adjacent[:4]
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        comparisons.append({'product_a': a, 'product_b': b, 'comparison': ' '.join(str(comparison.get('comparison') or '').split()).strip(), 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:3]
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:4] if str(x or '').strip()]
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
 def _summary(
     analysis: dict[str, Any],
     source_count: int,
@@ -4143,6 +4235,25 @@ def _summary(
                 parts.append(
                     f"Cheaper alternative: {name} at ${price:,.2f}."
                 )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
 
     tradeoffs = analysis.get("tradeoffs") or []
     for tradeoff in list(tradeoffs)[:2]:
@@ -4271,6 +4382,7 @@ def research_product(
         budget=budget,
         evidence=evidence,
     )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
 
     best_match = analysis.get("best_match") or {}
     best_value = analysis.get("best_value") or {}
