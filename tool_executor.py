@@ -160,7 +160,7 @@ def _browser_target_payload(payload: dict) -> dict:
     """Return only the DOM target fields understood by browser_controller."""
     target = {}
 
-    for key in ("selector", "text", "role"):
+    for key in ("selector", "text", "role", "name"):
         value = str(payload.get(key) or "").strip()
         if value:
             target[key] = value
