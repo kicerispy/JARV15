@@ -2007,13 +2007,11 @@ class JarvisAgent:
         if _is_browser_trace(trace):
             browser_state = _capture_browser_state()
 
-            task.active_context["browser_state"] = (
-                browser_state
-            )
+            task.active_context["browser_state"] = browser_state
 
             if browser_state.get("success"):
-                url = browser_state.get("url", "")
-                title = browser_state.get("title", "")
+                url = str(browser_state.get("url", "") or "")
+                title = str(browser_state.get("title", "") or "")
 
                 task.active_context["browser_url"] = url
                 task.active_context["browser_title"] = title
@@ -2033,6 +2031,88 @@ class JarvisAgent:
                     "Browser state observation failed: "
                     f"{error}"
                 )
+
+            # Preserve state-aware recovery evidence from the executor.
+            # This gives Agent Core concrete information about what was tried
+            # and what the browser looked like during recovery.
+            for entry in trace:
+                if not isinstance(entry, dict):
+                    continue
+
+                raw_result = entry.get("result")
+                result_data = self._extract_tool_data(raw_result)
+
+                if not isinstance(result_data, dict):
+                    continue
+
+                recovery = result_data.get("recovery")
+                if not isinstance(recovery, dict):
+                    continue
+
+                evidence = {
+                    "attempt": attempt,
+                    "tool": str(entry.get("tool", "") or "").strip(),
+                    "target": str(entry.get("argument", "") or "").strip(),
+                    "success": bool(entry.get("success") is True),
+                    "verified": bool(entry.get("verified", False)),
+                    "detail": "",
+                    "browser_recovery": {},
+                }
+
+                recovered_by = str(
+                    recovery.get("recovered_by", "") or ""
+                ).strip()
+
+                if recovered_by:
+                    evidence["browser_recovery"][
+                        "recovered_by"
+                    ] = recovered_by
+
+                observed_before = recovery.get("observed_before")
+                if isinstance(observed_before, dict):
+                    evidence["browser_recovery"][
+                        "observed_before"
+                    ] = {
+                        "url": str(
+                            observed_before.get("url", "") or ""
+                        ),
+                        "title": str(
+                            observed_before.get("title", "") or ""
+                        ),
+                    }
+
+                observed_after = recovery.get("observed_after")
+                if isinstance(observed_after, dict):
+                    evidence["browser_recovery"][
+                        "observed_after"
+                    ] = {
+                        "url": str(
+                            observed_after.get("url", "") or ""
+                        ),
+                        "title": str(
+                            observed_after.get("title", "") or ""
+                        ),
+                    }
+
+                attempt_count = entry.get("attempts")
+                recovery_count = entry.get("recovery_count")
+
+                evidence["browser_recovery"]["attempts"] = (
+                    attempt_count
+                )
+                evidence["browser_recovery"]["recovery_count"] = (
+                    recovery_count
+                )
+
+                evidence["detail"] = (
+                    "Browser recovery: "
+                    + self._compact_text(
+                        recovery,
+                        limit=1800,
+                    )
+                )
+
+                task.evidence.append(evidence)
 
     def _apply_step_status(
         self,
