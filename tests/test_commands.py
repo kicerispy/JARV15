@@ -118,3 +118,13 @@ class TestShouldResolveContext:
 
     def test_empty_not_resolved(self):
         assert should_resolve_context("") is False
+
+    def test_search_result_summary_followups_resolved(self):
+        for command in (
+            "What are the search results?",
+            "Tell me the search results",
+            "Show me the search results",
+            "What did the search find?",
+            "What did you find?",
+        ):
+            assert should_resolve_context(command) is True
