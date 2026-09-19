@@ -1010,11 +1010,64 @@ def build_browser_dom_plan(user_request):
     return None
 
 
+def build_browser_navigation_plan(user_request):
+    """Build a deterministic browser navigation plan for direct URLs."""
+    original = str(user_request or "").strip()
+
+    if not original:
+        return None
+
+    normalized = clean_text(original)
+
+    # Avoid stealing desktop application launches such as "Open Chrome".
+    if normalized in {
+        "open chrome",
+        "open google chrome",
+        "launch chrome",
+        "start chrome",
+    }:
+        return None
+
+    match = re.match(
+        r"^(?:go to|navigate to|open|visit)\s+"
+        r"(https?://[^\s]+|www\.[^\s]+|[a-z0-9.-]+\.[a-z]{2,}(?:/[^\s]*)?)$",
+        original.strip().rstrip("?.!"),
+        re.IGNORECASE,
+    )
+
+    if not match:
+        return None
+
+    target = match.group(1).strip().rstrip(".,!?")
+
+    if not re.match(r"^https?://", target, re.IGNORECASE):
+        target = "https://" + target
+
+    return {
+        "steps": [{
+            "tool": "browser_goto",
+            "argument": target,
+        }]
+    }
+
+
 def deterministic_route(user_request):
 
     text = clean_text(
         user_request
     )
+
+    # ==================================================
+    # Direct Browser Navigation
+    # ==================================================
+
+    navigation_plan = build_browser_navigation_plan(
+        user_request
+    )
+
+    if navigation_plan:
+        print("JARVIS: Direct browser navigation detected.")
+        return navigation_plan
 
     # ==================================================
     # Media Controls
