@@ -25,6 +25,23 @@ class SmartRouterTests(unittest.TestCase):
 
         self.assertEqual(decision.kind, "conversation")
 
+    def test_search_result_summary_followups_route_contextual(self):
+        from smart_router import route_command
+
+        for command in (
+            "What are the search results?",
+            "Tell me the search results",
+            "Show me the search results",
+            "What did the search find?",
+            "What did you find?",
+        ):
+            decision = route_command(command)
+            self.assertEqual(
+                decision.kind,
+                "contextual",
+                command,
+            )
+
     def test_multi_step_request_routes_agent(self):
         from smart_router import route_command
 
