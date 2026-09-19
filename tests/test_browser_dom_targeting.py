@@ -109,6 +109,70 @@ def test_browser_dispatcher_passes_accessible_name(monkeypatch):
     }
 
 
+def test_find_text_on_page_routes_to_browser_text_search():
+    from commands import get_fast_command
+
+    for command, query in (
+        ("Find the pricing on this page", "pricing"),
+        ("Locate shipping on the current page", "shipping"),
+        ("Look for refund policy on this page", "refund policy"),
+        ("Search this page for warranty", "warranty"),
+    ):
+        plan = get_fast_command(command)
+        assert plan is not None
+        assert plan["steps"] == [{
+            "tool": "browser_find_text",
+            "argument": '{"query": "%s"}' % query,
+        }]
+
+
+def test_browser_find_text_is_in_browser_dispatcher(monkeypatch):
+    import browser_controller
+    import tools
+
+    captured = {}
+
+    def fake_find_text(**kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "verified": True,
+            "action": "find_text",
+            "query": "pricing",
+            "found": True,
+            "match_count": 1,
+            "matches": [{
+                "match": "pricing",
+                "excerpt": "Pricing starts at $10."
+            }],
+        }
+
+    monkeypatch.setattr(
+        browser_controller,
+        "browser_find_text",
+        fake_find_text,
+    )
+
+    result = tools.run_browser_tool(
+        "browser_find_text",
+        '{"query":"pricing","context_chars":80,"max_matches":2}',
+    )
+
+    assert result.success is True
+    assert captured == {
+        "query": "pricing",
+        "context_chars": 80,
+        "max_matches": 2,
+    }
+    assert result.data["found"] is True
+
+
+def test_browser_find_text_is_advertised_to_planner():
+    from planner import AVAILABLE_TOOLS
+
+    assert "browser_find_text" in AVAILABLE_TOOLS
+
+
 def test_find_search_box_routes_to_dom_role():
     from commands import get_fast_command
 
