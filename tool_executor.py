@@ -2486,6 +2486,16 @@ def execute_plan(
 
                 task_state.finish()
 
+                if (
+                    hasattr(task_state, "is_background_speech_owned")
+                    and task_state.is_background_speech_owned()
+                ):
+                    # BackgroundTaskController owns final TTS delivery. Store
+                    # the result here so there is only one completion-speech
+                    # authority after the worker exits.
+                    task_state.set_final_speech(spoken_message)
+                    return "done"
+
                 speak_status = speak_result(
                     spoken_message,
                     speak_callback,
@@ -2761,6 +2771,13 @@ def execute_plan(
                         f"fallback: {e}"
                     )
 
+        if (
+            hasattr(task_state, "is_background_speech_owned")
+            and task_state.is_background_speech_owned()
+        ):
+            task_state.set_final_speech(spoken_message)
+            return "done"
+
         speak_status = speak_result(
             spoken_message,
             speak_callback,
@@ -2801,6 +2818,13 @@ def execute_plan(
         )
 
         task_state.finish()
+
+        if (
+            hasattr(task_state, "is_background_speech_owned")
+            and task_state.is_background_speech_owned()
+        ):
+            task_state.set_final_speech(spoken_message)
+            return "done"
 
         return speak_result(
             spoken_message,
