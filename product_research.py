@@ -99,6 +99,71 @@ def _source_type(url: str) -> str:
     return "web_source"
 
 
+def _extract_item_and_budget(raw: str) -> tuple[str, float | None]:
+    """Extract the product/category subject and optional budget from a request."""
+    text = " ".join(str(raw or "").split()).strip()
+    if not text:
+        return "", None
+
+    item = re.sub(
+        r"^\s*(?:please\s+|can\s+you\s+|could\s+you\s+|help\s+me\s+|"
+        r"find\s+me\s+|find\s+|research\s+|look\s+up\s+|"
+        r"search\s+for\s+|compare\s+)",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    budget = None
+    budget_patterns = (
+        r"(?:under|below|less\s+than|up\s+to|maximum(?:\s+budget)?(?:\s+of)?)"
+        r"\s*\$?\s*([0-9][0-9,]*(?:\.\d+)?)",
+        r"\$\s*([0-9][0-9,]*(?:\.\d+)?)"
+        r"\s*(?:or\s+less|max(?:imum)?)?",
+    )
+    for pattern in budget_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                budget = float(match.group(1).replace(",", ""))
+            except ValueError:
+                budget = None
+            break
+
+    item = re.sub(
+        r"\s+(?:under|below|less\s+than|up\s+to)\s*\$?[0-9][0-9,]*(?:\.\d+)?\b.*$",
+        "",
+        item,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    item = re.sub(
+        r"\s+(?:and\s+)?(?:compare|reviews?|ratings?|look\s+at\s+the\s+reviews|"
+        r"read\s+the\s+reviews|find\s+alternatives|find\s+similar\s+options|"
+        r"cheaper\s+alternatives|best\s+value|tell\s+me\s+which\s+option"
+        r"|which\s+option)\b.*$",
+        "",
+        item,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Search for the category/model, not the user's task instructions.
+    item = re.sub(
+        r"^the\s+best\s+",
+        "",
+        item,
+        flags=re.IGNORECASE,
+    ).strip()
+    item = re.sub(
+        r"^best\s+",
+        "",
+        item,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    return item, budget
+
+
 def _parse_argument(argument: str) -> dict[str, Any]:
     raw = str(argument or "").strip()
     if not raw:
@@ -124,63 +189,32 @@ def _parse_argument(argument: str) -> dict[str, Any]:
             or payload.get("item")
             or ""
         ).strip()
-        item = str(
+
+        explicit_item = str(
             payload.get("item")
             or payload.get("query")
-            or request
+            or ""
         ).strip()
+
+        if explicit_item:
+            item = explicit_item
+            _, parsed_budget = _extract_item_and_budget(request or explicit_item)
+        else:
+            item, parsed_budget = _extract_item_and_budget(request)
+
         budget = payload.get("budget")
         try:
-            budget = float(budget) if budget is not None else None
+            budget = float(budget) if budget is not None else parsed_budget
         except (TypeError, ValueError):
-            budget = None
+            budget = parsed_budget
+
         return {
             "request": request or item,
             "item": item,
             "budget": budget,
         }
 
-    item = re.sub(
-        r"^\s*(?:please\s+|can\s+you\s+|could\s+you\s+|help\s+me\s+|"
-        r"find\s+me\s+|find\s+|research\s+|look\s+up\s+|"
-        r"search\s+for\s+|compare\s+)",
-        "",
-        raw,
-        flags=re.IGNORECASE,
-    ).strip()
-
-    # Keep search discovery focused on the item. Preserve constraints in
-    # the full request and parse the budget separately.
-    item = re.sub(
-        r"\s+(?:under|below|less\s+than|up\s+to)\s*\$?[0-9][0-9,]*(?:\.\d+)?\b.*$",
-        "",
-        item,
-        flags=re.IGNORECASE,
-    ).strip()
-
-    item = re.sub(
-        r"\s+(?:and\s+)?(?:compare|review|reviews|look\s+at\s+the\s+reviews|"
-        r"read\s+the\s+reviews|find\s+alternatives|find\s+similar\s+options)\b.*$",
-        "",
-        item,
-        flags=re.IGNORECASE,
-    ).strip()
-
-    budget = None
-    patterns = (
-        r"(?:under|below|less\s+than|up\s+to|maximum(?:\s+budget)?(?:\s+of)?)"
-        r"\s*\$?\s*([0-9][0-9,]*(?:\.\d+)?)",
-        r"\$\s*([0-9][0-9,]*(?:\.\d+)?)"
-        r"\s*(?:or\s+less|max(?:imum)?)?",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, raw, re.IGNORECASE)
-        if match:
-            try:
-                budget = float(match.group(1).replace(",", ""))
-            except ValueError:
-                budget = None
-            break
+    item, budget = _extract_item_and_budget(raw)
 
     return {
         "request": raw,
@@ -325,19 +359,41 @@ def _discover(queries: list[str]) -> list[dict[str, Any]]:
                     f"for query={query!r}"
                 )
 
-                for result in results[:MAX_RESULTS_PER_QUERY]:
+                usable_results = []
+                for result in results:
                     if not isinstance(result, dict):
                         continue
 
-                    url = str(
-                        result.get("url")
-                        or result.get("href")
-                        or ""
-                    ).strip().split("#", 1)[0]
+                    url = _canonical_search_href(
+                        str(
+                            result.get("url")
+                            or result.get("href")
+                            or ""
+                        )
+                    ).split("#", 1)[0]
 
                     if not url or _is_search_url(url) or url in seen:
                         continue
 
+                    usable_results.append((result, url))
+                    if len(usable_results) >= MAX_RESULTS_PER_QUERY:
+                        break
+
+                if not usable_results and isinstance(snapshot, dict):
+                    fallback = _fallback_results_from_links(
+                        snapshot,
+                        engine,
+                    )
+                    usable_results = [
+                        (
+                            result,
+                            str(result.get("url") or "").strip(),
+                        )
+                        for result in fallback
+                        if str(result.get("url") or "").strip()
+                    ]
+
+                for result, url in usable_results:
                     seen.add(url)
                     discovered.append(
                         {
