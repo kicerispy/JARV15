@@ -3801,7 +3801,7 @@ def _synthesize(
 
     compact_evidence = _compact_evidence_for_synthesis(
         evidence,
-        per_source_chars=2000,
+        per_source_chars=1500,
     )
 
     prompt = f"""
@@ -3831,6 +3831,9 @@ Evidence rules:
 - When a maximum budget is supplied, it is a hard constraint. Do not
   designate a product as best_match, best_value, or another budget-oriented
   choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
 - Prefer a current verified retailer price at or below the budget over MSRP.
 - Use null when evidence is missing.
 - Cite factual claims with source IDs.
