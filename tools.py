@@ -2928,6 +2928,7 @@ def run_browser_tool(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
+                name=payload.get("name", ""),
             ))
 
         if tool_name == "browser_click_element":
@@ -2935,6 +2936,7 @@ def run_browser_tool(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
+                name=payload.get("name", ""),
             ))
 
         if tool_name == "browser_fill_element":
@@ -2943,6 +2945,7 @@ def run_browser_tool(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
+                name=payload.get("name", ""),
             ))
 
         if tool_name == "browser_press_key":
@@ -2951,6 +2954,7 @@ def run_browser_tool(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
+                name=payload.get("name", ""),
             ))
 
         if tool_name == "browser_wait_for_element":
@@ -2958,6 +2962,7 @@ def run_browser_tool(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
+                name=payload.get("name", ""),
                 timeout=int(payload.get("timeout", 10000)),
             ))
 
@@ -2966,6 +2971,7 @@ def run_browser_tool(
                 selector=payload.get("selector", ""),
                 text=payload.get("text", ""),
                 role=payload.get("role", ""),
+                name=payload.get("name", ""),
             ))
 
     if tool_name == "browser_page_info":
