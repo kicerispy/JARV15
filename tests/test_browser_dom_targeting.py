@@ -433,3 +433,21 @@ def test_planner_advertises_browser_snapshot():
     from planner import AVAILABLE_TOOLS
 
     assert "browser_page_snapshot" in AVAILABLE_TOOLS
+
+def test_browser_find_text_speech_is_concise():
+    from tool_executor import format_browser_result
+
+    result = format_browser_result(
+        "browser_find_text",
+        {
+            "success": True,
+            "found": True,
+            "query": "Downloads",
+            "matches": [{
+                "excerpt": "Downloads Documentation Success Stories Events # Simple arithmetic ";
+            }],
+        },
+    )
+
+    assert result == "Found 'Downloads' on the page."
+    assert len(result) < 100
