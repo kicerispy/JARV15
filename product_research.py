@@ -1240,10 +1240,55 @@ def _research_query_relevance(
         if term_present(term, combined)
     ]
 
-    # No meaningful subject match means this is not a useful
-    # result, regardless of generic words like "wireless",
-    # "best", "review", or "price".
-    if not matched_terms:
+    lowered_query = str(query or "").lower()
+    adjacent_intent = any(
+        marker in lowered_query
+        for marker in (
+            "alternative",
+            "alternatives",
+            "different types",
+            "earbuds",
+            "airpods",
+            "over ear",
+            "over-ear",
+            "on ear",
+            "on-ear",
+            "most comfortable",
+        )
+    )
+
+    adjacent_terms = (
+        "earbuds",
+        "earbud",
+        "airpods",
+        "true wireless",
+        "tws",
+        "over ear",
+        "over-ear",
+        "on ear",
+        "on-ear",
+        "open ear",
+        "open-ear",
+        "headset",
+        "comfort",
+        "comfortable",
+        "noise cancelling",
+        "noise-cancelling",
+        "anc",
+    )
+
+    matched_adjacent = [
+        term
+        for term in adjacent_terms
+        if term_present(term, combined)
+    ]
+
+    # Adjacent-form-factor evidence is deliberately allowed for alternative
+    # and variety queries. A page about AirPods/earbuds can be directly useful
+    # when the user originally asks about wireless headphones.
+    if not matched_terms and not (
+        adjacent_intent and matched_adjacent
+    ):
         return 0
 
     score = 0
@@ -1272,6 +1317,18 @@ def _research_query_relevance(
             score += 4
         elif term_present(term, url_text):
             score += 3
+
+    if adjacent_intent:
+        for term in matched_adjacent:
+            if term_present(term, title_text):
+                score += 6
+            elif term_present(term, snippet_text):
+                score += 3
+            elif term_present(term, url_text):
+                score += 2
+
+        if matched_adjacent and not matched_terms:
+            score += 4
 
     if len(matched_terms) >= 2:
         score += 5
