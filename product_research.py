@@ -3855,6 +3855,10 @@ SOURCE EVIDENCE:
 Use only the supplied evidence.
 Never invent product names, prices, ratings, review counts,
 specifications, or capabilities.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
 
 Evidence rules:
 - Manufacturer sources are strongest for specifications.
@@ -4027,6 +4031,34 @@ Keep every reason to one short sentence.
         )
 
     return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
 
 def _normalized_name(value: Any) -> str:
     return " ".join(
@@ -4568,6 +4600,8 @@ def research_product(
         budget,
         evidence,
     )
+
+    analysis = _sanitize_analysis_product_identity(analysis)
 
     analysis = _enrich_product_price_comparisons(
         analysis,
