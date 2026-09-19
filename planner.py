@@ -1509,6 +1509,29 @@ def create_plan(
                 }
 
     # ========================================================
+    # DETERMINISTIC SELECTED-RESULT REOPEN ROUTER
+    # ========================================================
+    if normalized_command in {
+        "open the previously selected browser result",
+        "open the previously selected result",
+    } and active_context:
+        selected_url = str(
+            active_context.get("last_result_url", "") or ""
+        ).strip()
+
+        if selected_url:
+            return {
+                "goal": "reopen previously selected browser result",
+                "steps": [
+                    {
+                        "tool": "browser_goto",
+                        "argument": selected_url,
+                    }
+                ],
+                "resolved_command": normalized_command,
+            }
+
+    # ========================================================
     # DETERMINISTIC BROWSER ELEMENT REFERENCE ROUTER
     # ========================================================
     #
