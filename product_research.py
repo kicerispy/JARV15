@@ -3926,6 +3926,9 @@ SOURCE EVIDENCE:
 Use only the supplied evidence.
 Never invent product names, prices, ratings, review counts,
 specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
 - Products must be concrete identifiable models, never category-only labels.
 - Prefer products named explicitly in the supplied evidence.
 - Never output generic names such as "Active Noise Cancelling Headphones"
@@ -4038,6 +4041,9 @@ Synthesize this product research using ONLY the evidence below.
 Request: {request}
 Item: {item}
 {budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
 
 Evidence:
 {json.dumps(
