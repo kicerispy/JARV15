@@ -168,3 +168,14 @@ def test_dom_router_does_not_steal_contextual_result_clicks():
     from commands import get_fast_command
 
     assert get_fast_command("Click the first result") is None
+
+
+def test_open_chrome_remains_a_desktop_launch_command():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Open Chrome")
+
+    assert plan["steps"] == [{
+        "tool": "open_program",
+        "argument": "chrome",
+    }]
