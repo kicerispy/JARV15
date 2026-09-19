@@ -1364,17 +1364,18 @@ def format_browser_result(
 
     if tool_name == "browser_page_snapshot":
         title = " ".join(str(result.get("title", "") or "").split())
-        url = " ".join(str(result.get("url", "") or "").split())
         preview = " ".join(str(result.get("spoken_preview", "") or "").split())
         results = result.get("results") or []
-        
-        parts = []
-        if title:
-            parts.append(title)
 
+        # Prefer the controller's bounded spoken preview. The raw structured
+        # result list remains available to the agent, while TTS stays concise.
+        if preview:
+            return preview[:900]
+
+        parts = []
         if results:
             titles = []
-            for item in results[:5]:
+            for item in results[:3]:
                 if not isinstance(item, dict):
                     continue
                 item_title = " ".join(str(item.get("title", "") or "").split())
@@ -1382,13 +1383,12 @@ def format_browser_result(
                     titles.append(item_title)
             if titles:
                 parts.append("Search results: " + "; ".join(titles) + ".")
-        elif preview:
-            parts.append(preview)
-
+        if not parts and title:
+            parts.append(title)
         if not parts:
             parts.append("The browser page was inspected.")
 
-        return " ".join(parts)[:1400]
+        return " ".join(parts)[:900]
 
     if tool_name == "browser_extract_text":
         extracted = str(result.get("text", "") or "").strip()
