@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, asdict
 from typing import Any, Callable, Dict, Iterable, List, Optional
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 
 try:
     from logger import logger
