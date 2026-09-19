@@ -61,6 +61,30 @@ STORE_PROFILES: Dict[str, Dict[str, Any]] = {
         "search_url": "https://www.bhphotovideo.com/c/search?Ntt={query}",
         "kind": "retailer",
     },
+    "microcenter": {
+        "label": "Micro Center",
+        "domain": "microcenter.com",
+        "search_url": "https://www.microcenter.com/search/search_results.aspx?Ntt={query}",
+        "kind": "retailer",
+    },
+    "costco": {
+        "label": "Costco",
+        "domain": "costco.com",
+        "search_url": "https://www.costco.com/CatalogSearch?keyword={query}",
+        "kind": "retailer",
+    },
+    "crutchfield": {
+        "label": "Crutchfield",
+        "domain": "crutchfield.com",
+        "search_url": "https://www.crutchfield.com/S-kLzEwLJ4/search.asp?search={query}",
+        "kind": "retailer",
+    },
+    "adorama": {
+        "label": "Adorama",
+        "domain": "adorama.com",
+        "search_url": "https://www.adorama.com/search/site/?text={query}",
+        "kind": "retailer",
+    },
     "bose": {
         "label": "Bose",
         "domain": "bose.com",
@@ -80,6 +104,8 @@ DEFAULT_RETAILERS = [
     "bestbuy",
     "walmart",
     "target",
+    "microcenter",
+    "costco",
     "newegg",
     "bhphoto",
 ]
@@ -283,7 +309,7 @@ class BrowserPriceChecker:
         browser_extract_text: Optional[Callable[..., Any]] = None,
         browser_wait_for_element: Optional[Callable[..., Any]] = None,
         browser_page_snapshot: Optional[Callable[..., Any]] = None,
-        max_stores: int = 6,
+        max_stores: int = 8,
     ) -> None:
         if browser_goto is None or browser_extract_text is None:
             try:
@@ -544,7 +570,7 @@ def compare_product_prices(
     product_name: str,
     model_number: str = "",
     stores: Optional[Iterable[str]] = None,
-    max_stores: int = 6,
+    max_stores: int = 8,
 ) -> Dict[str, Any]:
     """Convenience wrapper used by JARVIS product-research code."""
     checker = BrowserPriceChecker(max_stores=max_stores)
