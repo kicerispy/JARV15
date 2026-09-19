@@ -208,7 +208,14 @@ def route_command(command: str) -> RouteDecision:
     if not text:
         return RouteDecision("conversation", "empty request", 0.50)
 
-    if text in _CONTEXTUAL_EXACT:
+    if text in _CONTEXTUAL_EXACT or re.match(
+        r"^(?:click|open|play|select|choose|pick)\s+"
+        r"(?:the\s+)?"
+        r"(?:first|top|second|third|last|final)\s+"
+        r"(?:result|link|video|one|item)$",
+        text,
+        re.IGNORECASE,
+    ):
         return RouteDecision("contextual", "active-result follow-up", 0.99)
 
     if _looks_multi_step(text):
