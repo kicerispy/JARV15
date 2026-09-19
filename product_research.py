@@ -4193,7 +4193,7 @@ def _enrich_product_price_comparisons(
         enriched = compare_products_prices(
             products,
             stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
-            max_products=min(4, len(products)),
+            max_products=min(6, len(products)),
             max_stores=5,
         )
     except Exception as exc:
@@ -4674,6 +4674,8 @@ def research_product(
 
     analysis = _sanitize_analysis_product_identity(analysis)
 
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
     analysis = _enrich_product_price_comparisons(
         analysis,
         budget=budget,
