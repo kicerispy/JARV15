@@ -234,6 +234,101 @@ def route_command(command: str) -> RouteDecision:
     if not text:
         return RouteDecision("conversation", "empty request", 0.50)
 
+    research_hints = (
+        "reviews",
+        "review",
+        "ratings",
+        "rated",
+        "alternative",
+        "alternatives",
+        "cheaper",
+        "best value",
+        "best price",
+        "worth buying",
+        "shopping",
+        "compare prices",
+        "compare products",
+        "comparison",
+        "price",
+        "buy",
+        "purchase",
+    )
+
+    research_question = re.search(
+        r"\b(?:what|which|who)\b.{0,80}\b"
+        r"(?:best|top[- ]rated|cheapest|buy|purchase|worth)\b",
+        text,
+        re.IGNORECASE,
+    )
+
+    if (
+        not any(signal in text for signal in {
+            "code",
+            "coding",
+            "python",
+            "javascript",
+            "typescript",
+            "stack trace",
+            "traceback",
+            "compile",
+            "pytest",
+            "repository",
+            "git",
+        })
+        and (
+            any(signal in text for signal in research_hints)
+            or research_question is not None
+        )
+        and any(
+            signal in text
+            for signal in (
+                "product",
+                "products",
+                "model",
+                "models",
+                "device",
+                "devices",
+                "phone",
+                "phones",
+                "laptop",
+                "laptops",
+                "computer",
+                "computers",
+                "monitor",
+                "monitors",
+                "headphone",
+                "headphones",
+                "earbuds",
+                "keyboard",
+                "mouse",
+                "camera",
+                "tv",
+                "television",
+                "router",
+                "ssd",
+                "gpu",
+                "cpu",
+                "tablet",
+                "chair",
+                "shoes",
+                "appliance",
+                "buy",
+                "purchase",
+                "price",
+                "reviews",
+                "review",
+                "ratings",
+                "alternative",
+                "alternatives",
+            )
+        )
+    ):
+        return RouteDecision(
+            "agent",
+            "product research request",
+            0.97,
+        )
+
     if _looks_direct_browser_navigation(text):
         return RouteDecision("fast", "direct browser URL", 0.99)
 
