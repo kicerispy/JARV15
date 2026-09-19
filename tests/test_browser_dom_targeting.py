@@ -65,3 +65,45 @@ def test_dom_target_metadata_preserves_accessible_name():
         "role": "button",
         "name": "Sign in",
     }
+
+
+def test_planner_prompt_explicitly_prefers_semantic_dom_controls():
+    from planner import _planner_prompt
+
+    prompt = _planner_prompt()
+
+    assert "ARIA role plus accessible name" in prompt
+    assert "Do not use screen coordinates for browser interaction" in prompt
+
+
+def test_browser_dispatcher_passes_accessible_name(monkeypatch):
+    import browser_controller
+    import tools
+
+    captured = {}
+
+    def fake_click_element(**kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "verified": True,
+        }
+
+    monkeypatch.setattr(
+        browser_controller,
+        "browser_click_element",
+        fake_click_element,
+    )
+
+    result = tools.run_browser_tool(
+        "browser_click_element",
+        '{"role":"button","name":"Sign in"}',
+    )
+
+    assert result.success is True
+    assert captured == {
+        "selector": "",
+        "text": "",
+        "role": "button",
+        "name": "Sign in",
+    }
