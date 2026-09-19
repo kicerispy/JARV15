@@ -494,6 +494,10 @@ def build_website_search_plan(
     if not query:
         return None
 
+    site = str(
+        site or ""
+    ).strip().lower()
+
     steps = []
 
     if browser_requested(
@@ -507,19 +511,26 @@ def build_website_search_plan(
             }
         )
 
+    # Use the canonical browser search tool for Google so the fast
+    # command path is visible to the browser executor instead of routing
+    # through the legacy website-search wrapper.
+    if site == "google":
+
         steps.append(
             {
-                "tool": "wait",
-                "argument": "2"
+                "tool": "browser_search_google",
+                "argument": query
             }
         )
 
-    steps.append(
-        {
-            "tool": "search_website",
-            "argument": f"{site}|{query}"
-        }
-    )
+    else:
+
+        steps.append(
+            {
+                "tool": "search_website",
+                "argument": f"{site}|{query}"
+            }
+        )
 
     return {
         "steps": steps
@@ -552,39 +563,65 @@ def build_search_first_result_plan(
 
     steps = []
 
-    steps.append(
-        {
-            "tool": "search_website",
-            "argument": f"{site}|{query}"
-        }
-    )
-
-    steps.append(
-        {
-            "tool": "wait",
-            "argument": "2"
-        }
-    )
-
-    if site == "youtube":
+    if browser_requested(
+        user_request
+    ):
 
         steps.append(
             {
-                "tool": "click_screen",
-                "argument": f"first organic YouTube result for {query}"
+                "tool": "open_program",
+                "argument": "chrome"
             }
         )
 
-    elif site == "google":
+    # Search and click through the JARVIS browser DOM pipeline for the
+    # sites that have dedicated Playwright result tools. The search tools
+    # already wait for navigation/DOM readiness, so a fixed sleep is not
+    # necessary.
+    if site == "google":
 
         steps.append(
             {
-                "tool": "click_screen",
-                "argument": f"first organic Google result for {query}"
+                "tool": "browser_search_google",
+                "argument": query
+            }
+        )
+
+        steps.append(
+            {
+                "tool": "browser_click_first_result",
+                "argument": json.dumps({
+                    "site": "google"
+                })
+            }
+        )
+
+    elif site == "youtube":
+
+        steps.append(
+            {
+                "tool": "search_website",
+                "argument": f"{site}|{query}"
+            }
+        )
+
+        steps.append(
+            {
+                "tool": "browser_click_first_result",
+                "argument": json.dumps({
+                    "site": "youtube"
+                })
             }
         )
 
     else:
+
+        steps.append(
+            {
+                "tool": "search_website",
+                "argument": f"{site}|{query}"
+            }
+        )
 
         steps.append(
             {
