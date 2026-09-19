@@ -1801,6 +1801,7 @@ def _spoken_execution_summary(
         "barehands_add_card": "I added that to the JARVIS display.",
         "barehands_add_image": "I added the image to the JARVIS display.",
         "barehands_clear": "The JARVIS display is clear.",
+        "product_research": text or "The product research report is ready.",
     }
 
     if tool in concise:
