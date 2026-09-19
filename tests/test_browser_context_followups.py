@@ -145,3 +145,43 @@ def test_click_it_after_selected_result_routes_to_dom_element():
             }),
         }
     ]
+
+
+def test_click_it_after_navigation_reopens_selected_result_url():
+    context = make_context("google", "Wi-Fi skeleton")
+    context["last_result_title"] = "Wifiskeleton"
+    context["last_result_url"] = "https://en.wikipedia.org/wiki/Wifiskeleton"
+    context["page_url"] = "https://www.google.com/search?q=Wi-Fi+skeleton"
+
+    resolved = _deterministic_followup(
+        "Click it",
+        context,
+    )
+    assert resolved == "open the previously selected browser result"
+
+    plan = create_plan(resolved, context)
+
+    assert plan["steps"] == [
+        {
+            "tool": "browser_goto",
+            "argument": "https://en.wikipedia.org/wiki/Wifiskeleton",
+        }
+    ]
+
+
+def test_click_it_uses_clean_selected_result_title_when_still_on_result_page():
+    context = make_context("google", "Wi-Fi skeleton")
+    context["last_result_title"] = "Wifiskeleton"
+    context["page_url"] = "https://www.google.com/search?q=Wi-Fi+skeleton"
+
+    resolved = _deterministic_followup(
+        "Click it",
+        context,
+    )
+    assert resolved == "click the browser element with visible text 'Wifiskeleton'"
+
+    plan = create_plan(resolved, context)
+    assert plan["steps"][0]["tool"] == "browser_click_element"
+    assert json.loads(plan["steps"][0]["argument"]) == {
+        "text": "Wifiskeleton",
+    }
