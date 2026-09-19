@@ -249,6 +249,22 @@ def normalize_product_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def infer_model_number(product_name: str) -> str:
+    """Extract a useful model-like token when synthesis omitted model_number."""
+    text = normalize_product_text(product_name)
+    if not text:
+        return ""
+
+    for raw in re.findall(r"\b[a-z]{1,8}[- ]?\d{1,5}[a-z0-9-]*\b", text, re.IGNORECASE):
+        if len(raw) >= 3:
+            return raw
+
+    for raw in re.findall(r"\b[a-z0-9-]*\d[a-z0-9-]*\b", text, re.IGNORECASE):
+        if len(raw) >= 3:
+            return raw
+
+    return ""
+
 def product_tokens(value: str) -> List[str]:
     stop = {
         "the", "and", "with", "for", "wireless", "headphones",
@@ -680,7 +696,9 @@ class BrowserPriceChecker:
         product_name: str,
         model_number: str = "",
     ) -> PriceOffer:
-        cache_key = _price_cache_key(store_key, product_name, model_number)
+        inferred_model = model_number or infer_model_number(product_name)
+        cache_key = _price_cache_key(store_key, product_name, inferred_model)
+        model_number = inferred_model
         cached = _PRICE_CACHE.get(cache_key)
         if cached and (time.monotonic() - cached[0]) < _PRICE_CACHE_TTL:
             return PriceOffer(**asdict(cached[1]))
@@ -1116,4 +1134,5 @@ __all__ = [
     "extract_prices",
     "best_nearby_price",
     "match_score",
+    "infer_model_number",
 ]
