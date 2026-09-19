@@ -733,9 +733,19 @@ def browser_click_first_result(site: str = "", query: str = "") -> dict[str, Any
 
         result_title = ""
         try:
-            result_title = (await locator.inner_text()).strip()
+            # Google result anchors contain the clean result title in h3;
+            # using the whole anchor text also captures breadcrumbs/snippets.
+            heading = locator.locator("h3").first
+            if await heading.count():
+                result_title = (await heading.inner_text()).strip()
         except Exception:
             result_title = ""
+
+        if not result_title:
+            try:
+                result_title = (await locator.inner_text()).strip()
+            except Exception:
+                result_title = ""
 
         result_url = (await locator.get_attribute("href") or "").strip()
 
@@ -1126,8 +1136,9 @@ def browser_extract_text(
         if not selector_value and not text_value and not role_value:
             selector_value = "body"
 
-        # Give client-rendered pages a brief chance to populate after
-        # navigation before reading their DOM.
+        # Give client-rendered pages a chance to populate after
+        # navigation. Google and other SPAs can settle their visible DOM
+        # well after domcontentloaded.
         try:
             await page.wait_for_load_state(
                 "domcontentloaded",
@@ -1136,7 +1147,22 @@ def browser_extract_text(
         except Exception:
             pass
 
-        await page.wait_for_timeout(500)
+        try:
+            await page.wait_for_function(
+                """() => {
+                    const body = document.body;
+                    if (!body) return false;
+                    const text = (
+                        body.innerText ||
+                        body.textContent ||
+                        ""
+                    ).trim();
+                    return text.length > 20;
+                }""",
+                timeout=5_000,
+            )
+        except Exception:
+            await page.wait_for_timeout(750)
 
         locator = _locator(
             page,
