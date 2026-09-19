@@ -308,22 +308,6 @@ class BackgroundTaskController:
             self._last_pending_message = text
             self._pending_speech_count += 1
 
-            if text.lower().startswith("found '") and "on the page." in text.lower():
-                try:
-                    stack = inspect.stack()[1:5]
-                    callers = [
-                        f"{frame_info.frame.f_code.co_filename.split(chr(92))[-1]}:"
-                        f"{frame_info.lineno}::{frame_info.frame.f_code.co_name}"
-                        for frame_info in stack
-                    ]
-                    logger.info(
-                        "JARVIS TASK CONTROLLER: Queueing browser-find speech "
-                        f"count={len(self._task_spoken_messages)} "
-                        f"callers={' <- '.join(callers)}"
-                    )
-                except Exception:
-                    pass
-
             self._speech_queue.put(text)
 
         return False
@@ -389,9 +373,9 @@ class BackgroundTaskController:
                     if speak_callback:
                         speak_callback(message)
                 except Exception as exc:
-                logger.debug(
-                    f"JARVIS TASK CONTROLLER: Queued speech failed: {exc}"
-                )
+                    logger.debug(
+                        f"JARVIS TASK CONTROLLER: Queued speech failed: {exc}"
+                    )
                 finally:
                     self._speech_queue.task_done()
 
