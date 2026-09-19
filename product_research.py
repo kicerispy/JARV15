@@ -3383,6 +3383,120 @@ def _parse_json(text: str) -> dict[str, Any]:
     )
     return {}
 
+
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+SOURCE EVIDENCE:
+{json.dumps(evidence, ensure_ascii=False)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing and comparative analysis.
+- Video sources are useful for demonstrations, hands-on impressions, and
+  comparisons, but do not treat a creator's opinion as an objective measurement.
+- Community sources are anecdotal. Repeated independent reports can identify
+  patterns worth mentioning, but a single post is not proof.
+- Prefer agreement across independent domains and source types.
+- Do not treat a tiny rating sample like a large one.
+- State conflicts or potentially stale pricing.
+- A cheaper product is not automatically better value.
+- An alternative must reasonably serve the same use case.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Separate these outcomes:
+1. best match for the requested item/use case
+2. best value
+3. cheapest credible option
+4. better-reviewed alternative
+These may be the same product or different products.
+
+Return ONLY JSON:
+{{
+  "summary": "2-5 sentence conclusion",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "product",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{
+      "product_a": "",
+      "product_b": "",
+      "comparison": "",
+      "source_ids": []
+    }}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    try:
+        response = ModelManager().product_research(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Output valid JSON only. "
+                        "Be strict about evidence."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ]
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: synthesis failed: "
+            f"{exc}"
+        )
+        return {}
+
+    return _parse_json(
+        _response_text(response)
+    )
 def _normalized_name(value: Any) -> str:
     return " ".join(
         str(value or "").lower().split()
