@@ -9,6 +9,7 @@ logins, paywalls, or anti-bot controls.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, asdict
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
@@ -30,42 +31,49 @@ STORE_PROFILES: Dict[str, Dict[str, Any]] = {
         "domain": "amazon.com",
         "search_url": "https://www.amazon.com/s?k={query}",
         "kind": "retailer",
+        "price_selectors": ["#corePriceDisplay_desktop_feature_div .a-offscreen", "#corePrice_feature_div .a-offscreen", "span.a-price span.a-offscreen"],
     },
     "bestbuy": {
         "label": "Best Buy",
         "domain": "bestbuy.com",
         "search_url": "https://www.bestbuy.com/site/searchpage.jsp?st={query}",
         "kind": "retailer",
+        "price_selectors": ["div[data-testid=\"customerPrice\"]", "[data-test-id=\"price\"]", "div.priceView-hero-price span"],
     },
     "walmart": {
         "label": "Walmart",
         "domain": "walmart.com",
         "search_url": "https://www.walmart.com/search?q={query}",
         "kind": "retailer",
+        "price_selectors": ["[data-automation-id=\"product-price\"]", "[itemprop=\"price\"]", "span[data-automation-id=\"product-price\"]"],
     },
     "target": {
         "label": "Target",
         "domain": "target.com",
         "search_url": "https://www.target.com/s?searchTerm={query}",
         "kind": "retailer",
+        "price_selectors": ["[data-test=\"product-price\"]", "[data-test=\"currentPrice\"]", "[itemprop=\"price\"]"],
     },
     "newegg": {
         "label": "Newegg",
         "domain": "newegg.com",
         "search_url": "https://www.newegg.com/p/pl?d={query}",
         "kind": "retailer",
+        "price_selectors": [".price-current", ".price-current strong", ".price-current-num"],
     },
     "bhphoto": {
         "label": "B&H Photo",
         "domain": "bhphotovideo.com",
         "search_url": "https://www.bhphotovideo.com/c/search?Ntt={query}",
         "kind": "retailer",
+        "price_selectors": ["#pricing .price", "div[id*=\"pricing\"] .price", ".price_ourprice", "[data-selenium=\"pricing\"]"],
     },
     "microcenter": {
         "label": "Micro Center",
         "domain": "microcenter.com",
         "search_url": "https://www.microcenter.com/search/search_results.aspx?Ntt={query}",
         "kind": "retailer",
+        "price_selectors": ["[itemprop=\"price\"]", "span[class*=\"price\"]"],
     },
     "costco": {
         "label": "Costco",
@@ -119,6 +127,17 @@ BLOCK_MARKERS = (
     "unusual traffic",
     "automated access",
 )
+
+_PRICE_CACHE_TTL = 180.0
+_PRICE_CACHE = {}
+
+
+def _price_cache_key(store_key, product_name, model_number=""):
+    return (
+        str(store_key or "").strip().lower(),
+        normalize_product_text(product_name),
+        normalize_product_text(model_number),
+    )
 
 PRICE_RE = re.compile(
     r"(?<![\w])(?:US\s*)?\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{2})?)(?![\w])"
@@ -437,10 +456,31 @@ def _direct_identity_score(product_name: str, snapshot: dict[str, Any]) -> float
         if str(value or "").strip()
     )
 
+    valid_candidates = [
+        candidate for candidate in candidates
+        if candidate and not _product_type_conflict(product_name, candidate)
+    ]
     return max(
-        (match_score(product_name, candidate) for candidate in candidates if candidate),
+        (match_score(product_name, candidate) for candidate in valid_candidates),
         default=0.0,
     )
+
+
+def _product_type_conflict(product_name: str, observed_text: str) -> bool:
+    wanted = normalize_product_text(product_name)
+    observed = normalize_product_text(observed_text)
+
+    wants_headphones = any(term in wanted for term in ("headphone", "headphones", "over ear", "on ear"))
+    wants_earbuds = any(term in wanted for term in ("earbud", "earbuds", "in ear", "tws"))
+    observed_headphones = any(term in observed for term in ("headphone", "headphones", "over ear", "on ear"))
+    observed_earbuds = any(term in observed for term in ("earbud", "earbuds", "in ear", "tws"))
+
+    if wants_headphones and observed_earbuds and not observed_headphones:
+        return True
+    if wants_earbuds and observed_headphones and not observed_earbuds:
+        return True
+    return False
+
 
 
 def match_score(product_name: str, observed_text: str, model_number: str = "") -> float:
@@ -601,6 +641,8 @@ class BrowserPriceChecker:
                 continue
 
             haystack = f"{text} {absolute}".lower()
+            if _product_type_conflict(product_name, haystack):
+                continue
             product_score = match_score(product_name, haystack, model_number)
 
             model_hit = bool(
@@ -638,6 +680,11 @@ class BrowserPriceChecker:
         product_name: str,
         model_number: str = "",
     ) -> PriceOffer:
+        cache_key = _price_cache_key(store_key, product_name, model_number)
+        cached = _PRICE_CACHE.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < _PRICE_CACHE_TTL:
+            return PriceOffer(**asdict(cached[1]))
+
         profile = STORE_PROFILES[store_key]
         label = profile["label"]
         url = self._search_url(
@@ -751,11 +798,31 @@ class BrowserPriceChecker:
                         product_name,
                         direct_snapshot,
                     )
-                    direct_price = best_nearby_price(
-                        direct_body,
-                        product_name,
-                        model_number=model_number,
-                    )
+                    direct_price = None
+                    for selector in profile.get("price_selectors", []) or []:
+                        try:
+                            selector_raw = self.browser_extract_text(selector=selector)
+                        except TypeError:
+                            selector_raw = self.browser_extract_text(selector)
+                        except Exception:
+                            continue
+                        candidate_price = _select_best_price(_coerce_text(selector_raw))
+                        if candidate_price is not None:
+                            direct_price = candidate_price
+                            break
+
+                    if direct_price is None:
+                        lower_direct = direct_body.lower()
+                        anchor_index = -1
+                        for lookup in (model_number, product_name):
+                            needle = str(lookup or "").strip().lower()
+                            if needle:
+                                anchor_index = lower_direct.find(needle)
+                                if anchor_index >= 0:
+                                    break
+                        if anchor_index >= 0:
+                            nearby = direct_body[anchor_index:anchor_index + 900]
+                            direct_price = _select_best_price(nearby)
 
                     if direct_score >= score:
                         score = direct_score
@@ -861,7 +928,7 @@ class BrowserPriceChecker:
 
         exact_match = bool(direct_product_page_seen)
 
-        return PriceOffer(
+        offer = PriceOffer(
             store=store_key,
             label=label,
             url=direct_url,
@@ -870,6 +937,11 @@ class BrowserPriceChecker:
             match_score=score,
             notes=notes,
         )
+
+        if offer.exact_match and offer.price is not None:
+            _PRICE_CACHE[cache_key] = (time.monotonic(), PriceOffer(**asdict(offer)))
+
+        return offer
 
     def compare(
         self,
