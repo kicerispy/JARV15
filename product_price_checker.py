@@ -487,7 +487,14 @@ class BrowserPriceChecker:
             )
 
         score = match_score(product_name, body, model_number)
-        price = best_nearby_price(body, product_name, model_number=model_number)
+
+        # Prices taken from a retailer search page are not sufficiently tied
+        # to the exact product. Keep the search-page match only as a signal
+        # for resolving a direct product page; never treat its price as a
+        # verified offer.
+        price = None
+        direct_product_page_seen = False
+
         direct_url = self._direct_product_url(
             store_key,
             url,
@@ -529,6 +536,9 @@ class BrowserPriceChecker:
                     if direct_score >= score:
                         score = direct_score
 
+                    if direct_score >= 0.80:
+                        direct_product_page_seen = True
+
                     if direct_score >= 0.80 and direct_price is not None:
                         price = direct_price
 
@@ -563,6 +573,9 @@ class BrowserPriceChecker:
                         if direct_score >= score:
                             score = direct_score
 
+                        if direct_score >= 0.80:
+                            direct_product_page_seen = True
+
                         if direct_score >= 0.80 and direct_price is not None:
                             price = direct_price
                 except Exception:
@@ -573,17 +586,29 @@ class BrowserPriceChecker:
                 pass
 
         notes = ""
-        if score < 0.55:
-            notes = "Search page returned text, but an exact product match was not verified."
+        if not direct_product_page_seen:
+            # Search-page prices can belong to a different SKU, variant,
+            # marketplace seller, coupon, or nearby result. Do not promote
+            # them into verified price evidence without a direct product page.
+            if score < 0.55:
+                notes = "Search page returned text, but an exact product match was not verified."
+            else:
+                notes = (
+                    "Exact product was indicated on the search page, but a direct "
+                    "product page was not resolved; search-page pricing was not "
+                    "treated as verified."
+                )
         elif price is None:
-            notes = "Product appears present, but a reliable visible USD price was not found."
+            notes = "Product page appears to match, but a reliable visible USD price was not found."
+
+        exact_match = bool(direct_product_page_seen)
 
         return PriceOffer(
             store=store_key,
             label=label,
             url=direct_url,
             price=price,
-            exact_match=score >= 0.80 or (bool(model_number) and score >= 0.70),
+            exact_match=exact_match,
             match_score=score,
             notes=notes,
         )
