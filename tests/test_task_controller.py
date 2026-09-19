@@ -535,3 +535,19 @@ def test_background_speech_deduplicates_across_queue_drains():
         lambda message: spoken.append(message) or False
     ) == 0
     assert spoken == ["Task complete."]
+
+
+def test_delivery_layer_suppresses_duplicate_queue_entries():
+    controller = BackgroundTaskController(None)
+
+    # Simulate the queue containing two identical completion messages. This
+    # bypasses enqueue-time de-duplication and exercises the final delivery
+    # boundary directly.
+    controller._speech_queue.put("Task complete.")
+    controller._speech_queue.put("Task complete.")
+
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 2
+    assert spoken == ["Task complete."]
