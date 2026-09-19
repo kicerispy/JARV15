@@ -1380,6 +1380,91 @@ def create_plan(
                 }
 
     # ========================================================
+    # DETERMINISTIC ORDINAL BROWSER RESULT ROUTER
+    # ========================================================
+    #
+    # Context resolution can produce canonical browser phrases such as:
+    #   click the second browser result on google
+    #   click the last browser result on youtube
+    #
+    # These are execution-safe browser actions and should never be handed
+    # back to the LLM planner. Use the active browser context for the site
+    # and search query so the action stays on the current search.
+    # ========================================================
+
+    browser_result_match = re.match(
+        r"^(?:click|open|play|select|choose|pick)\s+"
+        r"(?:the\s+)?"
+        r"(first|top|second|third|last|final)\s+"
+        r"(?:browser\s+)?"
+        r"(?:result|link|video|one|item)"
+        r"(?:\s+on\s+([a-z0-9.-]+))?$",
+        normalized_command,
+        re.IGNORECASE,
+    )
+
+    if browser_result_match and active_context:
+        ordinal = browser_result_match.group(1).lower()
+        explicit_site = (
+            browser_result_match.group(2) or ""
+        ).strip().lower()
+
+        active_site = str(
+            active_context.get("site", "") or ""
+        ).strip().lower()
+
+        active_query = str(
+            active_context.get("last_query", "") or ""
+        ).strip()
+
+        site = explicit_site or active_site
+
+        if site in {"google", "youtube"} and active_query:
+            if ordinal in {"first", "top"}:
+                resolved_command = (
+                    f"click the first browser result on {site}"
+                )
+                return {
+                    "goal": f"click first {site} result",
+                    "steps": [
+                        {
+                            "tool": "browser_click_first_result",
+                            "argument": json.dumps({
+                                "site": site,
+                                "query": active_query,
+                            }),
+                        }
+                    ],
+                    "resolved_command": resolved_command,
+                }
+
+            index = {
+                "second": 2,
+                "third": 3,
+                "last": "last",
+                "final": "last",
+            }.get(ordinal)
+
+            if index is not None:
+                resolved_command = (
+                    f"click the {ordinal} browser result on {site}"
+                )
+                return {
+                    "goal": f"click {ordinal} {site} result",
+                    "steps": [
+                        {
+                            "tool": "browser_click_result",
+                            "argument": json.dumps({
+                                "index": index,
+                                "site": site,
+                                "query": active_query,
+                            }),
+                        }
+                    ],
+                    "resolved_command": resolved_command,
+                }
+
+    # ========================================================
     # DETERMINISTIC BAREHANDS DISPLAY ROUTER
     # ========================================================
     #
