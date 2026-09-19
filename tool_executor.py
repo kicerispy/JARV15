@@ -1901,6 +1901,23 @@ def speak_result(
     return "done"
 
 
+def _background_speech_owned(task_state, speak_callback) -> bool:
+    """Return True when final speech must be staged for the task controller."""
+    try:
+        if bool(getattr(speak_callback, "_jarvis_background_speech", False)):
+            return True
+    except Exception:
+        pass
+
+    try:
+        return bool(
+            hasattr(task_state, "is_background_speech_owned")
+            and task_state.is_background_speech_owned()
+        )
+    except Exception:
+        return False
+
+
 # ============================================================
 # EXECUTE PLAN
 # ============================================================
@@ -2486,10 +2503,7 @@ def execute_plan(
 
                 task_state.finish()
 
-                if (
-                    hasattr(task_state, "is_background_speech_owned")
-                    and task_state.is_background_speech_owned()
-                ):
+                if _background_speech_owned(task_state, speak_callback):
                     # BackgroundTaskController owns final TTS delivery. Store
                     # the result here so there is only one completion-speech
                     # authority after the worker exits.
@@ -2771,10 +2785,7 @@ def execute_plan(
                         f"fallback: {e}"
                     )
 
-        if (
-            hasattr(task_state, "is_background_speech_owned")
-            and task_state.is_background_speech_owned()
-        ):
+        if _background_speech_owned(task_state, speak_callback):
             task_state.set_final_speech(spoken_message)
             return "done"
 
