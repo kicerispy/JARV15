@@ -437,6 +437,17 @@ class BackgroundTaskController:
             )
             return False
 
+    def _make_background_speech_callback(self) -> Callable[[str], bool]:
+        """Create the speech callback used exclusively by background workers."""
+        def callback(message: str) -> bool:
+            return self._background_speak(
+                self._queue_speech,
+                message,
+            )
+
+        setattr(callback, "_jarvis_background_speech", True)
+        return callback
+
     def _run(
         self,
         task: Any,
@@ -456,10 +467,7 @@ class BackgroundTaskController:
                 task,
                 active_context,
                 task_state,
-                lambda message: self._background_speak(
-                    self._queue_speech,
-                    message,
-                ),
+                self._make_background_speech_callback(),
                 history_text=history_text,
             )
 
@@ -496,10 +504,7 @@ class BackgroundTaskController:
         history_text: str,
     ) -> None:
         """Plan first, then execute, without blocking the main loop."""
-        worker_speak = lambda message: self._background_speak(
-            self._queue_speech,
-            message,
-        )
+        worker_speak = self._make_background_speech_callback()
 
         try:
             if task_state.is_cancelled():
