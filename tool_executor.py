@@ -27,6 +27,7 @@ BROWSER_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "browser_find_text",
     "browser_click_first_result",
     "browser_connect",
     "browser_search_google",
@@ -1389,6 +1390,20 @@ def format_browser_result(
             parts.append("The browser page was inspected.")
 
         return " ".join(parts)[:900]
+
+    if tool_name == "browser_find_text":
+        query = " ".join(str(result.get("query", "") or "").split())
+        matches = result.get("matches") or []
+        if result.get("found") and matches:
+            excerpt = " ".join(
+                str(matches[0].get("excerpt", "") or "").split()
+            )
+            if excerpt:
+                return f"Found '{query}' on the page: {excerpt[:500]}."
+            return f"I found '{query}' on the page."
+        if query:
+            return f"I couldn't find '{query}' on the page."
+        return "I couldn't find that text on the page."
 
     if tool_name == "browser_extract_text":
         extracted = str(result.get("text", "") or "").strip()
