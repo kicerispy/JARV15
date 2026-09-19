@@ -246,7 +246,9 @@ Browser workflow:
 6. Use browser_click_element for links, buttons, tabs, menus, and controls.
 7. Use browser_wait_for_element when content may load asynchronously.
 8. Use browser_extract_text or browser_page_info to verify the result.
-9. Use browser_click_result for second, third, or last search results.
+9. Use browser_find_text when the user asks to find a phrase or information
+   somewhere in the current page's readable content.
+10. Use browser_click_result for second, third, or last search results.
 10. Use browser_back for requests to go back to the previous page.
 11. When an action fails, use the browser state and observations to
    choose a different strategy during replanning.
@@ -286,6 +288,9 @@ argument = {{"role":"heading","name":"Results","timeout":10000}}
 browser_extract_text
 argument = {{"selector":"main"}}
 
+browser_find_text
+argument = {{"query":"pricing"}}
+
 Browser rules:
 
 - Every DOM tool argument MUST be valid JSON.
@@ -296,7 +301,9 @@ Browser rules:
 - Keep browser actions atomic: one action per step.
 - Do not assume a click succeeded; verify the resulting state.
 - Use browser_page_info after important navigation or interactions.
-- Use browser_extract_text when page contents must be inspected.
+- Use browser_extract_text when a specific DOM element's text must be inspected.
+- Use browser_find_text when the requested information may appear anywhere
+  in the current page text.
 - Use browser_find_element before acting when element existence is uncertain.
 - Use browser_wait_for_element when the page may still be loading.
 - Use the specialized Bing/YouTube browser tools when their deterministic
