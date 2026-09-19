@@ -2648,6 +2648,7 @@ BROWSER_TOOLS = {
     "browser_click_first_bing_result",
     "browser_goto",
     "browser_page_info",
+    "browser_page_snapshot",
     "browser_click_result",
     "browser_back",
 }
@@ -2821,6 +2822,7 @@ def run_browser_tool(
         browser_back,
         browser_goto,
         browser_page_info,
+        browser_page_snapshot,
     )
 
     argument = str(argument or "").strip()
@@ -2966,6 +2968,9 @@ def run_browser_tool(
 
     if tool_name == "browser_page_info":
         return normalize(browser_page_info())
+
+    if tool_name == "browser_page_snapshot":
+        return normalize(browser_page_snapshot())
 
     return ToolResult(
         success=False,

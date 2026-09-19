@@ -24,6 +24,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
+    "browser_page_snapshot": "Read a bounded structured snapshot of the current browser page: title, URL, headings, results, buttons, inputs, links, and cleaned readable text.",
     "browser_click_result": "Click a numbered or last organic Google/YouTube result. Argument is JSON.",
     "browser_back": "Navigate the controlled browser back one page.",
     "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role with optional accessible name.",

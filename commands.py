@@ -1756,12 +1756,20 @@ def deterministic_route(user_request):
             ]
         }
 
-    if text in {"read the page", "read the page text", "read page"}:
+    if text in {
+        "read the page",
+        "read this page",
+        "read the page text",
+        "read page",
+        "read the current browser page",
+        "show this page",
+        "show the page",
+    }:
         return {
             "steps": [
                 {
-                    "tool": "browser_extract_text",
-                    "argument": "{\"selector\":\"body\"}"
+                    "tool": "browser_page_snapshot",
+                    "argument": ""
                 }
             ]
         }

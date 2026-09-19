@@ -179,3 +179,62 @@ def test_open_chrome_remains_a_desktop_launch_command():
         "tool": "open_program",
         "argument": "chrome",
     }]
+
+
+
+def test_read_page_routes_to_browser_snapshot():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Read this page")
+
+    assert plan["steps"] == [{
+        "tool": "browser_page_snapshot",
+        "argument": "",
+    }]
+
+
+def test_read_current_browser_page_routes_to_browser_snapshot():
+    from commands import get_fast_command
+
+    plan = get_fast_command("read the current browser page")
+
+    assert plan["steps"] == [{
+        "tool": "browser_page_snapshot",
+        "argument": "",
+    }]
+
+
+def test_browser_snapshot_is_in_browser_dispatcher(monkeypatch):
+    import browser_controller
+    import tools
+
+    monkeypatch.setattr(
+        browser_controller,
+        "browser_page_snapshot",
+        lambda: {
+            "success": True,
+            "verified": True,
+            "action": "page_snapshot",
+            "title": "Example",
+        },
+    )
+
+    result = tools.run_browser_tool(
+        "browser_page_snapshot",
+        "",
+    )
+
+    assert result.success is True
+    assert result.data["action"] == "page_snapshot"
+
+
+def test_browser_snapshot_is_in_executor_dispatcher():
+    import tool_executor
+
+    assert "browser_page_snapshot" in tool_executor.BROWSER_TOOLS
+
+
+def test_planner_advertises_browser_snapshot():
+    from planner import AVAILABLE_TOOLS
+
+    assert "browser_page_snapshot" in AVAILABLE_TOOLS

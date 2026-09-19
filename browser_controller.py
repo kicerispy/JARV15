@@ -386,6 +386,337 @@ def browser_page_info() -> dict[str, Any]:
         return {"success": False, "error": str(exc)}
 
 
+
+def _snapshot_clean_text(value: str, max_chars: int = 6000) -> str:
+    """Normalize browser page text and remove common navigation boilerplate."""
+    skip_lines = {
+        "skip to main content",
+        "accessibility help",
+        "ai mode",
+        "all",
+        "news",
+        "images",
+        "shopping",
+        "videos",
+        "forums",
+        "more",
+        "tools",
+        "page navigation",
+        "footer links",
+        "send feedback",
+        "sign in to customize",
+        "people also ask",
+        "what people are saying",
+    }
+
+    lines = []
+    seen = set()
+
+    for raw_line in str(value or "").splitlines():
+        line = " ".join(str(raw_line).split())
+        if not line:
+            continue
+
+        if line.lower() in skip_lines:
+            continue
+
+        if line in seen:
+            continue
+
+        seen.add(line)
+        lines.append(line)
+
+    cleaned = "\n".join(lines).strip()
+    return cleaned[:max_chars]
+
+
+async def _snapshot_texts(page, selector: str, limit: int = 20) -> list[str]:
+    """Collect short text values from the first visible matching elements."""
+    locator = page.locator(selector)
+    count = await locator.count()
+    values = []
+
+    for index in range(min(count, limit)):
+        item = locator.nth(index)
+
+        try:
+            if not await item.is_visible():
+                continue
+        except Exception:
+            pass
+
+        try:
+            value = (await item.inner_text(timeout=1500)).strip()
+        except Exception:
+            try:
+                value = (await item.text_content(timeout=1500) or "").strip()
+            except Exception:
+                value = ""
+
+        value = " ".join(value.split())
+        if value and value not in values:
+            values.append(value)
+
+    return values
+
+
+async def _snapshot_links(page, selector: str, limit: int = 30) -> list[dict[str, str]]:
+    """Collect visible link text and hrefs without walking the entire DOM."""
+    locator = page.locator(selector)
+    count = await locator.count()
+    links = []
+
+    for index in range(min(count, limit)):
+        item = locator.nth(index)
+
+        try:
+            if not await item.is_visible():
+                continue
+        except Exception:
+            pass
+
+        try:
+            label = " ".join((await item.inner_text(timeout=1500)).split())
+        except Exception:
+            label = ""
+
+        try:
+            href = (await item.get_attribute("href") or "").strip()
+        except Exception:
+            href = ""
+
+        if not label and not href:
+            continue
+
+        candidate = {
+            "text": label[:300],
+            "href": href[:1000],
+        }
+
+        if candidate not in links:
+            links.append(candidate)
+
+    return links
+
+
+async def _snapshot_search_results(page) -> list[dict[str, str]]:
+    """Extract lightweight search-result identities for common search pages."""
+    url = str(getattr(page, "url", "") or "").lower()
+    candidates = []
+
+    if "google." in url:
+        locator = page.locator("div#search a:has(h3)")
+        for index in range(min(await locator.count(), 10)):
+            link = locator.nth(index)
+            try:
+                heading = link.locator("h3").first
+                title = " ".join((await heading.inner_text(timeout=1500)).split())
+                href = (await link.get_attribute("href") or "").strip()
+            except Exception:
+                continue
+
+            if title:
+                candidates.append({
+                    "index": str(index + 1),
+                    "title": title[:300],
+                    "url": href[:1000],
+                })
+
+    elif "bing.com" in url:
+        locator = page.locator("li.b_algo h2 a")
+        for index in range(min(await locator.count(), 10)):
+            link = locator.nth(index)
+            try:
+                title = " ".join((await link.inner_text(timeout=1500)).split())
+                href = (await link.get_attribute("href") or "").strip()
+            except Exception:
+                continue
+
+            if title:
+                candidates.append({
+                    "index": str(index + 1),
+                    "title": title[:300],
+                    "url": href[:1000],
+                })
+
+    elif "youtube.com" in url:
+        locator = page.locator(
+            "ytd-video-renderer a#video-title, "
+            "ytd-search ytd-video-renderer #video-title"
+        )
+        for index in range(min(await locator.count(), 10)):
+            item = locator.nth(index)
+            try:
+                title = " ".join((await item.inner_text(timeout=1500)).split())
+                href = (await item.get_attribute("href") or "").strip()
+            except Exception:
+                continue
+
+            if title:
+                candidates.append({
+                    "index": str(index + 1),
+                    "title": title[:300],
+                    "url": href[:1000],
+                })
+
+    return candidates
+
+
+def browser_page_snapshot() -> dict[str, Any]:
+    """Return a bounded, structured observation of the current browser page."""
+    async def _snapshot():
+        page = await _init_browser()
+
+        try:
+            await page.wait_for_load_state(
+                "domcontentloaded",
+                timeout=2_000,
+            )
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(150)
+
+        title = (await page.title()).strip()
+        url = str(page.url or "").strip()
+
+        body_text = ""
+        try:
+            body_text = await page.locator("body").evaluate(
+                """el => (
+                    el.innerText ||
+                    el.textContent ||
+                    ""
+                ).trim()"""
+            )
+        except Exception:
+            pass
+
+        readable_text = _snapshot_clean_text(body_text)
+
+        headings = await _snapshot_texts(
+            page,
+            "h1,h2,h3,h4,h5,h6",
+            limit=20,
+        )
+
+        buttons = await _snapshot_texts(
+            page,
+            "button",
+            limit=20,
+        )
+
+        links = await _snapshot_links(
+            page,
+            "a",
+            limit=30,
+        )
+
+        inputs = []
+        fields = page.locator("input, textarea, select")
+        field_count = await fields.count()
+
+        for index in range(min(field_count, 20)):
+            field = fields.nth(index)
+
+            try:
+                if not await field.is_visible():
+                    continue
+            except Exception:
+                pass
+
+            try:
+                field_type = (
+                    await field.get_attribute("type")
+                    or "text"
+                ).strip()
+            except Exception:
+                field_type = "text"
+
+            try:
+                field_name = (
+                    await field.get_attribute("name")
+                    or ""
+                ).strip()
+            except Exception:
+                field_name = ""
+
+            try:
+                placeholder = (
+                    await field.get_attribute("placeholder")
+                    or ""
+                ).strip()
+            except Exception:
+                placeholder = ""
+
+            try:
+                aria_label = (
+                    await field.get_attribute("aria-label")
+                    or ""
+                ).strip()
+            except Exception:
+                aria_label = ""
+
+            if any((field_name, placeholder, aria_label, field_type)):
+                inputs.append({
+                    "type": field_type[:80],
+                    "name": field_name[:200],
+                    "placeholder": placeholder[:200],
+                    "aria_label": aria_label[:200],
+                })
+
+        results = await _snapshot_search_results(page)
+
+        spoken_preview = readable_text[:900]
+        if results:
+            result_titles = [
+                item["title"]
+                for item in results[:5]
+                if item.get("title")
+            ]
+            if result_titles:
+                spoken_preview = (
+                    "Search results: "
+                    + "; ".join(result_titles)
+                    + "."
+                )
+
+        return {
+            "success": True,
+            "verified": True,
+            "action": "page_snapshot",
+            "snapshot_version": 1,
+            "title": title,
+            "url": url,
+            "headings": headings,
+            "results": results,
+            "buttons": buttons,
+            "inputs": inputs,
+            "links": links,
+            "readable_text": readable_text,
+            "spoken_preview": spoken_preview,
+            "characters": len(readable_text),
+            "has_more": len(readable_text) > len(spoken_preview),
+            "element_counts": {
+                "headings": len(headings),
+                "results": len(results),
+                "buttons": len(buttons),
+                "inputs": len(inputs),
+                "links": len(links),
+            },
+        }
+
+    try:
+        return get_event_loop().run_until_complete(_snapshot())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "action": "page_snapshot",
+            "error": str(exc),
+        }
+
 def browser_search_google(query: str) -> dict[str, Any]:
     return browser_goto("https://www.google.com/search?q=" + quote_plus(str(query or "").strip()))
 

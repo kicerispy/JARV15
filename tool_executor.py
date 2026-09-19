@@ -34,6 +34,7 @@ BROWSER_TOOLS = {
     "browser_click_first_bing_result",
     "browser_goto",
     "browser_page_info",
+    "browser_page_snapshot",
     "browser_click_result",
     "browser_back",
 }
@@ -1360,6 +1361,34 @@ def format_browser_result(
 
     if tool_name == "browser_wait_for_element":
         return "The browser element is visible."
+
+    if tool_name == "browser_page_snapshot":
+        title = " ".join(str(result.get("title", "") or "").split())
+        url = " ".join(str(result.get("url", "") or "").split())
+        preview = " ".join(str(result.get("spoken_preview", "") or "").split())
+        results = result.get("results") or []
+        
+        parts = []
+        if title:
+            parts.append(title)
+
+        if results:
+            titles = []
+            for item in results[:5]:
+                if not isinstance(item, dict):
+                    continue
+                item_title = " ".join(str(item.get("title", "") or "").split())
+                if item_title and item_title not in titles:
+                    titles.append(item_title)
+            if titles:
+                parts.append("Search results: " + "; ".join(titles) + ".")
+        elif preview:
+            parts.append(preview)
+
+        if not parts:
+            parts.append("The browser page was inspected.")
+
+        return " ".join(parts)[:1400]
 
     if tool_name == "browser_extract_text":
         extracted = str(result.get("text", "") or "").strip()
