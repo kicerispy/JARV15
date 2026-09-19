@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+import unicodedata
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Optional
 
@@ -92,6 +93,24 @@ class BackgroundTaskController:
             and self._thread.is_alive()
         )
 
+    @staticmethod
+    def _speech_key(message: str) -> str:
+        """Build a stable key for user-facing speech de-duplication."""
+        text = unicodedata.normalize(
+            "NFKC",
+            str(message or ""),
+        )
+
+        # Remove zero-width/control formatting that can make visually identical
+        # speech compare differently while remaining inaudible to the user.
+        text = "".join(
+            character
+            for character in text
+            if not unicodedata.category(character).startswith("C")
+        )
+
+        return " ".join(text.split()).casefold()
+
     def has_active_task(self) -> bool:
         with self._lock:
             return (
@@ -115,6 +134,8 @@ class BackgroundTaskController:
             self._task = task
             self._task_state = task_state
             self._task_spoken_messages.clear()
+            self._last_delivered_speech = ""
+            self._last_delivered_speech_at = 0.0
             self._completion_event.clear()
 
             thread = threading.Thread(
@@ -295,16 +316,23 @@ class BackgroundTaskController:
                 except Exception:
                     pass
 
-            if text in self._task_spoken_messages:
+            speech_key = self._speech_key(text)
+
+            if not speech_key:
+                return False
+
+            if speech_key in self._task_spoken_messages:
                 return False
 
             if (
                 self._pending_speech_count > 0
-                and text == self._last_pending_message
+                and speech_key == self._speech_key(
+                    self._last_pending_message
+                )
             ):
                 return False
 
-            self._task_spoken_messages.add(text)
+            self._task_spoken_messages.add(speech_key)
             self._last_pending_message = text
             self._pending_speech_count += 1
 
@@ -345,21 +373,19 @@ class BackgroundTaskController:
                 if self._pending_speech_count == 0:
                     self._last_pending_message = ""
 
-            normalized_message = " ".join(
-                str(message or "").strip().split()
-            ).casefold()
+            speech_key = self._speech_key(message)
             now = time.monotonic()
 
             with self._lock:
                 duplicate = (
-                    bool(normalized_message)
-                    and normalized_message == self._last_delivered_speech
+                    bool(speech_key)
+                    and speech_key == self._last_delivered_speech
                     and now - self._last_delivered_speech_at
                     < self._speech_delivery_dedup_window
                 )
 
                 if not duplicate:
-                    self._last_delivered_speech = normalized_message
+                    self._last_delivered_speech = speech_key
                     self._last_delivered_speech_at = now
 
             try:
