@@ -362,22 +362,23 @@ class BackgroundTaskController:
                     self._last_delivered_speech = normalized_message
                     self._last_delivered_speech_at = now
 
-            if duplicate:
-                logger.info(
-                    "JARVIS TASK CONTROLLER: "
-                    "Suppressed duplicate delivered speech: "
-                    f"{message}"
-                )
-            else:
-                try:
-                    if speak_callback:
-                        speak_callback(message)
-                except Exception as exc:
-                    logger.debug(
-                        f"JARVIS TASK CONTROLLER: Queued speech failed: {exc}"
+            try:
+                if duplicate:
+                    logger.info(
+                        "JARVIS TASK CONTROLLER: "
+                        "Suppressed duplicate delivered speech: "
+                        f"{message}"
                     )
-                finally:
-                    self._speech_queue.task_done()
+                else:
+                    try:
+                        if speak_callback:
+                            speak_callback(message)
+                    except Exception as exc:
+                        logger.debug(
+                            f"JARVIS TASK CONTROLLER: Queued speech failed: {exc}"
+                        )
+            finally:
+                self._speech_queue.task_done()
 
             drained += 1
 
