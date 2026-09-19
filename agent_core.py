@@ -2375,6 +2375,13 @@ class JarvisAgent:
 
         task.status = "executing"
 
+        # Each execution attempt owns its own staged completion message.
+        # Clear any prior phase's message before starting the next attempt.
+        try:
+            task_state.clear_final_speech()
+        except Exception:
+            pass
+
         logger.info(
             "JARVIS AGENT: Executing plan "
             f"(attempt={task.replan_count + 1})"
@@ -2854,12 +2861,14 @@ class JarvisAgent:
 
                 if report_progress:
                     completion_spoken = False
+                    pending_final_speech = False
                     try:
                         completion_spoken = task_state.was_completion_spoken()
+                        pending_final_speech = task_state.has_pending_final_speech()
                     except Exception:
-                        completion_spoken = False
+                        pass
 
-                    if not completion_spoken:
+                    if not completion_spoken and not pending_final_speech:
                         self._announce(
                             "The task is complete.",
                             speak_callback,
