@@ -867,18 +867,22 @@ def build_browser_dom_plan(user_request):
 
     # Search readable text on the current page.
     match = re.match(
-        r"^(?:find|look\\s+for|search\\s+this\\s+page\\s+for)\\s+"
+        r"^(?:find|locate|look\\s+for)\\s+"
         r"(?:the\\s+)?(.+?)\\s+"
-        r"(?:on|in)\\s+(?:the\\s+)?(?:current\\s+)?page$|"
-        r"^search\\s+this\\s+page\\s+for\\s+(.+?)$",
+        r"(?:on|in)\\s+(?:the\\s+)?(?:current\\s+)?page$",
         normalized,
         re.IGNORECASE,
     )
+
+    if not match:
+        match = re.match(
+            r"^search\\s+this\\s+page\\s+for\\s+(.+?)$",
+            normalized,
+            re.IGNORECASE,
+        )
+
     if match:
-        query = next(
-            (group for group in match.groups() if group),
-            "",
-        ).strip().rstrip("?.!").strip()
+        query = match.group(1).strip().rstrip("?.!").strip()
         if query:
             return {
                 "steps": [{
