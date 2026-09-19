@@ -2564,15 +2564,130 @@ def _research_fetch_source(
 
 def _discover(queries):
     """
-    Google-first research discovery.
+    Google-first research discovery with deterministic coverage seeds.
 
     Google is the default provider.
-    Bing is used only after Google is blocked or the accumulated
-    discovery set is still insufficient.
+    Bing is used after Google is blocked or accumulated coverage is still
+    insufficient. Direct retailer/community/video search seeds are inserted
+    first so search-engine quirks cannot starve those source categories.
     """
 
     discovered = []
     seen_urls = set()
+
+    seed_item = ""
+    if queries:
+        seed_item = str(
+            _extract_item_and_budget(
+                queries[0]
+            )[0]
+            or ""
+        ).strip()
+
+    # --------------------------------------------------------
+    # Coverage seeds
+    # --------------------------------------------------------
+    #
+    # Search providers have repeatedly ignored site: operators in this
+    # environment. Seed the important source families directly before
+    # general discovery so they are guaranteed a chance to be selected.
+    # The seeds are candidates only; evidence is still fetched and must
+    # pass the normal content-quality checks later.
+    # --------------------------------------------------------
+
+    if seed_item:
+        encoded_item = requests.utils.quote(
+            seed_item,
+            safe="",
+        )
+
+        retailer_seeds = (
+            ("amazon.com", "https://www.amazon.com/s?k={q}"),
+            ("bestbuy.com", "https://www.bestbuy.com/site/searchpage.jsp?st={q}"),
+            ("walmart.com", "https://www.walmart.com/search?q={q}"),
+            ("target.com", "https://www.target.com/s?searchTerm={q}"),
+            ("microcenter.com", "https://www.microcenter.com/search/search_results.aspx?Ntt={q}"),
+            ("costco.com", "https://www.costco.com/CatalogSearch?keyword={q}"),
+            ("newegg.com", "https://www.newegg.com/p/pl?d={q}"),
+            ("bhphotovideo.com", "https://www.bhphotovideo.com/c/search?q={q}&sts=ma"),
+            ("ebay.com", "https://www.ebay.com/sch/i.html?_nkw={q}"),
+        )
+
+        for domain, template in retailer_seeds:
+            _research_add_results(
+                discovered,
+                [
+                    {
+                        "title": f"{seed_item} {domain} search results",
+                        "url": template.format(q=encoded_item),
+                        "domain": domain,
+                        "source_type": "retailer",
+                        "snippet": "",
+                    }
+                ],
+                seen_urls,
+                engine="seed",
+                query=f"{seed_item} retailer",
+            )
+
+        community_seeds = (
+            (
+                "reddit.com",
+                f"https://www.reddit.com/search/?q={encoded_item}&type=link",
+                "reddit discussions",
+            ),
+            (
+                "head-fi.org",
+                f"https://www.head-fi.org/search/?q={encoded_item}",
+                "Head-Fi discussions",
+            ),
+            (
+                "avforums.com",
+                f"https://www.avforums.com/search/?q={encoded_item}",
+                "AVForums discussions",
+            ),
+            (
+                "slickdeals.net",
+                f"https://slickdeals.net/newsearch.php?q={encoded_item}",
+                "Slickdeals discussions",
+            ),
+        )
+
+        for domain, url, label in community_seeds:
+            _research_add_results(
+                discovered,
+                [
+                    {
+                        "title": f"{seed_item} {label}",
+                        "url": url,
+                        "domain": domain,
+                        "source_type": "community",
+                        "snippet": "",
+                    }
+                ],
+                seen_urls,
+                engine="seed",
+                query=f"{seed_item} community discussion",
+            )
+
+        _research_add_results(
+            discovered,
+            [
+                {
+                    "title": f"{seed_item} YouTube reviews and comparisons",
+                    "url": (
+                        "https://www.youtube.com/results"
+                        f"?search_query={encoded_item}%20review"
+                    ),
+                    "domain": "youtube.com",
+                    "source_type": "video",
+                    "snippet": "",
+                }
+            ],
+            seen_urls,
+            engine="seed",
+            query=f"{seed_item} video review",
+        )
 
     google_blocked = False
 
@@ -2678,62 +2793,6 @@ def _discover(queries):
             ):
                 break
 
-    # Seed direct retailer search pages because Bing can ignore site:
-    # operators. This preserves retailer coverage without trusting mismatched
-    # search results.
-    retailer_seeds = (
-        ("amazon.com", "https://www.amazon.com/s?k={q}"),
-        ("bestbuy.com", "https://www.bestbuy.com/site/searchpage.jsp?st={q}"),
-        ("walmart.com", "https://www.walmart.com/search?q={q}"),
-        ("target.com", "https://www.target.com/s?searchTerm={q}"),
-        ("newegg.com", "https://www.newegg.com/p/pl?d={q}"),
-        ("bhphotovideo.com", "https://www.bhphotovideo.com/c/search?q={q}&sts=ma"),
-        ("microcenter.com", "https://www.microcenter.com/search/search_results.aspx?Ntt={q}"),
-        ("costco.com", "https://www.costco.com/CatalogSearch?keyword={q}"),
-        ("ebay.com", "https://www.ebay.com/sch/i.html?_nkw={q}"),
-    )
-
-    seed_item = ""
-    if queries:
-        seed_item = str(
-            _extract_item_and_budget(
-                queries[0]
-            )[0]
-            or ""
-        ).strip()
-
-    if seed_item:
-        encoded_item = requests.utils.quote(
-            seed_item,
-            safe="",
-        )
-
-        for domain, template in retailer_seeds:
-            if any(
-                str(source.get("domain") or "")
-                .lower()
-                .removeprefix("www.")
-                == domain
-                for source in discovered
-            ):
-                continue
-
-            _research_add_results(
-                discovered,
-                [
-                    {
-                        "title": f"{domain} search results",
-                        "url": template.format(q=encoded_item),
-                        "domain": domain,
-                        "source_type": "retailer",
-                        "snippet": "",
-                    }
-                ],
-                seen_urls,
-                engine="seed",
-                query=f"{seed_item} {domain}",
-            )
-
     print(
         "[JARVIS] JARVIS PRODUCT RESEARCH: "
         f"discovery complete: "
@@ -2746,9 +2805,10 @@ def _choose_sources(discovered):
     """
     Select relevant, diverse product-research sources.
 
-    Search engines can return semantically related but incorrect pages,
-    especially for terms such as "wireless". Candidates are therefore
-    scored before selection.
+    Known review, manufacturer, community, video, and retailer domains are
+    preferred over arbitrary web-source domains. Unknown web sources remain
+    available as fallback evidence, but cannot consume most of the research
+    budget when stronger source families are present.
     """
 
     quotas = {
@@ -2758,6 +2818,8 @@ def _choose_sources(discovered):
         "video": 2,
         "community": 3,
     }
+
+    max_generic_web_sources = 2
 
     selected = []
     domains = set()
@@ -2796,6 +2858,14 @@ def _choose_sources(discovered):
         "ebay.com",
     }
 
+    known_manufacturers = set(
+        _RESEARCH_MANUFACTURER_DOMAINS
+    )
+
+    known_reviews = set(
+        _RESEARCH_REVIEW_DOMAINS
+    )
+
     telecom_domains = {
         "verizon.com",
         "att.com",
@@ -2815,84 +2885,15 @@ def _choose_sources(discovered):
         "consumerwireless.com",
     }
 
-    generic_domains = {
-        "wikipedia.org",
-    }
-
-    telecom_terms = (
-        "phone plan",
-        "cell phone",
-        "cell phones",
-        "mobile phone",
-        "mobile phones",
-        "5g network",
-        "wireless service",
-        "wireless services",
-        "internet service",
-        "internet provider",
-        "government phone",
-        "lifeline service",
-        "unlimited data",
-        "prepaid wireless",
-        "phone services",
-        "carrier",
-        "wireless network",
-        "wireless networking",
-        "networking",
-        "wifi",
-        "wi-fi",
-        "router",
-        "routers",
-        "modem",
-        "modems",
-    )
-
-    product_terms = (
-        "headphone",
-        "headphones",
-        "earbud",
-        "earbuds",
-        "earphone",
-        "earphones",
-        "headset",
-        "audio",
-        "hi-fi",
-        "hifi",
-        "speaker",
-        "speakers",
-        "sound",
-        "sound quality",
-        "noise cancelling",
-        "noise cancellation",
-        "active noise cancellation",
-        "anc",
-        "bluetooth audio",
-    )
-
-    high_value_terms = (
-        "review",
-        "reviews",
-        "comparison",
-        "compare",
-        "tested",
-        "best",
-        "budget",
-        "under $",
-        "price",
-        "pricing",
-        "specifications",
-        "specs",
-        "battery life",
-        "comfort",
-        "microphone",
-        "anc",
-    )
-
     def normalize_domain(source):
-        domain = str(source.get("domain") or "").strip().lower()
+        domain = str(
+            source.get("domain") or ""
+        ).strip().lower()
 
         if not domain:
-            url = str(source.get("url") or "").strip().lower()
+            url = str(
+                source.get("url") or ""
+            ).strip().lower()
 
             try:
                 from urllib.parse import urlparse
@@ -2924,6 +2925,12 @@ def _choose_sources(discovered):
         if domain_matches(domain, known_retailers):
             return "retailer"
 
+        if domain_matches(domain, known_manufacturers):
+            return "manufacturer"
+
+        if domain_matches(domain, known_reviews):
+            return "independent_review"
+
         return current_type or "web_source"
 
     def source_relevance(source):
@@ -2932,6 +2939,74 @@ def _choose_sources(discovered):
             source.get("snippet"),
             source.get("url"),
             source.get("query") or "",
+        )
+
+    def source_priority(source):
+        """
+        Deterministic quality-aware priority.
+
+        This is intentionally not a product recommendation score. It only
+        controls which source families are trusted first when building the
+        evidence packet for synthesis.
+        """
+        source_type = str(
+            source.get("source_type") or "web_source"
+        )
+
+        domain = normalize_domain(source)
+        relevance = source.get(
+            "_relevance_score",
+            0,
+        )
+
+        if source_type == "independent_review":
+            base = 100
+        elif source_type == "manufacturer":
+            base = 95
+        elif source_type == "community":
+            base = 90
+        elif source_type == "video":
+            base = 85
+        elif source_type == "retailer":
+            base = 80
+        else:
+            base = 0
+
+        if domain_matches(
+            domain,
+            known_reviews,
+        ):
+            base += 15
+
+        if domain_matches(
+            domain,
+            known_manufacturers,
+        ):
+            base += 12
+
+        if domain_matches(
+            domain,
+            known_community,
+        ):
+            base += 10
+
+        if domain_matches(
+            domain,
+            known_video,
+        ):
+            base += 8
+
+        if domain_matches(
+            domain,
+            known_retailers,
+        ):
+            base += 8
+
+        if source.get("requested_domain_match"):
+            base += 4
+
+        return base + float(
+            relevance or 0
         )
 
     def is_irrelevant(source):
@@ -2944,8 +3019,6 @@ def _choose_sources(discovered):
             source.get("query") or ""
         )
 
-        # Telecom providers are valid evidence for phone/internet/
-        # networking topics, but not generic product research.
         if domain_matches(
             domain,
             telecom_domains,
@@ -2974,18 +3047,27 @@ def _choose_sources(discovered):
 
         normalized = dict(source)
 
-        normalized["domain"] = normalize_domain(source)
+        normalized["domain"] = normalize_domain(
+            source
+        )
+
         normalized["source_type"] = forced_source_type(
             source,
             source.get("source_type"),
         )
+
         normalized["_relevance_score"] = source_relevance(
             normalized
         )
 
-        clean_sources.append(normalized)
+        normalized["_priority_score"] = source_priority(
+            normalized
+        )
 
-    # Highest relevance first within every category.
+        clean_sources.append(
+            normalized
+        )
+
     by_type = {}
 
     for source in clean_sources:
@@ -2994,22 +3076,30 @@ def _choose_sources(discovered):
             []
         ).append(source)
 
+    # Prefer the strongest known source within each category. Unknown
+    # web_source candidates are handled separately as a fallback.
     for source_type in by_type:
         by_type[source_type].sort(
-            key=lambda item: item.get(
-                "_relevance_score",
-                0,
+            key=lambda item: (
+                item.get(
+                    "_priority_score",
+                    0,
+                ),
+                item.get(
+                    "_relevance_score",
+                    0,
+                ),
             ),
             reverse=True,
         )
 
-    # Satisfy category quotas first.
+    # Satisfy the source-family quotas first.
     for source_type, quota in quotas.items():
         count = 0
 
         for source in by_type.get(source_type, []):
             if len(selected) >= MAX_SOURCES:
-                return selected
+                break
 
             domain = normalize_domain(source)
 
@@ -3023,24 +3113,40 @@ def _choose_sources(discovered):
             if count >= quota:
                 break
 
-    # Fill remaining slots from all remaining candidates, highest
-    # relevance first.
-    remaining = [
+        if len(selected) >= MAX_SOURCES:
+            break
+
+    # Only a small number of arbitrary sites may fill the remaining slots.
+    generic_candidates = [
         source
-        for source in clean_sources
+        for source in by_type.get(
+            "web_source",
+            [],
+        )
         if normalize_domain(source) not in domains
     ]
 
-    remaining.sort(
-        key=lambda item: item.get(
-            "_relevance_score",
-            0,
+    generic_candidates.sort(
+        key=lambda item: (
+            item.get(
+                "_priority_score",
+                0,
+            ),
+            item.get(
+                "_relevance_score",
+                0,
+            ),
         ),
         reverse=True,
     )
 
-    for source in remaining:
+    generic_count = 0
+
+    for source in generic_candidates:
         if len(selected) >= MAX_SOURCES:
+            break
+
+        if generic_count >= max_generic_web_sources:
             break
 
         domain = normalize_domain(source)
@@ -3050,10 +3156,55 @@ def _choose_sources(discovered):
 
         selected.append(source)
         domains.add(domain)
+        generic_count += 1
 
-    # Internal discovery metadata should not leak into synthesis.
+    # Finally use any remaining recognized source candidate if a quota could
+    # not be satisfied because a domain/category was unavailable.
+    if len(selected) < MAX_SOURCES:
+        remaining = [
+            source
+            for source in clean_sources
+            if (
+                normalize_domain(source) not in domains
+                and source.get("source_type") != "web_source"
+            )
+        ]
+
+        remaining.sort(
+            key=lambda item: (
+                item.get(
+                    "_priority_score",
+                    0,
+                ),
+                item.get(
+                    "_relevance_score",
+                    0,
+                ),
+            ),
+            reverse=True,
+        )
+
+        for source in remaining:
+            if len(selected) >= MAX_SOURCES:
+                break
+
+            domain = normalize_domain(source)
+
+            if not domain or domain in domains:
+                continue
+
+            selected.append(source)
+            domains.add(domain)
+
     for source in selected:
-        source.pop("_relevance_score", None)
+        source.pop(
+            "_relevance_score",
+            None,
+        )
+        source.pop(
+            "_priority_score",
+            None,
+        )
 
     return selected
 
