@@ -1962,11 +1962,26 @@ def should_resolve_context(text):
     if (
         re.match(
             r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?"
-            r"(?:first|second|third|last|top)\s+"
+            r"(?:first|second|third|last|top|final)\s+"
             r"(?:result|link|video|one|item)$",
             normalized,
         )
     ):
+        return True
+
+    if normalized in {
+        "read the page",
+        "read this page",
+        "read page",
+        "read the page text",
+        "show the page",
+        "show this page",
+        "read the title",
+        "read the page title",
+        "read title",
+        "go back",
+        "go back in the browser",
+    }:
         return True
 
     return (
