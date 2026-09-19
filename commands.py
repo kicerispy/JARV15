@@ -793,6 +793,185 @@ def build_browser_search_plan(
     }
 
 
+def _browser_dom_target(target: str):
+    """Convert a natural browser target into one semantic DOM target."""
+    target = clean_text(target).strip().rstrip("?.!").strip()
+
+    if not target:
+        return None
+
+    normalized = target.lower()
+
+    role_map = {
+        "search box": "searchbox",
+        "searchbox": "searchbox",
+        "search field": "searchbox",
+        "search input": "searchbox",
+        "address bar": "textbox",
+        "url bar": "textbox",
+        "text box": "textbox",
+        "textbox": "textbox",
+        "input field": "textbox",
+        "button": "button",
+        "link": "link",
+        "tab": "tab",
+        "menu": "menu",
+        "menu item": "menuitem",
+        "checkbox": "checkbox",
+        "radio button": "radio",
+        "radio": "radio",
+        "combobox": "combobox",
+        "listbox": "listbox",
+        "heading": "heading",
+    }
+
+    role = role_map.get(normalized)
+    if role:
+        return {"role": role}
+
+    suffix_roles = (
+        (" button", "button"),
+        (" link", "link"),
+        (" tab", "tab"),
+        (" checkbox", "checkbox"),
+        (" radio button", "radio"),
+        (" menu item", "menuitem"),
+        (" heading", "heading"),
+    )
+
+    for suffix, role_name in suffix_roles:
+        if normalized.endswith(suffix) and normalized != suffix.strip():
+            name = target[: -len(suffix)].strip()
+            if name:
+                return {
+                    "role": role_name,
+                    "name": name,
+                }
+
+    return {"text": target}
+
+
+def build_browser_dom_plan(user_request):
+    """Build deterministic Playwright DOM actions from natural language."""
+    normalized = clean_text(user_request)
+
+    # Find/inspect an element.
+    match = re.match(
+        r"^(?:find|locate|inspect|looks+for)s+(?:thes+)?(.+?)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if match:
+        target = _browser_dom_target(match.group(1))
+        if target:
+            return {
+                "steps": [{
+                    "tool": "browser_find_element",
+                    "argument": json.dumps(target),
+                }]
+            }
+
+    # Fill an element with text.
+    match = re.match(
+        r"^(?:fill|enter|put|type)s+"
+        r"(?:thes+)?(.+?)s+"
+        r"(?:with|using)s+(.+)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if match:
+        target = _browser_dom_target(match.group(1))
+        value = match.group(2).strip().rstrip("?.!").strip()
+        if target and value:
+            return {
+                "steps": [{
+                    "tool": "browser_fill_element",
+                    "argument": json.dumps({
+                        **target,
+                        "value": value,
+                    }),
+                }]
+            }
+
+    # Press a key on a named browser element.
+    match = re.match(
+        r"^(?:press|hit)s+(?:thes+)?(.+?)s+"
+        r"(?:in|on|inside)s+(?:thes+)?(.+)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if match:
+        key = match.group(1).strip()
+        target = _browser_dom_target(match.group(2))
+        if key and target:
+            return {
+                "steps": [{
+                    "tool": "browser_press_key",
+                    "argument": json.dumps({
+                        **target,
+                        "key": key,
+                    }),
+                }]
+            }
+
+    # Explicit browser click language. Contextual result phrases remain
+    # handled by the context resolver and generic result routers.
+    match = re.match(
+        r"^(?:click|open|select|choose)s+"
+        r"(?:thes+)?(.+?)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if match:
+        target_text = match.group(1).strip()
+        blocked = {
+            "it",
+            "that",
+            "this one",
+            "that one",
+            "first result",
+            "second result",
+            "third result",
+            "last result",
+            "first link",
+            "second link",
+            "third link",
+            "last link",
+        }
+        if target_text.lower() not in blocked:
+            target = _browser_dom_target(target_text)
+            if target:
+                return {
+                    "steps": [{
+                        "tool": "browser_click_element",
+                        "argument": json.dumps(target),
+                    }]
+                }
+
+    # Wait for visible page content.
+    match = re.match(
+        r"^(?:waits+for|waits+until)s+"
+        r"(?:thes+)?(.+?)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if match:
+        target_text = match.group(1).strip()
+        if target_text:
+            target = _browser_dom_target(target_text)
+            # Common phrase: "wait for the results".
+            if target_text.lower() in {"results", "the results"}:
+                target = {"text": "Results"}
+            return {
+                "steps": [{
+                    "tool": "browser_wait_for_element",
+                    "argument": json.dumps(target),
+                }]
+            }
+
+    return None
+
+
 def deterministic_route(user_request):
 
     text = clean_text(
@@ -985,6 +1164,18 @@ def deterministic_route(user_request):
             if plan:
                 print("JARVIS: Reddit search detected.")
                 return plan
+
+    # ==================================================
+    # GENERIC BROWSER DOM ACTIONS
+    # ==================================================
+
+    browser_dom_plan = build_browser_dom_plan(
+        user_request
+    )
+
+    if browser_dom_plan:
+        print("JARVIS: Browser DOM action detected.")
+        return browser_dom_plan
 
     # ==================================================
     # GENERIC BROWSER SEARCH
