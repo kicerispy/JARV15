@@ -1,7 +1,11 @@
 """Evidence-first product research for JARVIS."""
 from __future__ import annotations
+import requests
+from html.parser import HTMLParser
+import time
 
 import ast
+import base64
 import json
 import re
 from datetime import datetime
@@ -19,7 +23,7 @@ from logger import logger
 from model_manager import ModelManager
 
 MAX_RESULTS_PER_QUERY = 3
-MAX_SOURCES = 10
+MAX_SOURCES = 16
 MAX_PAGE_CHARS = 8000
 MIN_CONFIDENT_SOURCES = 4
 
@@ -35,6 +39,10 @@ RETAILERS = {
     "homedepot.com",
     "lowes.com",
     "ebay.com",
+    "crutchfield.com",
+    "adorama.com",
+    "samsclub.com",
+    "woot.com",
 }
 
 REVIEWS = {
@@ -56,6 +64,17 @@ COMMUNITY = {
     "reddit.com",
     "forums.tomshardware.com",
     "linustechtips.com",
+    "headphones.com",
+    "forum.headphones.com",
+    "head-fi.org",
+    "avsforum.com",
+    "avforums.com",
+    "slickdeals.net",
+}
+
+VIDEO_SOURCES = {
+    "youtube.com",
+    "youtu.be",
 }
 
 MANUFACTURERS = {
@@ -88,14 +107,28 @@ def _domain(url: str) -> str:
 
 def _source_type(url: str) -> str:
     domain = _domain(url)
+
     if domain in RETAILERS:
         return "retailer"
+
     if domain in REVIEWS:
         return "independent_review"
+
+    if domain in VIDEO_SOURCES or any(
+        domain.endswith("." + x)
+        for x in VIDEO_SOURCES
+    ):
+        return "video"
+
     if domain in COMMUNITY:
         return "community"
-    if domain in MANUFACTURERS or any(domain.endswith("." + x) for x in MANUFACTURERS):
+
+    if domain in MANUFACTURERS or any(
+        domain.endswith("." + x)
+        for x in MANUFACTURERS
+    ):
         return "manufacturer"
+
     return "web_source"
 
 
@@ -223,39 +256,170 @@ def _parse_argument(argument: str) -> dict[str, Any]:
     }
 
 
-def _queries(
-    item: str,
-    budget: float | None = None,
-) -> list[str]:
-    subject = " ".join(
-        str(item or "").split()
-    ).strip()
+def _queries(subject, budget):
+    """
+    Generate search-engine-friendly discovery queries.
 
-    if not subject:
-        return []
+    Avoid depending exclusively on 'site:' operators. Bing can return
+    zero results for those even when relevant pages exist.
+    """
 
-    budget_suffix = (
-        " under $"
-        + format(budget, ",.2f")
-        if budget is not None
-        else ""
-    )
+    subject = str(subject or "").strip()
 
-    return [
-        f"{subject} reviews price{budget_suffix}",
-        f"{subject} best reviews{budget_suffix}",
-        f"{subject} alternatives",
-        f"{subject} cheaper alternatives",
-        f"{subject} comparison review{budget_suffix}",
+    try:
+        budget_text = f"${float(budget):g}"
+    except Exception:
+        budget_text = ""
+
+    queries = [
+        # General product research
+        f"{subject} reviews price under {budget_text}".strip(),
+        f"{subject} best comparison under {budget_text}".strip(),
+        f"{subject} expert review".strip(),
+        f"{subject} problems issues".strip(),
+
+        # Community
+        f"{subject} reddit review owners".strip(),
+        f"{subject} reddit problems".strip(),
+        f"{subject} Head-Fi discussion".strip(),
+        f"{subject} AVForums discussion".strip(),
+        f"{subject} headphone forum discussion".strip(),
+
+        # YouTube
+        f"{subject} review YouTube".strip(),
+        f"{subject} comparison YouTube".strip(),
+        f"{subject} hands on YouTube".strip(),
+
+        # Manufacturer
+        f"{subject} official manufacturer specifications".strip(),
+        f"{subject} official product page".strip(),
+
+        # Retail
+        f"{subject} Amazon".strip(),
+        f"{subject} Best Buy".strip(),
+        f"{subject} Walmart".strip(),
+
+        # Alternatives
+        f"{subject} cheaper alternatives".strip(),
     ]
 
+    # ------------------------------------------------------------
+    # Broad exact-phrase discovery
+    #
+    # Keep the product/topic phrase intact so search engines do not
+    # reinterpret ambiguous terms such as "wireless".
+    #
+    # We intentionally avoid putting the budget on every query.
+    # Bing has already been observed to return unrelated results for
+    # some budget-qualified variants.
+    # ------------------------------------------------------------
+    clean_subject = (
+        str(subject or "")
+        .replace('"', "")
+        .strip()
+    )
+
+    if clean_subject:
+        subject_phrase = f'"{clean_subject}"'
+
+        phrase_queries = [
+            f"{subject_phrase} reviews"
+        ]
+
+        if budget_text:
+            phrase_queries.insert(
+                0,
+                f"{subject_phrase} reviews under {budget_text}",
+            )
+
+        phrase_queries.extend(
+            [
+                # Broad research.
+                f"{subject_phrase} comparison",
+                f"{subject_phrase} tested",
+                f"{subject_phrase} buying guide",
+
+                # Community / forums.
+                f'site:reddit.com {subject_phrase}',
+                f'site:head-fi.org {subject_phrase}',
+                f'site:avforums.com {subject_phrase}',
+                f'site:forums.tomshardware.com {subject_phrase}',
+                f'site:linustechtips.com {subject_phrase}',
+                f'site:slickdeals.net {subject_phrase}',
+
+                # Video.
+                f'site:youtube.com {subject_phrase} review',
+
+                # Retailers.
+                f'site:amazon.com {subject_phrase}',
+                f'site:bestbuy.com {subject_phrase}',
+                f'site:microcenter.com {subject_phrase}',
+                f'site:walmart.com {subject_phrase}',
+                f'site:target.com {subject_phrase}',
+                f'site:newegg.com {subject_phrase}',
+                f'site:bhphotovideo.com {subject_phrase}',
+                f'site:costco.com {subject_phrase}',
+                f'site:ebay.com {subject_phrase}',
+                f'site:crutchfield.com {subject_phrase}',
+                f'site:adorama.com {subject_phrase}',
+                f'site:samsclub.com {subject_phrase}',
+                f'site:woot.com {subject_phrase}',
+            ]
+        )
+
+        # Exact-phrase discovery comes first. Existing queries stay
+        # afterward as additional coverage/fallbacks.
+        queries = phrase_queries + queries
+
+    return list(dict.fromkeys(q for q in queries if q))
 
 def _is_search_url(url: str) -> bool:
+    """Return True only for search-engine result pages."""
     domain = _domain(url)
+
     return (
         domain.endswith("google.com")
         or domain.endswith("bing.com")
-        or domain.endswith("youtube.com")
+    )
+
+
+def _search_engine_blocked(
+    snapshot: dict[str, Any],
+    engine: str,
+) -> bool:
+    """Return True when a search engine has presented a block/CAPTCHA page."""
+    if engine.lower() != "google":
+        return False
+
+    if not isinstance(snapshot, dict):
+        return False
+
+    value = " ".join(
+        str(
+            snapshot.get(key, "")
+            or ""
+        )
+        for key in (
+            "url",
+            "title",
+            "readable_text",
+        )
+    ).lower()
+
+    markers = (
+        "google.com/sorry",
+        "/sorry/index",
+        "unusual traffic",
+        "captcha",
+        "recaptcha",
+        "not a robot",
+        "verify you are human",
+        "our systems have detected unusual traffic",
+    )
+
+    return any(
+        marker in value
+        for marker in markers
     )
 
 
@@ -265,22 +429,102 @@ def _canonical_search_href(href: str) -> str:
     if not value:
         return ""
 
+    # Already a direct URL.
+    if value.startswith(("http://", "https://")):
+        try:
+            parsed_direct = urlparse(value)
+            query_direct = parse_qs(parsed_direct.query)
+
+            # Bing commonly wraps outbound result URLs in:
+            #   u=a1<urlsafe-base64>
+            #
+            # The a1 prefix is not part of the encoded URL.
+            for target_raw in query_direct.get("u", []) or []:
+                target = unquote(str(target_raw or "")).strip()
+
+                if target.startswith("a1") and len(target) > 2:
+                    encoded = target[2:]
+
+                    try:
+                        padding = "=" * (
+                            (-len(encoded)) % 4
+                        )
+                        decoded = base64.urlsafe_b64decode(
+                            encoded + padding
+                        ).decode(
+                            "utf-8",
+                            errors="ignore",
+                        ).strip()
+
+                        if decoded.startswith(
+                            ("http://", "https://")
+                        ):
+                            return decoded
+                    except Exception:
+                        pass
+
+                if target.startswith(
+                    ("http://", "https://")
+                ):
+                    return target
+        except Exception:
+            pass
+
     try:
         parsed = urlparse(value)
         query = parse_qs(parsed.query)
 
-        for key in ("url", "q", "u"):
+        # Standard search-engine redirect parameters.
+        for key in ("url", "q"):
             targets = query.get(key) or []
-            if not targets:
-                continue
+            for target_raw in targets:
+                target = unquote(
+                    str(target_raw or "")
+                ).strip()
 
-            target = unquote(str(targets[0] or "")).strip()
-            if target.startswith(("http://", "https://")):
+                if target.startswith(
+                    ("http://", "https://")
+                ):
+                    return target
+
+        # Bing outbound redirects.
+        for target_raw in query.get("u", []) or []:
+            target = unquote(
+                str(target_raw or "")
+            ).strip()
+
+            if target.startswith("a1") and len(target) > 2:
+                encoded = target[2:]
+
+                try:
+                    padding = "=" * (
+                        (-len(encoded)) % 4
+                    )
+                    decoded = base64.urlsafe_b64decode(
+                        encoded + padding
+                    ).decode(
+                        "utf-8",
+                        errors="ignore",
+                    ).strip()
+
+                    if decoded.startswith(
+                        ("http://", "https://")
+                    ):
+                        return decoded
+                except Exception:
+                    pass
+
+            if target.startswith(
+                ("http://", "https://")
+            ):
                 return target
+
     except Exception:
         pass
 
-    return value if value.startswith(("http://", "https://")) else ""
+    return value if value.startswith(
+        ("http://", "https://")
+    ) else ""
 
 
 def _fallback_results_from_links(
@@ -329,217 +573,2360 @@ def _fallback_results_from_links(
     return recovered
 
 
-def _discover(queries: list[str]) -> list[dict[str, Any]]:
-    discovered: list[dict[str, Any]] = []
-    seen: set[str] = set()
 
-    for query in queries:
-        for engine, search in (
-            ("google", browser_search_google),
-            ("bing", browser_search_bing),
+# ============================================================
+# HYBRID PRODUCT RESEARCH
+# ============================================================
+
+_RESEARCH_HTTP_TIMEOUT = 15
+_RESEARCH_HEADLESS_TIMEOUT = 18
+_RESEARCH_TEXT_LIMIT = 6000
+_RESEARCH_MAX_DISCOVERY = max(
+    int(MAX_SOURCES) * 3,
+    24,
+)
+
+_RESEARCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/153.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7"
+    ),
+}
+
+_RESEARCH_TELECOM_DOMAINS = {
+    "verizon.com",
+    "att.com",
+    "t-mobile.com",
+    "assurancewireless.com",
+    "visible.com",
+    "cricketwireless.com",
+    "metrobyt-mobile.com",
+    "boostmobile.com",
+    "mintmobile.com",
+    "uscellular.com",
+    "spectrum.com",
+    "xfinity.com",
+    "straighttalk.com",
+    "tracfone.com",
+    "usmobile.com",
+    "consumerwireless.com",
+}
+
+_RESEARCH_GENERIC_DOMAINS = {
+    "wikipedia.org",
+    "support.microsoft.com",
+    "microsoft.com",
+}
+
+_RESEARCH_VIDEO_DOMAINS = {
+    "youtube.com",
+    "youtu.be",
+}
+
+_RESEARCH_COMMUNITY_DOMAINS = {
+    "reddit.com",
+    "head-fi.org",
+    "avforums.com",
+    "headphones.com",
+    "forum.headphones.com",
+    "forums.tomshardware.com",
+    "linustechtips.com",
+    "slickdeals.net",
+}
+
+_RESEARCH_RETAILER_DOMAINS = {
+    "amazon.com",
+    "bestbuy.com",
+    "walmart.com",
+    "target.com",
+    "newegg.com",
+    "bhphotovideo.com",
+    "costco.com",
+    "microcenter.com",
+    "crutchfield.com",
+    "adorama.com",
+    "samsclub.com",
+    "woot.com",
+    "homedepot.com",
+    "lowes.com",
+    "ebay.com",
+}
+
+_RESEARCH_MANUFACTURER_DOMAINS = {
+    "apple.com",
+    "sony.com",
+    "bose.com",
+    "jbl.com",
+    "sennheiser-hearing.com",
+    "sennheiser.com",
+    "soundcore.com",
+    "anker.com",
+    "skullcandy.com",
+    "audio-technica.com",
+    "beyerdynamic.com",
+    "beatsbydre.com",
+    "shure.com",
+    "jabra.com",
+    "bowerswilkins.com",
+    "bang-olufsen.com",
+    "marshall.com",
+    "akg.com",
+    "masterdynamic.com",
+}
+
+_RESEARCH_REVIEW_DOMAINS = {
+    "rtings.com",
+    "pcmag.com",
+    "techradar.com",
+    "soundguys.com",
+    "cnet.com",
+    "tomsguide.com",
+    "whathifi.com",
+    "wired.com",
+    "forbes.com",
+    "gizmodo.com",
+    "pcworld.com",
+    "digitaltrends.com",
+    "trustedreviews.com",
+}
+
+_RESEARCH_PRODUCT_TERMS = (
+    "headphone",
+    "headphones",
+    "earbud",
+    "earbuds",
+    "earphone",
+    "earphones",
+    "headset",
+    "audio",
+    "hi-fi",
+    "hifi",
+    "speaker",
+    "speakers",
+    "sound quality",
+    "noise cancelling",
+    "noise cancellation",
+    "active noise cancellation",
+    "anc",
+    "bluetooth audio",
+)
+
+_RESEARCH_BAD_TERMS = (
+    "phone plan",
+    "cell phone",
+    "cell phones",
+    "mobile phone",
+    "mobile phones",
+    "5g network",
+    "wireless service",
+    "wireless services",
+    "internet service",
+    "internet provider",
+    "government phone",
+    "lifeline service",
+    "unlimited data",
+    "prepaid wireless",
+    "phone services",
+    "carrier",
+    "wireless network",
+    "wireless networking",
+    "wifi",
+    "wi-fi",
+    "router",
+    "routers",
+    "modem",
+    "modems",
+)
+
+
+class _ResearchHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__(
+            convert_charrefs=True
+        )
+        self.title_parts = []
+        self.text_parts = []
+        self.skip_depth = 0
+        self.in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+
+        if tag in {
+            "script",
+            "style",
+            "noscript",
+            "svg",
+            "template",
+        }:
+            self.skip_depth += 1
+            return
+
+        if tag == "title":
+            self.in_title = True
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+
+        if tag in {
+            "script",
+            "style",
+            "noscript",
+            "svg",
+            "template",
+        }:
+            if self.skip_depth:
+                self.skip_depth -= 1
+            return
+
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.skip_depth:
+            return
+
+        clean = " ".join(
+            str(data or "").split()
+        )
+
+        if not clean:
+            return
+
+        if self.in_title:
+            self.title_parts.append(clean)
+
+        self.text_parts.append(clean)
+
+    @property
+    def title(self):
+        return " ".join(self.title_parts).strip()
+
+    @property
+    def text(self):
+        return " ".join(self.text_parts).strip()
+
+
+def _research_domain(url):
+    try:
+        from urllib.parse import urlparse
+
+        domain = urlparse(
+            str(url or "")
+        ).netloc.lower().strip()
+
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return domain
+    except Exception:
+        return ""
+
+
+def _research_domain_matches(
+    domain,
+    known_domains,
+):
+    return any(
+        domain == known
+        or domain.endswith("." + known)
+        for known in known_domains
+    )
+
+
+def _research_source_type(
+    url,
+    title="",
+):
+    domain = _research_domain(url)
+
+    if _research_domain_matches(
+        domain,
+        _RESEARCH_VIDEO_DOMAINS,
+    ):
+        return "video"
+
+    if _research_domain_matches(
+        domain,
+        _RESEARCH_COMMUNITY_DOMAINS,
+    ):
+        return "community"
+
+    if _research_domain_matches(
+        domain,
+        _RESEARCH_RETAILER_DOMAINS,
+    ):
+        return "retailer"
+
+    if _research_domain_matches(
+        domain,
+        _RESEARCH_MANUFACTURER_DOMAINS,
+    ):
+        return "manufacturer"
+
+    if _research_domain_matches(
+        domain,
+        _RESEARCH_REVIEW_DOMAINS,
+    ):
+        return "independent_review"
+
+    combined = (
+        str(title or "")
+        + " "
+        + str(url or "")
+    ).lower()
+
+    if "official product page" in combined:
+        return "manufacturer"
+
+    return "web_source"
+
+
+def _research_candidate_relevance(
+    title,
+    snippet,
+    url,
+):
+    combined = " ".join(
+        [
+            str(title or ""),
+            str(snippet or ""),
+            str(url or ""),
+        ]
+    ).lower()
+
+    score = 0
+
+    for term in _RESEARCH_PRODUCT_TERMS:
+        if term in str(title or "").lower():
+            score += 8
+        elif term in combined:
+            score += 2
+
+    for term in (
+        "review",
+        "reviews",
+        "comparison",
+        "compare",
+        "tested",
+        "best",
+        "budget",
+        "price",
+        "pricing",
+        "specifications",
+        "specs",
+        "battery life",
+        "comfort",
+        "microphone",
+        "anc",
+    ):
+        if term in str(title or "").lower():
+            score += 3
+        elif term in combined:
+            score += 1
+
+    if any(
+        path_part in str(url or "").lower()
+        for path_part in (
+            "/headphone",
+            "/headphones",
+            "/earbud",
+            "/earbuds",
+            "/audio",
+            "/sound",
+        )
+    ):
+        score += 6
+
+    return score
+
+
+
+_RESEARCH_QUERY_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "best",
+    "buy",
+    "buying",
+    "cheap",
+    "cheaper",
+    "compare",
+    "comparison",
+    "expert",
+    "for",
+    "from",
+    "good",
+    "guide",
+    "hands",
+    "in",
+    "issues",
+    "new",
+    "of",
+    "on",
+    "owners",
+    "page",
+    "price",
+    "problems",
+    "review",
+    "reviews",
+    "shop",
+    "spec",
+    "specification",
+    "specifications",
+    "tested",
+    "the",
+    "under",
+    "up",
+    "with",
+    "youtube",
+    "reddit",
+    "amazon",
+    "walmart",
+    "bestbuy",
+    "best",
+    "microcenter",
+    "forum",
+    "forums",
+    "discussion",
+    "discussions",
+    "official",
+    "manufacturer",
+    "product",
+    "products",
+    "alternative",
+    "alternatives",
+    "hands",
+    "on",
+}
+
+_RESEARCH_QUERY_AMBIGUOUS_TERMS = {
+    "wireless",
+    "wired",
+    "best",
+    "good",
+    "cheap",
+    "budget",
+    "review",
+    "reviews",
+    "tested",
+    "comparison",
+    "compare",
+    "price",
+    "under",
+    "over",
+    "buy",
+    "buying",
+    "guide",
+}
+
+_RESEARCH_TELECOM_QUERY_TERMS = {
+    "phone",
+    "phones",
+    "smartphone",
+    "smartphones",
+    "iphone",
+    "android",
+    "cell",
+    "cellular",
+    "mobile",
+    "carrier",
+    "carriers",
+    "plan",
+    "plans",
+    "5g",
+    "4g",
+    "lte",
+    "internet",
+    "isp",
+    "broadband",
+    "fiber",
+    "wifi",
+    "wi-fi",
+    "router",
+    "routers",
+    "modem",
+    "modems",
+    "hotspot",
+    "data",
+    "prepaid",
+    "telecom",
+    "network",
+    "networking",
+}
+
+def _research_query_focus_terms(query):
+    """
+    Extract the meaningful subject terms from a search query.
+
+    Search modifiers, retailer/provider names, budgets, and ambiguous
+    words such as "wireless" are deliberately excluded.
+    """
+    value = str(query or "").lower().strip()
+
+    quoted = re.findall(
+        r'"([^"]+)"',
+        value,
+    )
+
+    focus = (
+        quoted[0]
+        if quoted
+        else value
+    )
+
+    tokens = re.findall(
+        r"[a-z0-9]+(?:[.+-][a-z0-9]+)*",
+        focus,
+    )
+
+    terms = []
+
+    for token in tokens:
+        token = token.strip("._-")
+
+        if not token:
+            continue
+
+        if token in _RESEARCH_QUERY_STOPWORDS:
+            continue
+
+        if token in _RESEARCH_QUERY_AMBIGUOUS_TERMS:
+            continue
+
+        if token.isdigit():
+            continue
+
+        if len(token) < 2:
+            continue
+
+        if token not in terms:
+            terms.append(token)
+
+    return terms
+
+
+def _research_query_is_telecom(query):
+    """
+    Return True only when the actual search topic is telecom-related.
+
+    Word boundaries are important here:
+        "phone" must not match "headphone"
+        "phone" must not match "headphones"
+    """
+    value = str(query or "").lower().strip()
+
+    tokens = set(
+        re.findall(
+            r"[a-z0-9]+(?:[.+-][a-z0-9]+)*",
+            value,
+        )
+    )
+
+    telecom_words = {
+        "phone",
+        "phones",
+        "smartphone",
+        "smartphones",
+        "iphone",
+        "android",
+        "cell",
+        "cellular",
+        "mobile",
+        "mobiles",
+        "carrier",
+        "carriers",
+        "plan",
+        "plans",
+        "5g",
+        "4g",
+        "lte",
+        "internet",
+        "isp",
+        "broadband",
+        "fiber",
+        "wifi",
+        "router",
+        "routers",
+        "modem",
+        "modems",
+        "hotspot",
+        "data",
+        "telecom",
+        "network",
+        "networking",
+        "provider",
+        "providers",
+    }
+
+    if tokens.intersection(telecom_words):
+        return True
+
+    telecom_phrases = (
+        "phone plan",
+        "phone plans",
+        "cell phone",
+        "cell phones",
+        "mobile phone",
+        "mobile phones",
+        "wireless service",
+        "wireless services",
+        "internet service",
+        "internet services",
+        "internet provider",
+        "internet providers",
+        "wireless network",
+        "wireless networking",
+        "prepaid wireless",
+        "phone service",
+        "phone services",
+        "home internet",
+        "home networking",
+    )
+
+    return any(
+        re.search(
+            rf"\b{re.escape(phrase)}\b",
+            value,
+        )
+        for phrase in telecom_phrases
+    )
+
+def _research_query_relevance(
+    title,
+    snippet,
+    url,
+    query,
+):
+    """
+    Score a result against the actual research topic.
+
+    A result must match a meaningful query subject term before
+    generic/product-specific relevance bonuses are considered.
+    This prevents pages about wireless phone service from
+    matching searches for wireless headphones.
+    """
+    title_text = str(title or "").lower()
+    snippet_text = str(snippet or "").lower()
+    url_text = str(url or "").lower()
+
+    combined = " ".join(
+        (
+            title_text,
+            snippet_text,
+            url_text,
+        )
+    )
+
+    terms = _research_query_focus_terms(query)
+
+    if not terms:
+        return 0
+
+    def term_present(term, value):
+        if re.search(
+            rf"\b{re.escape(term)}\b",
+            value,
         ):
-            try:
-                search(query)
-                snapshot = browser_page_snapshot()
-                results = (
-                    snapshot.get("results", [])
-                    if isinstance(snapshot, dict)
-                    else []
+            return True
+
+        # Simple singular/plural tolerance.
+        if term.endswith("s") and len(term) > 3:
+            singular = term[:-1]
+
+            if re.search(
+                rf"\b{re.escape(singular)}\b",
+                value,
+            ):
+                return True
+
+        return False
+
+    matched_terms = [
+        term
+        for term in terms
+        if term_present(term, combined)
+    ]
+
+    # No meaningful subject match means this is not a useful
+    # result, regardless of generic words like "wireless",
+    # "best", "review", or "price".
+    if not matched_terms:
+        return 0
+
+    score = 0
+
+    quoted = re.findall(
+        r'"([^"]+)"',
+        str(query or "").lower(),
+    )
+
+    # Exact quoted subject is the strongest signal.
+    for phrase in quoted:
+        phrase = phrase.strip()
+
+        if not phrase:
+            continue
+
+        if phrase in title_text:
+            score += 12
+        elif phrase in combined:
+            score += 7
+
+    for term in matched_terms:
+        if term_present(term, title_text):
+            score += 7
+        elif term_present(term, snippet_text):
+            score += 4
+        elif term_present(term, url_text):
+            score += 3
+
+    if len(matched_terms) >= 2:
+        score += 5
+
+    # Existing specialist scoring is useful only AFTER the
+    # result is proven to be about the requested subject.
+    score += min(
+        _research_candidate_relevance(
+            title,
+            snippet,
+            url,
+        ),
+        8,
+    )
+
+    return score
+
+def _research_telecom_domain_relevant(
+    domain,
+    query,
+):
+    """
+    Telecom domains are allowed only for telecom-relevant topics.
+    """
+    return (
+        _research_domain_matches(
+            domain,
+            _RESEARCH_TELECOM_DOMAINS,
+        )
+        and _research_query_is_telecom(query)
+    )
+
+def _research_candidate_allowed(
+    title,
+    snippet,
+    url,
+    query="",
+):
+    domain = _research_domain(url)
+
+    if not domain:
+        return False
+
+    # Telecom sites are context-dependent rather than globally bad.
+    if _research_domain_matches(
+        domain,
+        _RESEARCH_TELECOM_DOMAINS,
+    ):
+        if not _research_query_is_telecom(query):
+            return False
+
+    combined = " ".join(
+        [
+            str(title or ""),
+            str(snippet or ""),
+            str(url or ""),
+        ]
+    ).lower()
+
+    has_product = any(
+        term in combined
+        for term in _RESEARCH_PRODUCT_TERMS
+    )
+
+    has_bad_term = any(
+        term in combined
+        for term in _RESEARCH_BAD_TERMS
+    )
+
+    if has_bad_term and not has_product and not query:
+        return False
+
+    if query:
+        return (
+            _research_query_relevance(
+                title,
+                snippet,
+                url,
+                query,
+            )
+            >= 3
+        )
+
+    return _research_candidate_relevance(
+        title,
+        snippet,
+        url,
+    ) >= 3
+
+def _research_canonical_url(href):
+    href = str(href or "").strip()
+
+    if not href:
+        return ""
+
+    try:
+        from urllib.parse import (
+            parse_qs,
+            unquote,
+            urlparse,
+        )
+        import base64
+
+        parsed = urlparse(href)
+        query = parse_qs(
+            parsed.query
+        )
+
+        # Google redirect.
+        for key in (
+            "q",
+            "url",
+        ):
+            values = query.get(key)
+
+            if values:
+                target = unquote(
+                    str(values[0])
                 )
 
-                if not results and isinstance(snapshot, dict):
-                    results = _fallback_results_from_links(
-                        snapshot,
-                        engine,
+                if target.startswith(
+                    (
+                        "http://",
+                        "https://",
                     )
+                ):
+                    return target
 
-                logger.info(
-                    "JARVIS PRODUCT RESEARCH: "
-                    f"{engine} returned {len(results)} candidate result(s) "
-                    f"for query={query!r}"
+        # Bing redirect.
+        values = query.get("u")
+
+        if values:
+            target = str(values[0])
+
+            if target.startswith("a1"):
+                encoded = target[2:]
+
+                padding = "=" * (
+                    (-len(encoded)) % 4
                 )
 
-                usable_results = []
-                for result in results:
-                    if not isinstance(result, dict):
-                        continue
-
-                    url = _canonical_search_href(
-                        str(
-                            result.get("url")
-                            or result.get("href")
-                            or ""
-                        )
-                    ).split("#", 1)[0]
-
-                    if not url or _is_search_url(url) or url in seen:
-                        continue
-
-                    usable_results.append((result, url))
-                    if len(usable_results) >= MAX_RESULTS_PER_QUERY:
-                        break
-
-                if not usable_results and isinstance(snapshot, dict):
-                    fallback = _fallback_results_from_links(
-                        snapshot,
-                        engine,
+                try:
+                    decoded = base64.urlsafe_b64decode(
+                        encoded + padding
+                    ).decode(
+                        "utf-8",
+                        errors="ignore",
                     )
-                    usable_results = [
+
+                    if decoded.startswith(
                         (
-                            result,
-                            str(result.get("url") or "").strip(),
+                            "http://",
+                            "https://",
                         )
-                        for result in fallback
-                        if str(result.get("url") or "").strip()
-                    ]
+                    ):
+                        return decoded
+                except Exception:
+                    pass
 
-                for result, url in usable_results:
-                    seen.add(url)
-                    discovered.append(
+            target = unquote(target)
+
+            if target.startswith(
+                (
+                    "http://",
+                    "https://",
+                )
+            ):
+                return target
+
+    except Exception:
+        pass
+
+    if href.startswith(
+        (
+            "http://",
+            "https://",
+        )
+    ):
+        return href
+
+    return ""
+
+
+def _research_html_text(
+    html_text,
+):
+    parser = _ResearchHTMLParser()
+
+    try:
+        parser.feed(
+            str(html_text or "")
+        )
+        parser.close()
+    except Exception:
+        pass
+
+    return (
+        parser.title,
+        parser.text[
+            :_RESEARCH_TEXT_LIMIT
+        ],
+    )
+
+
+
+class _ResearchLinkParser(HTMLParser):
+    """
+    Provider-independent HTML anchor parser.
+
+    Search engines frequently change their surrounding result DOM,
+    but their result links are still ordinary <a href="..."> elements.
+    """
+
+    def __init__(self):
+        super().__init__(
+            convert_charrefs=True
+        )
+
+        self.results = []
+        self._href = None
+        self._text_parts = []
+        self._depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "a":
+            if self._href is not None:
+                self._depth += 1
+            return
+
+        if self._href is not None:
+            self._depth += 1
+            return
+
+        attributes = dict(attrs)
+        href = attributes.get("href")
+
+        if href:
+            self._href = href
+            self._text_parts = []
+            self._depth = 0
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            if self._depth > 0:
+                self._depth -= 1
+                return
+
+            text = " ".join(
+                " ".join(
+                    self._text_parts
+                ).split()
+            )
+
+            self.results.append(
+                {
+                    "href": self._href,
+                    "text": text,
+                }
+            )
+
+            self._href = None
+            self._text_parts = []
+            self._depth = 0
+
+    def handle_data(self, data):
+        if self._href is not None:
+            clean = " ".join(
+                str(data or "").split()
+            )
+
+            if clean:
+                self._text_parts.append(
+                    clean
+                )
+
+
+
+def _research_http_search(
+    engine,
+    query,
+):
+    """
+    Search discovery using a hidden Playwright browser.
+
+    Google is the primary provider.
+    Bing is the fallback.
+
+    Important:
+    We extract actual search-result elements instead of treating every
+    page anchor as a candidate. This avoids navigation/UI links
+    overwhelming the relevance filter.
+    """
+
+    engine = str(
+        engine or ""
+    ).lower().strip()
+
+    query = str(
+        query or ""
+    ).strip()
+
+    if engine not in {
+        "google",
+        "bing",
+    }:
+        raise ValueError(
+            f"Unsupported research search engine: {engine!r}"
+        )
+
+    endpoint = (
+        "https://www.google.com/search"
+        if engine == "google"
+        else "https://www.bing.com/search"
+    )
+
+    encoded_query = requests.utils.quote(
+        query,
+        safe="",
+    )
+
+    search_url = (
+        f"{endpoint}?q={encoded_query}"
+        f"&hl=en&num=10"
+    )
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"headless {engine} search: {query}"
+    )
+
+    try:
+        from playwright.sync_api import (
+            sync_playwright,
+        )
+
+        with sync_playwright() as playwright:
+
+            browser = playwright.chromium.launch(
+                headless=True,
+            )
+
+            try:
+                context = browser.new_context(
+                    viewport={
+                        "width": 1440,
+                        "height": 1000,
+                    },
+                    user_agent=_RESEARCH_HEADERS[
+                        "User-Agent"
+                    ],
+                    locale="en-US",
+                )
+
+                page = context.new_page()
+
+                page.goto(
+                    search_url,
+                    wait_until="domcontentloaded",
+                    timeout=(
+                        _RESEARCH_HEADLESS_TIMEOUT
+                        * 1000
+                    ),
+                )
+
+                page.wait_for_timeout(
+                    1800
+                )
+
+                current_url = (
+                    page.url or ""
+                )
+
+                page_title = (
+                    page.title() or ""
+                )
+
+                try:
+                    body_text = (
+                        page.locator(
+                            "body"
+                        ).inner_text(
+                            timeout=5000
+                        )
+                        or ""
+                    )
+                except Exception:
+                    body_text = ""
+
+                combined = (
+                    current_url
+                    + "\n"
+                    + page_title
+                    + "\n"
+                    + body_text
+                ).lower()
+
+                blocked_markers = (
+                    "google.com/sorry",
+                    "unusual traffic",
+                    "captcha",
+                    "recaptcha",
+                    "not a robot",
+                    "verify you are human",
+                    "prove your humanity",
+                    "access denied",
+                    "checking your browser",
+                    "before you continue",
+                )
+
+                if any(
+                    marker in combined
+                    for marker in blocked_markers
+                ):
+                    print(
+                        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                        f"headless {engine} search blocked."
+                    )
+
+                    return {
+                        "blocked": True,
+                        "results": [],
+                    }
+
+                # =================================================
+                # Provider-specific result selectors
+                # =================================================
+
+                selectors = (
+                    [
+                        # Google current/legacy result links.
+                        "div#search a:has(h3)",
+                        "div#search h3",
+                    ]
+                    if engine == "google"
+                    else [
+                        # Bing standard organic results.
+                        "li.b_algo h2 a",
+                        "#b_results li.b_algo h2 a",
+                        "#b_results h2 a",
+                        "li.b_algo a[href]",
+                    ]
+                )
+
+                result_elements = []
+
+                for selector in selectors:
+                    try:
+                        locator = page.locator(
+                            selector
+                        )
+
+                        count = locator.count()
+
+                        if count:
+                            print(
+                                "[JARVIS] "
+                                "JARVIS PRODUCT RESEARCH: "
+                                f"{engine} selector "
+                                f"{selector!r} found {count}"
+                            )
+
+                            for index in range(
+                                min(
+                                    count,
+                                    20,
+                                )
+                            ):
+                                result_elements.append(
+                                    locator.nth(
+                                        index
+                                    )
+                                )
+
+                            if len(
+                                result_elements
+                            ) >= 10:
+                                break
+
+                    except Exception:
+                        continue
+
+                # =================================================
+                # Generic fallback if provider selector changed.
+                # =================================================
+
+                if not result_elements:
+                    try:
+                        all_links = page.locator(
+                            "a[href]"
+                        )
+
+                        count = all_links.count()
+
+                        print(
+                            "[JARVIS] "
+                            "JARVIS PRODUCT RESEARCH: "
+                            f"{engine} generic fallback "
+                            f"found {count} links"
+                        )
+
+                        for index in range(
+                            min(
+                                count,
+                                100,
+                            )
+                        ):
+                            link = all_links.nth(
+                                index
+                            )
+
+                            try:
+                                href = (
+                                    link.get_attribute(
+                                        "href"
+                                    )
+                                    or ""
+                                )
+
+                                anchor_text = (
+                                    link.inner_text()
+                                    or ""
+                                ).strip()
+
+                            except Exception:
+                                continue
+
+                            if not href:
+                                continue
+
+                            if len(
+                                anchor_text
+                            ) < 5:
+                                continue
+
+                            # Only keep links that look like real
+                            # search results.
+                            if (
+                                engine == "bing"
+                                and not (
+                                    _research_domain(
+                                        href
+                                    )
+                                    or href.startswith(
+                                        "/"
+                                    )
+                                )
+                            ):
+                                continue
+
+                            class_text = ""
+
+                            try:
+                                class_text = (
+                                    link.get_attribute(
+                                        "class"
+                                    )
+                                    or ""
+                                ).lower()
+                            except Exception:
+                                pass
+
+                            if (
+                                "nav" in class_text
+                                or "header" in class_text
+                                or "footer" in class_text
+                            ):
+                                continue
+
+                            result_elements.append(
+                                link
+                            )
+
+                            if len(
+                                result_elements
+                            ) >= 20:
+                                break
+
+                    except Exception:
+                        pass
+
+                print(
+                    "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                    f"{engine} candidate result "
+                    f"elements={len(result_elements)}"
+                )
+
+                results = []
+                seen = set()
+
+                from urllib.parse import (
+                    urljoin,
+                )
+                from html import unescape
+
+                for element in result_elements:
+
+                    try:
+                        href = (
+                            element.get_attribute(
+                                "href"
+                            )
+                            or ""
+                        ).strip()
+
+                        title = (
+                            element.inner_text()
+                            or ""
+                        ).strip()
+
+                    except Exception:
+                        continue
+
+                    if not href:
+                        continue
+
+                    href = unescape(
+                        href
+                    )
+
+                    title = unescape(
+                        " ".join(
+                            title.split()
+                        )
+                    )
+
+                    if href.startswith(
+                        "/"
+                    ):
+                        href = urljoin(
+                            search_url,
+                            href,
+                        )
+
+                    elif href.startswith(
+                        "//"
+                    ):
+                        href = (
+                            "https:"
+                            + href
+                        )
+
+                    canonical = (
+                        _research_canonical_url(
+                            href
+                        )
+                    )
+
+                    if not canonical:
+                        canonical = href
+
+                    domain = _research_domain(
+                        canonical
+                    )
+
+                    if not domain:
+                        continue
+
+                    if (
+                        domain == "google.com"
+                        or domain.endswith(
+                            ".google.com"
+                        )
+                        or domain == "bing.com"
+                        or domain.endswith(
+                            ".bing.com"
+                        )
+                    ):
+                        continue
+
+                    # Telecom providers are context-dependent.
+                    # They are valid for phone/internet/networking
+                    # research, but not unrelated product topics.
+                    if _research_domain_matches(
+                        domain,
+                        _RESEARCH_TELECOM_DOMAINS,
+                    ):
+                        if not _research_query_is_telecom(
+                            query
+                        ):
+                            continue
+
+                    if len(title) < 4:
+                        title = domain
+
+                    key = (
+                        canonical
+                        .lower()
+                        .rstrip("/")
+                    )
+
+                    if key in seen:
+                        continue
+
+                    source_type = (
+                        _research_source_type(
+                            canonical,
+                            title,
+                        )
+                    )
+
+                    relevance = (
+                        _research_query_relevance(
+                            title,
+                            "",
+                            canonical,
+                            query,
+                        )
+                    )
+
+                    recognized_domain = (
+                        _research_domain_matches(
+                            domain,
+                            _RESEARCH_VIDEO_DOMAINS,
+                        )
+                        or _research_domain_matches(
+                            domain,
+                            _RESEARCH_COMMUNITY_DOMAINS,
+                        )
+                        or _research_domain_matches(
+                            domain,
+                            _RESEARCH_RETAILER_DOMAINS,
+                        )
+                        or _research_domain_matches(
+                            domain,
+                            _RESEARCH_MANUFACTURER_DOMAINS,
+                        )
+                        or _research_domain_matches(
+                            domain,
+                            _RESEARCH_REVIEW_DOMAINS,
+                        )
+                    )
+
+                    # Result-specific selectors are useful evidence,
+                    # but the result still needs to match the query.
+                    #
+                    # Known retailers/community/video/manufacturer/review
+                    # domains receive a small allowance, but arbitrary
+                    # irrelevant pages do not.
+                    if relevance < 3:
+                        if not recognized_domain:
+                            continue
+
+                        if not any(
+                            term in (
+                                " ".join(
+                                    (
+                                        title,
+                                        canonical,
+                                    )
+                                ).lower()
+                            )
+                            for term in _research_query_focus_terms(
+                                query
+                            )
+                        ):
+                            continue
+
+                    seen.add(
+                        key
+                    )
+
+                    results.append(
                         {
-                            "url": url,
-                            "domain": _domain(url),
-                            "source_type": _source_type(url),
-                            "title": " ".join(
-                                str(
-                                    result.get("title", "")
-                                    or ""
-                                ).split()
-                            )[:300],
-                            "snippet": " ".join(
-                                str(
-                                    result.get("snippet", "")
-                                    or ""
-                                ).split()
-                            )[:800],
-                            "engine": engine,
+                            "title": title[:500],
+                            "url": canonical,
+                            "domain": domain,
+                            "source_type": source_type,
+                            "snippet": "",
                             "query": query,
                         }
                     )
 
-                    if len(discovered) >= MAX_SOURCES * 2:
-                        return discovered
+                    if len(
+                        results
+                    ) >= 20:
+                        break
 
-            except Exception as exc:
-                logger.debug(
-                    "JARVIS PRODUCT RESEARCH: "
-                    f"discovery failed for {engine}/{query}: {exc}"
+                print(
+                    "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                    f"{engine} produced "
+                    f"{len(results)} candidate(s)"
                 )
 
-    if discovered:
-        return discovered
+                if not results:
+                    print(
+                        "[JARVIS] "
+                        "JARVIS PRODUCT RESEARCH: "
+                        f"{engine} result extraction "
+                        "returned no accepted links."
+                    )
 
-    # Browser search can occasionally expose a loaded page without exposing
-    # organic result anchors. Fall back to the existing HTTP search tool rather
-    # than forcing the agent to repeat the exact same research plan.
-    try:
-        from web_tools import web_search
+                    # Diagnostics: expose the first few actual
+                    # result element href/title pairs.
+                    for element in (
+                        result_elements[:8]
+                    ):
+                        try:
+                            print(
+                                "[JARVIS] SEARCH RESULT DEBUG:",
+                                (
+                                    element.get_attribute(
+                                        "href"
+                                    )
+                                    or ""
+                                )[:300],
+                                "|",
+                                (
+                                    element.inner_text()
+                                    or ""
+                                ).strip()[:200],
+                            )
+                        except Exception:
+                            pass
 
-        fallback_seen: set[str] = set()
-        for query in queries:
-            try:
-                fallback_results = web_search(
-                    query,
-                    max_results=MAX_RESULTS_PER_QUERY,
-                )
-            except Exception as exc:
-                logger.debug(
-                    "JARVIS PRODUCT RESEARCH: "
-                    f"HTTP fallback failed for {query!r}: {exc}"
-                )
-                continue
+                return {
+                    "blocked": False,
+                    "results": results,
+                }
 
-            for result in fallback_results:
-                if not isinstance(result, dict):
-                    continue
+            finally:
+                context.close()
+                browser.close()
 
-                url = str(
-                    result.get("url") or ""
-                ).strip().split("#", 1)[0]
-
-                if (
-                    not url
-                    or _is_search_url(url)
-                    or url in fallback_seen
-                ):
-                    continue
-
-                fallback_seen.add(url)
-                discovered.append(
-                    {
-                        "url": url,
-                        "domain": _domain(url),
-                        "source_type": _source_type(url),
-                        "title": " ".join(
-                            str(result.get("title") or "").split()
-                        )[:300],
-                        "snippet": " ".join(
-                            str(result.get("snippet") or "").split()
-                        )[:800],
-                        "engine": "http_fallback",
-                        "query": query,
-                    }
-                )
-
-                if len(discovered) >= MAX_SOURCES * 2:
-                    break
-
-            if len(discovered) >= MAX_SOURCES * 2:
-                break
     except Exception as exc:
-        logger.debug(
-            "JARVIS PRODUCT RESEARCH: "
-            f"HTTP fallback unavailable: {exc}"
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            f"headless {engine} search failed: {exc}"
         )
 
-    if discovered:
-        logger.info(
-            "JARVIS PRODUCT RESEARCH: "
-            f"HTTP fallback recovered {len(discovered)} source candidate(s)."
+        return {
+            "blocked": False,
+            "results": [],
+        }
+
+def _research_enough_sources(
+    sources,
+):
+    types = {}
+
+    for source in sources:
+        source_type = source.get(
+            "source_type"
+        )
+        types[source_type] = (
+            types.get(
+                source_type,
+                0,
+            )
+            + 1
+        )
+
+    if len(sources) >= _RESEARCH_MAX_DISCOVERY:
+        return True
+
+    if (
+        len(sources) >= 12
+        and types.get(
+            "independent_review",
+            0,
+        ) >= 3
+        and types.get(
+            "retailer",
+            0,
+        ) >= 2
+        and (
+            types.get(
+                "community",
+                0,
+            ) >= 1
+            or types.get(
+                "video",
+                0,
+            ) >= 1
+        )
+    ):
+        return True
+
+    return False
+
+
+def _research_add_results(
+    discovered,
+    results,
+    seen_urls,
+):
+    for result in results:
+        url = str(
+            result.get("url") or ""
+        ).strip()
+
+        if not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        discovered.append(result)
+
+        if len(discovered) >= _RESEARCH_MAX_DISCOVERY:
+            break
+
+
+def _research_http_fetch(url):
+    try:
+        response = requests.get(
+            url,
+            headers=_RESEARCH_HEADERS,
+            timeout=_RESEARCH_HTTP_TIMEOUT,
+            allow_redirects=True,
+        )
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "blocked": False,
+            "status": None,
+            "url": url,
+            "title": "",
+            "text": "",
+            "method": "http",
+            "error": str(exc),
+        }
+
+    body = response.text or ""
+
+    lower = body.lower()
+
+    block_markers = (
+        "prove your humanity",
+        "captcha",
+        "recaptcha",
+        "verify you are human",
+        "not a robot",
+        "unusual traffic",
+        "access denied",
+        "checking your browser",
+        "just a moment",
+    )
+
+    blocked = any(
+        marker in lower
+        for marker in block_markers
+    )
+
+    content_type = (
+        response.headers.get(
+            "content-type",
+            "",
+        ).lower()
+    )
+
+    if (
+        "text/html" in content_type
+        or "<html" in lower[:5000]
+    ):
+        title, readable = _research_html_text(
+            body
         )
     else:
-        logger.warning(
-            "JARVIS PRODUCT RESEARCH: "
-            "all search engines and HTTP fallback returned zero usable "
-            "source candidates."
+        title = ""
+        readable = " ".join(
+            body.split()
+        )[:_RESEARCH_TEXT_LIMIT]
+
+    return {
+        "success": (
+            response.status_code < 400
+            and bool(readable)
+            and not blocked
+        ),
+        "blocked": blocked,
+        "status": response.status_code,
+        "url": str(response.url or url),
+        "title": title,
+        "text": readable,
+        "method": "http",
+        "error": "",
+    }
+
+
+def _research_headless_fetch(url):
+    """
+    Hidden Playwright fallback.
+
+    This is NOT the user's visible JARVIS browser.
+    It exists only for pages that cannot be extracted cleanly with HTTP.
+    """
+
+    try:
+        from playwright.sync_api import (
+            sync_playwright,
         )
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                headless=True,
+            )
+
+            try:
+                page = browser.new_page(
+                    viewport={
+                        "width": 1440,
+                        "height": 1000,
+                    },
+                    user_agent=_RESEARCH_HEADERS[
+                        "User-Agent"
+                    ],
+                )
+
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=(
+                        _RESEARCH_HEADLESS_TIMEOUT
+                        * 1000
+                    ),
+                )
+
+                page.wait_for_timeout(
+                    1500
+                )
+
+                title = page.title() or ""
+
+                try:
+                    readable = page.locator(
+                        "body"
+                    ).inner_text(
+                        timeout=5000
+                    )
+                except Exception:
+                    readable = ""
+
+                readable = " ".join(
+                    readable.split()
+                )[
+                    :_RESEARCH_TEXT_LIMIT
+                ]
+
+                combined = (
+                    title
+                    + "\n"
+                    + readable
+                ).lower()
+
+                blocked = any(
+                    marker in combined
+                    for marker in (
+                        "prove your humanity",
+                        "captcha",
+                        "recaptcha",
+                        "verify you are human",
+                        "not a robot",
+                        "unusual traffic",
+                        "access denied",
+                        "checking your browser",
+                        "just a moment",
+                    )
+                )
+
+                final_url = page.url
+
+                return {
+                    "success": (
+                        bool(readable)
+                        and not blocked
+                    ),
+                    "blocked": blocked,
+                    "status": None,
+                    "url": final_url,
+                    "title": title,
+                    "text": readable,
+                    "method": "headless",
+                    "error": "",
+                }
+
+            finally:
+                browser.close()
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "blocked": False,
+            "status": None,
+            "url": url,
+            "title": "",
+            "text": "",
+            "method": "headless",
+            "error": str(exc),
+        }
+
+
+def _research_fetch_source(
+    source,
+):
+    original_url = str(
+        source.get("url") or ""
+    ).strip()
+
+    if not original_url:
+        return {
+            "success": False,
+            "blocked": False,
+            "status": None,
+            "url": "",
+            "title": source.get("title") or "",
+            "text": "",
+            "method": "none",
+            "error": "Missing URL",
+        }
+
+    candidates = [original_url]
+
+    # Preserve the Reddit fallback logic already added to this file.
+    fallback_builder = globals().get(
+        "_source_visit_urls"
+    )
+
+    if callable(
+        fallback_builder
+    ):
+        try:
+            candidates = list(
+                fallback_builder(
+                    source
+                )
+                or candidates
+            )
+        except Exception:
+            pass
+
+    attempted = []
+
+    for candidate_url in candidates:
+        attempted.append(
+            candidate_url
+        )
+
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            f"HTTP fetch {candidate_url}"
+        )
+
+        fetched = _research_http_fetch(
+            candidate_url
+        )
+
+        if fetched.get("success"):
+            fetched[
+                "original_url"
+            ] = original_url
+            return fetched
+
+        if fetched.get("blocked"):
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"HTTP blocked/challenged: "
+                f"{candidate_url}"
+            )
+            continue
+
+        # HTTP returned a legitimate but tiny page.
+        # Try headless before declaring failure.
+        if (
+            fetched.get("status") is not None
+            and fetched.get("status") < 400
+            and not fetched.get("text")
+        ):
+            continue
+
+    # JavaScript/browser fallback, still completely hidden.
+    for candidate_url in attempted:
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            f"headless fallback {candidate_url}"
+        )
+
+        fetched = _research_headless_fetch(
+            candidate_url
+        )
+
+        if fetched.get("success"):
+            fetched[
+                "original_url"
+            ] = original_url
+            return fetched
+
+        if fetched.get("blocked"):
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"headless page blocked/challenged: "
+                f"{candidate_url}"
+            )
+
+    return {
+        "success": False,
+        "blocked": False,
+        "status": None,
+        "url": original_url,
+        "title": source.get("title") or "",
+        "text": "",
+        "method": "none",
+        "error": "No usable research content",
+        "original_url": original_url,
+    }
+
+
+def _discover(queries):
+    """
+    Google-first research discovery.
+
+    Google is the default provider.
+    Bing is used only after Google is blocked or the accumulated
+    discovery set is still insufficient.
+    """
+
+    discovered = []
+    seen_urls = set()
+
+    google_blocked = False
+
+    # --------------------------------------------------------
+    # Phase 1: Google
+    # --------------------------------------------------------
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "discovery provider = Google"
+    )
+
+    for query in queries:
+        if google_blocked:
+            break
+
+        result = _research_http_search(
+            "google",
+            query,
+        )
+
+        if result.get("blocked"):
+            google_blocked = True
+
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                "Google HTTP search is blocked; "
+                "switching to Bing fallback."
+            )
+
+            break
+
+        candidates = result.get(
+            "results",
+            [],
+        )
+
+        _research_add_results(
+            discovered,
+            candidates,
+            seen_urls,
+        )
+
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            f"google returned "
+            f"{len(candidates)} relevant candidate(s) "
+            f"for query={query!r}"
+        )
+
+        if _research_enough_sources(
+            discovered
+        ):
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                "Google produced sufficient source coverage."
+            )
+            break
+
+    # --------------------------------------------------------
+    # Phase 2: Bing fallback
+    # --------------------------------------------------------
+
+    if not _research_enough_sources(
+        discovered
+    ):
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            "Google coverage insufficient; "
+            "using Bing fallback."
+        )
+
+        for query in queries:
+            result = _research_http_search(
+                "bing",
+                query,
+            )
+
+            candidates = result.get(
+                "results",
+                [],
+            )
+
+            _research_add_results(
+                discovered,
+                candidates,
+                seen_urls,
+            )
+
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"bing returned "
+                f"{len(candidates)} relevant candidate(s) "
+                f"for query={query!r}"
+            )
+
+            if _research_enough_sources(
+                discovered
+            ):
+                break
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"discovery complete: "
+        f"{len(discovered)} candidate source(s)"
+    )
 
     return discovered
 
+def _choose_sources(discovered):
+    """
+    Select relevant, diverse product-research sources.
 
-def _choose_sources(
-    discovered: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    domains: set[str] = set()
+    Search engines can return semantically related but incorrect pages,
+    especially for terms such as "wireless". Candidates are therefore
+    scored before selection.
+    """
 
-    for source_type in (
-        "manufacturer",
-        "independent_review",
-        "retailer",
-        "community",
-        "web_source",
-    ):
-        for source in discovered:
+    quotas = {
+        "manufacturer": 2,
+        "independent_review": 4,
+        "retailer": 3,
+        "video": 2,
+        "community": 3,
+    }
+
+    selected = []
+    domains = set()
+
+    known_video = {
+        "youtube.com",
+        "youtu.be",
+    }
+
+    known_community = {
+        "reddit.com",
+        "head-fi.org",
+        "avforums.com",
+        "headphones.com",
+        "forum.headphones.com",
+        "forums.tomshardware.com",
+        "linustechtips.com",
+        "slickdeals.net",
+    }
+
+    known_retailers = {
+        "amazon.com",
+        "bestbuy.com",
+        "walmart.com",
+        "target.com",
+        "newegg.com",
+        "bhphotovideo.com",
+        "costco.com",
+        "microcenter.com",
+        "crutchfield.com",
+        "adorama.com",
+        "samsclub.com",
+        "woot.com",
+        "homedepot.com",
+        "lowes.com",
+        "ebay.com",
+    }
+
+    telecom_domains = {
+        "verizon.com",
+        "att.com",
+        "t-mobile.com",
+        "assurancewireless.com",
+        "visible.com",
+        "cricketwireless.com",
+        "metrobyt-mobile.com",
+        "boostmobile.com",
+        "mintmobile.com",
+        "uscellular.com",
+        "spectrum.com",
+        "xfinity.com",
+        "straighttalk.com",
+        "tracfone.com",
+        "usmobile.com",
+        "consumerwireless.com",
+    }
+
+    generic_domains = {
+        "wikipedia.org",
+    }
+
+    telecom_terms = (
+        "phone plan",
+        "cell phone",
+        "cell phones",
+        "mobile phone",
+        "mobile phones",
+        "5g network",
+        "wireless service",
+        "wireless services",
+        "internet service",
+        "internet provider",
+        "government phone",
+        "lifeline service",
+        "unlimited data",
+        "prepaid wireless",
+        "phone services",
+        "carrier",
+        "wireless network",
+        "wireless networking",
+        "networking",
+        "wifi",
+        "wi-fi",
+        "router",
+        "routers",
+        "modem",
+        "modems",
+    )
+
+    product_terms = (
+        "headphone",
+        "headphones",
+        "earbud",
+        "earbuds",
+        "earphone",
+        "earphones",
+        "headset",
+        "audio",
+        "hi-fi",
+        "hifi",
+        "speaker",
+        "speakers",
+        "sound",
+        "sound quality",
+        "noise cancelling",
+        "noise cancellation",
+        "active noise cancellation",
+        "anc",
+        "bluetooth audio",
+    )
+
+    high_value_terms = (
+        "review",
+        "reviews",
+        "comparison",
+        "compare",
+        "tested",
+        "best",
+        "budget",
+        "under $",
+        "price",
+        "pricing",
+        "specifications",
+        "specs",
+        "battery life",
+        "comfort",
+        "microphone",
+        "anc",
+    )
+
+    def normalize_domain(source):
+        domain = str(source.get("domain") or "").strip().lower()
+
+        if not domain:
+            url = str(source.get("url") or "").strip().lower()
+
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+            except Exception:
+                domain = ""
+
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return domain
+
+    def domain_matches(domain, known_domains):
+        return any(
+            domain == known
+            or domain.endswith("." + known)
+            for known in known_domains
+        )
+
+    def forced_source_type(source, current_type):
+        domain = normalize_domain(source)
+
+        if domain_matches(domain, known_video):
+            return "video"
+
+        if domain_matches(domain, known_community):
+            return "community"
+
+        if domain_matches(domain, known_retailers):
+            return "retailer"
+
+        return current_type or "web_source"
+
+    def source_relevance(source):
+        return _research_query_relevance(
+            source.get("title"),
+            source.get("snippet"),
+            source.get("url"),
+            source.get("query") or "",
+        )
+
+    def is_irrelevant(source):
+        domain = normalize_domain(source)
+
+        if not domain:
+            return True
+
+        query = str(
+            source.get("query") or ""
+        )
+
+        # Telecom providers are valid evidence for phone/internet/
+        # networking topics, but not generic product research.
+        if domain_matches(
+            domain,
+            telecom_domains,
+        ):
+            if not _research_query_is_telecom(
+                query
+            ):
+                return True
+
+        return source_relevance(source) < 3
+
+    clean_sources = []
+
+    for source in discovered:
+        if not isinstance(source, dict):
+            continue
+
+        if is_irrelevant(source):
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"filtered irrelevant source: "
+                f"{normalize_domain(source)} | "
+                f"{source.get('title')}"
+            )
+            continue
+
+        normalized = dict(source)
+
+        normalized["domain"] = normalize_domain(source)
+        normalized["source_type"] = forced_source_type(
+            source,
+            source.get("source_type"),
+        )
+        normalized["_relevance_score"] = source_relevance(
+            normalized
+        )
+
+        clean_sources.append(normalized)
+
+    # Highest relevance first within every category.
+    by_type = {}
+
+    for source in clean_sources:
+        by_type.setdefault(
+            source.get("source_type"),
+            []
+        ).append(source)
+
+    for source_type in by_type:
+        by_type[source_type].sort(
+            key=lambda item: item.get(
+                "_relevance_score",
+                0,
+            ),
+            reverse=True,
+        )
+
+    # Satisfy category quotas first.
+    for source_type, quota in quotas.items():
+        count = 0
+
+        for source in by_type.get(source_type, []):
             if len(selected) >= MAX_SOURCES:
                 return selected
 
-            if source.get("source_type") != source_type:
-                continue
-
-            domain = str(
-                source.get("domain")
-                or ""
-            ).lower()
+            domain = normalize_domain(source)
 
             if not domain or domain in domains:
                 continue
 
             selected.append(source)
             domains.add(domain)
+            count += 1
+
+            if count >= quota:
+                break
+
+    # Fill remaining slots from all remaining candidates, highest
+    # relevance first.
+    remaining = [
+        source
+        for source in clean_sources
+        if normalize_domain(source) not in domains
+    ]
+
+    remaining.sort(
+        key=lambda item: item.get(
+            "_relevance_score",
+            0,
+        ),
+        reverse=True,
+    )
+
+    for source in remaining:
+        if len(selected) >= MAX_SOURCES:
+            break
+
+        domain = normalize_domain(source)
+
+        if not domain or domain in domains:
+            continue
+
+        selected.append(source)
+        domains.add(domain)
+
+    # Internal discovery metadata should not leak into synthesis.
+    for source in selected:
+        source.pop("_relevance_score", None)
 
     return selected
-
 
 def _numeric_hints(text: str) -> dict[str, list[Any]]:
     value = str(text or "")
@@ -588,105 +2975,270 @@ def _numeric_hints(text: str) -> dict[str, list[Any]]:
     }
 
 
-def _collect_evidence(
-    sources: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    evidence = []
-    original = browser_page_info()
-    original_url = (
-        str(original.get("url", "") or "").strip()
-        if isinstance(original, dict)
-        else ""
+
+def _source_visit_blocked(snapshot):
+    """
+    Detect pages that were reached successfully but did not provide
+    usable research content because an anti-bot / CAPTCHA page was shown.
+    """
+    snapshot = snapshot or {}
+
+    url = str(snapshot.get("url") or "").lower()
+    title = str(snapshot.get("title") or "").lower()
+    readable = str(snapshot.get("readable_text") or "").lower()
+
+    combined = f"{url}\n{title}\n{readable}"
+
+    blocked_markers = (
+        "prove your humanity",
+        "captcha",
+        "recaptcha",
+        "verify you are human",
+        "not a robot",
+        "unusual traffic",
+        "access denied",
+        "security check",
+        "checking your browser",
+        "just a moment",
     )
 
-    try:
-        for index, source in enumerate(sources, 1):
-            url = str(source.get("url") or "").strip()
-            if not url:
-                continue
+    return any(marker in combined for marker in blocked_markers)
 
-            try:
-                navigation = browser_goto(url)
-            except Exception as exc:
-                navigation = {
-                    "title": "",
-                    "url": url,
-                }
-                logger.debug(
-                    "JARVIS PRODUCT RESEARCH: "
-                    f"navigation failed for {url}: {exc}"
+
+def _source_visit_urls(source):
+    """
+    Return browser URLs to try for a source.
+
+    Reddit gets alternate endpoints because the normal Reddit HTML page
+    may present an anti-bot challenge even though the source itself is valid.
+    """
+    url = str(source.get("url") or "").strip()
+
+    if not url:
+        return []
+
+    urls = [url]
+
+    source_type = str(source.get("source_type") or "").lower()
+
+    if source_type == "community" and "reddit.com/" in url.lower():
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+
+            path = (parsed.path or "").rstrip("/")
+
+            if path:
+                # Old Reddit HTML fallback.
+                urls.append(
+                    f"https://old.reddit.com{path}"
                 )
 
-            try:
-                snapshot = browser_page_snapshot()
-            except Exception:
-                snapshot = {}
+                # Reddit JSON fallback.
+                if "/comments/" in path:
+                    urls.append(
+                        f"https://www.reddit.com{path}.json"
+                    )
+                    urls.append(
+                        f"https://old.reddit.com{path}.json"
+                    )
 
-            readable = (
-                " ".join(
-                    str(
-                        snapshot.get(
-                            "readable_text",
-                            "",
-                        )
-                        or ""
-                    ).split()
-                )[:MAX_PAGE_CHARS]
-                if isinstance(snapshot, dict)
-                else ""
+        except Exception:
+            pass
+
+    # De-duplicate while retaining order.
+    return list(dict.fromkeys(urls))
+
+
+
+
+def _wait_for_research_page(
+    timeout=12.0,
+    poll_interval=0.75,
+):
+    """
+    Wait for the currently loaded browser page to produce meaningful
+    readable content.
+
+    Some sites return control from browser_goto() before the page's
+    useful DOM/text has finished rendering. Polling the snapshot avoids
+    capturing an almost-empty page too early.
+    """
+
+    started = time.monotonic()
+
+    best_snapshot = {}
+
+    previous_text = ""
+    stable_count = 0
+
+    while (time.monotonic() - started) < timeout:
+        try:
+            snapshot = browser_page_snapshot() or {}
+        except Exception:
+            snapshot = {}
+
+        if snapshot:
+            best_snapshot = snapshot
+
+        readable = str(
+            snapshot.get("readable_text") or ""
+        ).strip()
+
+        title = str(
+            snapshot.get("title") or ""
+        ).strip()
+
+        # Stop immediately for known anti-bot / CAPTCHA pages.
+        if _source_visit_blocked(snapshot):
+            return snapshot
+
+        # Meaningful page content.
+        if len(readable) >= 800:
+            if readable == previous_text:
+                stable_count += 1
+            else:
+                stable_count = 0
+
+            previous_text = readable
+
+            # Two consecutive identical snapshots means the page has
+            # probably finished changing.
+            if stable_count >= 1:
+                return snapshot
+
+        # A page may have a meaningful title but need more time to
+        # populate the readable DOM.
+        elif title and len(readable) >= 250:
+            previous_text = readable
+
+        time.sleep(poll_interval)
+
+    return best_snapshot
+
+
+def _collect_evidence(sources):
+    """
+    Extract research evidence without touching the user's visible
+    browser.
+
+    HTTP is attempted first. Hidden Playwright is the fallback for
+    JavaScript-heavy pages.
+    """
+
+    evidence = []
+
+    for index, source in enumerate(
+        sources,
+        1,
+    ):
+        domain = str(
+            source.get("domain") or ""
+        )
+
+        source_type = str(
+            source.get("source_type")
+            or _research_source_type(
+                source.get("url"),
+                source.get("title"),
+            )
+        )
+
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            f"researching source {index}/{len(sources)} "
+            f"[{source_type}] {domain}"
+        )
+
+        fetched = _research_fetch_source(
+            source
+        )
+
+        readable = " ".join(
+            str(
+                fetched.get("text") or ""
+            ).split()
+        )[:_RESEARCH_TEXT_LIMIT]
+
+        title = str(
+            fetched.get("title")
+            or source.get("title")
+            or ""
+        ).strip()
+
+        final_url = str(
+            fetched.get("url")
+            or source.get("url")
+            or ""
+        ).strip()
+
+        success = bool(
+            fetched.get("success")
+        )
+
+        if success:
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"EVIDENCE OK [{source_type}] "
+                f"{domain} "
+                f"method={fetched.get('method')} "
+                f"chars={len(readable)}"
+            )
+        else:
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"NO USABLE EVIDENCE [{source_type}] "
+                f"{domain}"
             )
 
-            title = " ".join(
-                str(
-                    (
-                        snapshot.get("title")
-                        if isinstance(snapshot, dict)
-                        else ""
+        evidence.append(
+            {
+                "id": index,
+                "source_type": source_type,
+                "domain": domain,
+                "title": title,
+                "url": final_url,
+                "original_url": source.get(
+                    "url"
+                ),
+                "access_status": (
+                    "visited"
+                    if success
+                    else "failed"
+                ),
+                "research_method": (
+                    fetched.get("method")
+                    or "none"
+                ),
+                "text": readable,
+                "snippet": source.get(
+                    "snippet"
+                ) or "",
+                "numeric_hints": _numeric_hints(
+                    " ".join(
+                        [
+                            title,
+                            str(
+                                source.get(
+                                    "title"
+                                )
+                                or ""
+                            ),
+                            str(
+                                source.get(
+                                    "snippet"
+                                )
+                                or ""
+                            ),
+                            readable,
+                        ]
                     )
-                    or (
-                        navigation.get("title")
-                        if isinstance(navigation, dict)
-                        else ""
-                    )
-                    or source.get("title")
-                    or ""
-                ).split()
-            )[:300]
-
-            evidence.append(
-                {
-                    "id": index,
-                    "url": url,
-                    "domain": source.get("domain") or _domain(url),
-                    "source_type": (
-                        source.get("source_type")
-                        or _source_type(url)
-                    ),
-                    "title": title,
-                    "snippet": source.get("snippet", ""),
-                    "text": readable,
-                    "query": source.get("query", ""),
-                    "engine": source.get("engine", ""),
-                    "numeric_hints": _numeric_hints(
-                        " ".join(
-                            [
-                                source.get("title", ""),
-                                source.get("snippet", ""),
-                                readable,
-                            ]
-                        )
-                    ),
-                }
-            )
-    finally:
-        if original_url:
-            try:
-                browser_goto(original_url)
-            except Exception:
-                pass
+                ),
+            }
+        )
 
     return evidence
-
 
 def _response_text(response: Any) -> str:
     message = getattr(
@@ -785,8 +3337,11 @@ Evidence rules:
 - Manufacturer sources are strongest for specifications.
 - Retailers are strongest for observed price and customer ratings.
 - Independent reviews are strongest for testing and comparative analysis.
-- Community sources are anecdotal.
-- Prefer agreement across independent domains.
+- Video sources are useful for demonstrations, hands-on impressions, and
+  comparisons, but do not treat a creator's opinion as an objective measurement.
+- Community sources are anecdotal. Repeated independent reports can identify
+  patterns worth mentioning, but a single post is not proof.
+- Prefer agreement across independent domains and source types.
 - Do not treat a tiny rating sample like a large one.
 - State conflicts or potentially stale pricing.
 - A cheaper product is not automatically better value.
@@ -827,7 +3382,7 @@ Return ONLY JSON:
 """
 
     try:
-        response = ModelManager().planner(
+        response = ModelManager().product_research(
             [
                 {
                     "role": "system",

@@ -369,6 +369,16 @@ PLANNER_NUM_PREDICT = int(
     )
 )
 
+# Product research synthesis can require a substantially larger structured
+# JSON response than normal task planning. Keep it separate so ordinary
+# planner responses remain fast.
+PRODUCT_RESEARCH_NUM_PREDICT = int(
+    os.environ.get(
+        "JARVIS_PRODUCT_RESEARCH_NUM_PREDICT",
+        "900",
+    )
+)
+
 PLANNER_MODEL_KEEP_ALIVE = os.environ.get(
     "JARVIS_PLANNER_MODEL_KEEP_ALIVE",
     "10m",

@@ -1328,6 +1328,38 @@ class JarvisAgent:
                     plan
                 )
 
+                # Product research must always operate on the original user
+                # request. During replanning, request_for_planner contains
+                # recovery/evidence instructions intended only for the LLM.
+                # Never allow that temporary planner context to leak into the
+                # product_research tool argument.
+                if isinstance(plan, dict):
+                    steps = plan.get("steps", [])
+                    if isinstance(steps, list):
+                        for step in steps:
+                            if not isinstance(step, dict):
+                                continue
+
+                            if (
+                                str(
+                                    step.get("tool", "")
+                                    or ""
+                                ).strip()
+                                != "product_research"
+                            ):
+                                continue
+
+                            step["argument"] = json.dumps(
+                                {
+                                    "request": task.request,
+                                }
+                            )
+
+                            task.observations.append(
+                                "Product research argument normalized to the "
+                                "original user request before execution."
+                            )
+
             except Exception as exc:
 
                 logger.exception(
@@ -2980,6 +3012,35 @@ class JarvisAgent:
             # ------------------------------------------------
 
             if result == "failed":
+
+                # Respect the tool's explicit retryability contract at the
+                # Agent Core boundary. _execute_once() already records and
+                # announces retryable=False failures, but this outer failure
+                # branch previously treated every "failed" result as a signal
+                # to replan. That could cause deterministic failures such as
+                # product-research collection failures to enter an endless
+                # LLM replan loop.
+                retryable, retry_message = self._failure_is_retryable()
+
+                if not retryable:
+                    if retry_message:
+                        task.error = retry_message
+
+                    task.status = "failed"
+                    task.completed_at = time.time()
+
+                    self.state["last_result"] = task.execution_result
+                    self.state["last_status"] = task.status
+                    self.state["last_error"] = task.error
+                    self.state["replans"] = task.replan_count
+
+                    logger.warning(
+                        "JARVIS AGENT: Non-retryable failure reached "
+                        "outer execution loop; skipping replan."
+                    )
+
+                    task_state.set_progress_callback(None)
+                    return task
 
                 # A failed diagnostic is useful evidence, not a generic
                 # planning failure. For software repair tasks, hand the

@@ -225,6 +225,25 @@ class ModelManager:
             think=False,
         )
 
+    def product_research(
+        self,
+        messages: list,
+        *,
+        format: str = "json",
+    ):
+        """Generate structured product-research synthesis with a larger output budget."""
+        return self.generate(
+            model=self.planner_model,
+            messages=messages,
+            format=format,
+            options={
+                "temperature": 0,
+                "num_predict": config.PRODUCT_RESEARCH_NUM_PREDICT,
+            },
+            keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
+            think=False,
+        )
+
     def coding(
         self,
         messages: list,
