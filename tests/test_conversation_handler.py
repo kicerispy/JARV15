@@ -23,9 +23,8 @@ class ConversationSpeechPipelineTests(unittest.TestCase):
             return_value=[
                 {"role": "user", "content": "Explain this."}
             ],
-        ), mock.patch.object(
-            conversation_handler.MODEL_MANAGER,
-            "chat",
+        ), mock.patch(
+            "conversation_handler.ModelManager.chat",
             return_value={
                 "message": {
                     "content": long_reply,
