@@ -107,3 +107,64 @@ def test_browser_dispatcher_passes_accessible_name(monkeypatch):
         "role": "button",
         "name": "Sign in",
     }
+
+
+def test_find_search_box_routes_to_dom_role():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Find the search box")
+
+    assert plan["steps"] == [{
+        "tool": "browser_find_element",
+        "argument": '{"role": "searchbox"}',
+    }]
+
+
+def test_fill_search_box_routes_to_dom_role():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Fill the search box with ChatGPT")
+
+    assert plan["steps"] == [{
+        "tool": "browser_fill_element",
+        "argument": '{"role": "searchbox", "value": "ChatGPT"}',
+    }]
+
+
+def test_press_enter_in_search_box_routes_to_dom_role():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Press Enter in the search box")
+
+    assert plan["steps"] == [{
+        "tool": "browser_press_key",
+        "argument": '{"role": "searchbox", "key": "Enter"}',
+    }]
+
+
+def test_wait_for_results_routes_to_dom_text():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Wait for the results")
+
+    assert plan["steps"] == [{
+        "tool": "browser_wait_for_element",
+        "argument": '{"text": "Results"}',
+    }]
+
+
+def test_click_named_button_routes_to_dom_role_and_name():
+    from commands import get_fast_command
+
+    plan = get_fast_command("Click the Sign in button")
+
+    assert plan["steps"] == [{
+        "tool": "browser_click_element",
+        "argument": '{"role": "button", "name": "Sign in"}',
+    }]
+
+
+def test_dom_router_does_not_steal_contextual_result_clicks():
+    from commands import get_fast_command
+
+    assert get_fast_command("Click the first result") is None
