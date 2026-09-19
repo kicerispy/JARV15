@@ -626,6 +626,7 @@ def _update_browser_active_context(
     tool_name: str,
     result: Any,
     active_context: ActiveContext,
+    argument: str = "",
 ) -> None:
     """Copy useful browser observations into ActiveContext."""
     raw = _unwrap_result_data(result)
@@ -668,6 +669,23 @@ def _update_browser_active_context(
 
     if raw.get("query"):
         active_context.last_query = str(raw.get("query"))
+
+    # Browser-native searches return page metadata but do not echo the
+    # search query in their controller payload. Preserve the exact query
+    # from the executed tool argument so later commands can resolve
+    # "click the second result", "click that", etc. without model planning.
+    if tool_name in {
+        "browser_search_google",
+        "browser_search_bing",
+    }:
+        search_query = str(argument or "").strip()
+        if search_query:
+            active_context.last_query = search_query
+            active_context.site = (
+                "google"
+                if tool_name == "browser_search_google"
+                else "bing"
+            )
 
     try:
         from urllib.parse import parse_qs, urlparse
@@ -2273,6 +2291,7 @@ def execute_plan(
                     tool_name,
                     result,
                     active_context,
+                    argument,
                 )
 
             if success and verified:
