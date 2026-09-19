@@ -3336,22 +3336,6 @@ def _research_evidence_has_core_coverage(evidence):
         )
     )
 
-def _research_evidence_has_core_coverage(evidence):
-    types = {}
-    for source in evidence:
-        source_type = str(source.get("source_type") or "")
-        types[source_type] = types.get(source_type, 0) + 1
-    return (
-        len(evidence) >= 8
-        and types.get("independent_review", 0) >= 3
-        and types.get("retailer", 0) >= 2
-        and types.get("manufacturer", 0) >= 1
-        and (
-            types.get("video", 0) >= 1
-            or types.get("community", 0) >= 1
-        )
-    )
-
 
 def _collect_one_evidence(index, source):
     domain = str(source.get("domain") or "")
