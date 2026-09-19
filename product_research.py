@@ -462,7 +462,7 @@ def _collect_evidence(
                 }
             )
     finally:
-        if original_url and not _is_search_url(original_url):
+        if original_url:
             try:
                 browser_goto(original_url)
             except Exception:
