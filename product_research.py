@@ -3,6 +3,7 @@ from __future__ import annotations
 import requests
 from html.parser import HTMLParser
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import ast
 import base64
@@ -3370,170 +3371,57 @@ def _research_evidence_has_core_coverage(evidence):
         )
     )
 
+def _collect_one_evidence(index, source):
+    domain = str(source.get("domain") or "")
+    source_type = str(source.get("source_type") or _research_source_type(source.get("url"), source.get("title")))
+    print("[JARVIS] JARVIS PRODUCT RESEARCH: " f"researching source {index} [{source_type}] {domain}")
+    fetched = _research_fetch_source(source)
+    readable = " ".join(str(fetched.get("text") or "").split())[:_RESEARCH_TEXT_LIMIT]
+    title = str(fetched.get("title") or source.get("title") or "").strip()
+    final_url = str(fetched.get("url") or source.get("url") or "").strip()
+    success = bool(fetched.get("success")) and len(readable) >= 200
+    if success and source_type == "community":
+        lower_text = readable.lower()
+        discussion_markers = ("reply", "replies", "comments", "posted", "thread", "threads", "user review", "owner review", "discussion", "members")
+        if not (any(marker in lower_text for marker in discussion_markers) and any(marker in lower_text for marker in _RESEARCH_PRODUCT_TERMS)):
+            success = False
+    if not success:
+        print("[JARVIS] JARVIS PRODUCT RESEARCH: " f"NO USABLE EVIDENCE [{source_type}] {domain}")
+        return None
+    return {
+        "id": index, "engine": str(source.get("engine") or "").strip(),
+        "query": str(source.get("query") or "").strip(),
+        "requested_domain": str(source.get("requested_domain") or "").strip(),
+        "requested_domain_match": bool(source.get("requested_domain_match")),
+        "source_type": source_type, "domain": domain, "title": title, "url": final_url,
+        "original_url": source.get("url"), "access_status": "visited",
+        "research_method": fetched.get("method") or "none", "text": readable,
+        "snippet": source.get("snippet") or "",
+        "numeric_hints": _numeric_hints(" ".join([title, str(source.get("title") or ""), str(source.get("snippet") or ""), readable])),
+    }
+
 def _collect_evidence(sources):
-    """
-    Extract research evidence without touching the user's visible
-    browser.
-
-    HTTP is attempted first. Hidden Playwright is the fallback for
-    JavaScript-heavy pages.
-    """
-
+    """Fetch source pages concurrently in small waves and stop once core coverage is ready."""
     evidence = []
-
-    for index, source in enumerate(
-        sources,
-        1,
-    ):
-        domain = str(
-            source.get("domain") or ""
-        )
-
-        source_type = str(
-            source.get("source_type")
-            or _research_source_type(
-                source.get("url"),
-                source.get("title"),
-            )
-        )
-
-        print(
-            "[JARVIS] JARVIS PRODUCT RESEARCH: "
-            f"researching source {index}/{len(sources)} "
-            f"[{source_type}] {domain}"
-        )
-
-        fetched = _research_fetch_source(
-            source
-        )
-
-        readable = " ".join(
-            str(
-                fetched.get("text") or ""
-            ).split()
-        )[:_RESEARCH_TEXT_LIMIT]
-
-        title = str(
-            fetched.get("title")
-            or source.get("title")
-            or ""
-        ).strip()
-
-        final_url = str(
-            fetched.get("url")
-            or source.get("url")
-            or ""
-        ).strip()
-
-        success = bool(
-            fetched.get("success")
-        ) and len(readable) >= 200
-
-        # Community search/navigation pages are not discussion evidence.
-        # Require some indication of actual threads/posts/replies/reviews for
-        # community sources so site chrome does not inflate coverage.
-        if success and source_type == "community":
-            lower_text = readable.lower()
-            discussion_markers = (
-                "reply",
-                "replies",
-                "comments",
-                "posted",
-                "thread",
-                "threads",
-                "user review",
-                "owner review",
-                "discussion",
-                "members",
-            )
-            product_markers = _RESEARCH_PRODUCT_TERMS
-            has_discussion = any(
-                marker in lower_text
-                for marker in discussion_markers
-            )
-            has_product_context = any(
-                marker in lower_text
-                for marker in product_markers
-            )
-
-            if not (has_discussion and has_product_context):
-                success = False
-
-        if success:
-            print(
-                "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                f"EVIDENCE OK [{source_type}] "
-                f"{domain} "
-                f"method={fetched.get('method')} "
-                f"chars={len(readable)}"
-            )
-        else:
-            print(
-                "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                f"NO USABLE EVIDENCE [{source_type}] "
-                f"{domain}"
-            )
-            continue
-
-        evidence.append(
-            {
-                "id": index,
-                "engine": str(source.get("engine") or "").strip(),
-                "query": str(source.get("query") or "").strip(),
-                "requested_domain": str(source.get("requested_domain") or "").strip(),
-                "requested_domain_match": bool(source.get("requested_domain_match")),
-                "source_type": source_type,
-                "domain": domain,
-                "title": title,
-                "url": final_url,
-                "original_url": source.get(
-                    "url"
-                ),
-                "access_status": (
-                    "visited"
-                    if success
-                    else "failed"
-                ),
-                "research_method": (
-                    fetched.get("method")
-                    or "none"
-                ),
-                "text": readable,
-                "snippet": source.get(
-                    "snippet"
-                ) or "",
-                "numeric_hints": _numeric_hints(
-                    " ".join(
-                        [
-                            title,
-                            str(
-                                source.get(
-                                    "title"
-                                )
-                                or ""
-                            ),
-                            str(
-                                source.get(
-                                    "snippet"
-                                )
-                                or ""
-                            ),
-                            readable,
-                        ]
-                    )
-                ),
-            }
-        )
-
-        if _research_evidence_has_core_coverage(evidence):
-            print(
-                "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                f"core evidence coverage satisfied after {len(evidence)} source(s)."
-            )
+    indexed = list(enumerate(sources, 1))
+    batch_size = 4
+    for offset in range(0, len(indexed), batch_size):
+        batch = indexed[offset:offset + batch_size]
+        with ThreadPoolExecutor(max_workers=min(batch_size, len(batch))) as executor:
+            futures = [executor.submit(_collect_one_evidence, index, source) for index, source in batch]
+            results = []
+            for future in futures:
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    print("[JARVIS] JARVIS PRODUCT RESEARCH: worker failed: " f"{exc}")
+                    result = None
+                if result:
+                    results.append(result)
+        evidence.extend(sorted(results, key=lambda item: item["id"]))
+        if _research_enough_sources(evidence):
             break
-
     return evidence
-
 def _response_text(response: Any) -> str:
     """Extract assistant text from Ollama mappings or response objects."""
     if response is None:
