@@ -2830,10 +2830,7 @@ def execute_plan(
 
         task_state.finish()
 
-        if (
-            hasattr(task_state, "is_background_speech_owned")
-            and task_state.is_background_speech_owned()
-        ):
+        if _background_speech_owned(task_state, speak_callback):
             task_state.set_final_speech(spoken_message)
             return "done"
 
