@@ -86,6 +86,10 @@ async def _init_browser():
     if _page is not None:
         try:
             if not _page.is_closed():
+                try:
+                    await _page.bring_to_front()
+                except Exception:
+                    pass
                 return _page
         except Exception:
             pass
@@ -128,6 +132,10 @@ async def _init_browser():
 
     pages = _context.pages
     _page = pages[-1] if pages else await _context.new_page()
+    try:
+        await _page.bring_to_front()
+    except Exception:
+        pass
     _skipper_task = asyncio.create_task(_auto_skip_ads(_page))
     return _page
 
@@ -245,8 +253,20 @@ def _locator(
 
     if role:
         if name:
-            return page.get_by_role(role, name=name, exact=False)
-        return page.get_by_role(role)
+            primary = page.get_by_role(role, name=name, exact=False)
+        else:
+            primary = page.get_by_role(role)
+
+        # Google and several modern SPAs expose search inputs as an ARIA
+        # combobox instead of searchbox. Include that representation while
+        # retaining the semantic searchbox as the primary target.
+        if role.lower() == "searchbox" and not name:
+            try:
+                return primary.or_(page.get_by_role("combobox")).first
+            except (AttributeError, TypeError):
+                pass
+
+        return primary
 
     return page.get_by_text(text, exact=False)
 
@@ -1402,6 +1422,36 @@ def browser_extract_text(
             except Exception:
                 pass
 
+        diagnostics = {}
+        try:
+            diagnostics["body_text_length"] = int(
+                await page.locator("body").evaluate(
+                    "el => ((el.innerText || el.textContent || '').trim().length)"
+                )
+            )
+        except Exception:
+            diagnostics["body_text_length"] = -1
+
+        try:
+            diagnostics["document_text_length"] = int(
+                await page.evaluate(
+                    """() => (
+                        document.documentElement?.innerText ||
+                        document.documentElement?.textContent ||
+                        ""
+                    ).trim().length"""
+                )
+            )
+        except Exception:
+            diagnostics["document_text_length"] = -1
+
+        try:
+            diagnostics["html_length"] = int(
+                len(await page.content())
+            )
+        except Exception:
+            diagnostics["html_length"] = -1
+
         metadata_only = False
         if not extracted:
             try:
@@ -1428,11 +1478,12 @@ def browser_extract_text(
             "characters": len(extracted),
             "target_count": info["count"],
             "metadata_only": metadata_only,
+            "diagnostics": diagnostics,
             **_dom_target_args(
                 selector_value,
                 text_value,
                 role_value,
-                "",
+                name_value,
             ),
         }
 
