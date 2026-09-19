@@ -203,8 +203,16 @@ _last_spoken_key = ""
 _last_spoken_at = 0.0
 
 def _speech_dedup_key(text):
-    """Normalize speech so formatting-only differences cannot duplicate audio."""
-    return " ".join(str(text or "").strip().split()).casefold()
+    """Build a key from the exact text after JARVIS speech normalization."""
+    try:
+        from response_pipeline import clean_for_speech
+        cleaned = clean_for_speech(str(text or ""))
+    except Exception:
+        cleaned = str(text or "")
+
+    return " ".join(
+        str(cleaned or "").strip().split()
+    ).casefold()
 
 
 # ============================================================
