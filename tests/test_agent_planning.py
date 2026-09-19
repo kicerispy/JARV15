@@ -1048,8 +1048,9 @@ def test_code_test_progress_does_not_claim_a_change_was_applied():
     messages = {}
 
     class FakeTaskState:
-        def report_progress(self, message):
+        def report_progress(self, message, key=None):
             messages["message"] = message
+            messages["key"] = key
 
     tool_executor._report_tool_progress(
         FakeTaskState(),
@@ -1058,7 +1059,8 @@ def test_code_test_progress_does_not_claim_a_change_was_applied():
         3,
     )
 
-    assert "Step 3 of 3. I'm running the validation now." == messages["message"]
+    assert messages["message"] == "I'm validating the result."
+    assert messages["key"] == "validation"
     assert "change is in place" not in messages["message"].lower()
 
 class MalformedRequiredReadPlanner:

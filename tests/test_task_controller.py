@@ -312,7 +312,7 @@ def test_background_planning_does_not_block_caller():
 
     assert agent.planning_started.wait(timeout=1)
     assert controller.has_active_task() is True
-    assert controller.status_message() == "I'm getting the task underway."
+    assert controller.status_message() == "I'm planning the task now."
 
     spoken = []
     assert controller.drain_speech(

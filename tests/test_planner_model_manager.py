@@ -10,15 +10,36 @@ class PlannerModelManagerTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_chat(**kwargs):
-            captured.update(kwargs)
+        def fake_generate(
+            *,
+            model,
+            messages,
+            format=None,
+            options=None,
+            keep_alive=None,
+            think=None,
+        ):
+            captured.update(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "format": format,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                    "think": think,
+                }
+            )
             return {
                 "message": {
                     "content": '{"goal":"test","steps":[]}'
                 }
             }
 
-        with patch.object(planner, "chat", side_effect=fake_chat):
+        with patch.object(
+            planner.ModelManager,
+            "generate",
+            side_effect=fake_generate,
+        ):
             planner.create_plan("Run a harmless test request")
 
         self.assertEqual(
@@ -32,11 +53,32 @@ class PlannerModelManagerTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_chat(**kwargs):
-            captured.update(kwargs)
+        def fake_generate(
+            *,
+            model,
+            messages,
+            format=None,
+            options=None,
+            keep_alive=None,
+            think=None,
+        ):
+            captured.update(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "format": format,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                    "think": think,
+                }
+            )
             return {
                 "message": {
-                    "content": '{"goal":"read source","steps":[{"tool":"read_file","argument":"browser_controller.py"}]}'
+                    "content": (
+                        '{"goal":"read source","steps":'
+                        '[{"tool":"read_file",'
+                        '"argument":"browser_controller.py"}]}'
+                    )
                 }
             }
 
@@ -45,7 +87,11 @@ class PlannerModelManagerTests(unittest.TestCase):
             "Read the verified browser_controller.py source."
         )
 
-        with patch.object(planner, "chat", side_effect=fake_chat):
+        with patch.object(
+            planner.ModelManager,
+            "generate",
+            side_effect=fake_generate,
+        ):
             result = planner.create_plan(request)
 
         self.assertEqual(result.get("goal"), "read source")
@@ -62,8 +108,25 @@ class PlannerModelManagerTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_chat(**kwargs):
-            captured.update(kwargs)
+        def fake_generate(
+            *,
+            model,
+            messages,
+            format=None,
+            options=None,
+            keep_alive=None,
+            think=None,
+        ):
+            captured.update(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "format": format,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                    "think": think,
+                }
+            )
             return {
                 "message": {
                     "content": json.dumps(
@@ -90,7 +153,11 @@ class PlannerModelManagerTests(unittest.TestCase):
             "Run the verified browser runtime diagnostic."
         )
 
-        with patch.object(planner, "chat", side_effect=fake_chat):
+        with patch.object(
+            planner.ModelManager,
+            "generate",
+            side_effect=fake_generate,
+        ):
             result = planner.create_plan(request)
 
         self.assertEqual(result.get("goal"), "runtime diagnostic")
@@ -107,8 +174,25 @@ class PlannerModelManagerTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_chat(**kwargs):
-            captured.update(kwargs)
+        def fake_generate(
+            *,
+            model,
+            messages,
+            format=None,
+            options=None,
+            keep_alive=None,
+            think=None,
+        ):
+            captured.update(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "format": format,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                    "think": think,
+                }
+            )
             return {
                 "message": {
                     "content": '{"goal":"repair","steps":[]}'
@@ -122,24 +206,35 @@ class PlannerModelManagerTests(unittest.TestCase):
             "Use the verified evidence and perform the smallest safe repair."
         )
 
-        with patch.object(planner, "chat", side_effect=fake_chat):
+        with patch.object(
+            planner.ModelManager,
+            "generate",
+            side_effect=fake_generate,
+        ):
             result = planner.create_plan(repair_request)
 
         self.assertEqual(result.get("goal"), "repair")
+
         system = captured.get("messages", [{}])[0].get("content", "")
         self.assertIn("REPAIR HANDOFF MODE", system)
         self.assertIn("code_checkpoint", system)
-        self.assertNotIn("expert software engineer and systems architect", system)
+        self.assertNotIn(
+            "expert software engineer and systems architect",
+            system,
+        )
+
         self.assertEqual(
             captured.get("model"),
             planner.ModelManager().coding_model,
             "repair handoffs must use the centralized coding model",
         )
+
         self.assertEqual(
             captured.get("keep_alive"),
             "15m",
             "repair planner should keep the coding model warm",
         )
+
         self.assertEqual(
             captured.get("options"),
             {

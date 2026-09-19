@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from conversation_handler import handle_normal_conversation
 from state import ActiveContext
+import conversation_handler
 
 
 class ChatGenerationConfigTests(unittest.TestCase):
@@ -10,11 +11,32 @@ class ChatGenerationConfigTests(unittest.TestCase):
     def test_normal_conversation_uses_bounded_chat_generation(self):
         captured = {}
 
-        def fake_chat(**kwargs):
-            captured.update(kwargs)
+        def fake_generate(
+            *,
+            model,
+            messages,
+            format=None,
+            options=None,
+            keep_alive=None,
+            think=None,
+        ):
+            captured.update(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "format": format,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                    "think": think,
+                }
+            )
             return {"message": {"content": "ok"}}
 
-        with patch("conversation_handler.chat", side_effect=fake_chat):
+        with patch.object(
+            conversation_handler.ModelManager,
+            "generate",
+            side_effect=fake_generate,
+        ):
             with patch(
                 "conversation_handler.build_conversation_messages",
                 return_value=[
@@ -24,7 +46,7 @@ class ChatGenerationConfigTests(unittest.TestCase):
             ):
                 with patch("conversation.add_message"):
                     with patch.object(
-                        __import__("conversation_handler").logger,
+                        conversation_handler.logger,
                         "info",
                     ):
                         status = handle_normal_conversation(
