@@ -4132,6 +4132,35 @@ def _enrich_product_price_comparisons(
 
     analysis["products"] = enriched
 
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        if isinstance(budget, (int, float)) and budget >= 0:
+            eligible_offers = comparison.get("budget_verified_offers") or []
+        else:
+            eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
     cheapest_by_name = {}
     for product in enriched:
         if not isinstance(product, dict):
@@ -4296,6 +4325,38 @@ def _enrich_product_price_comparisons(
             and isinstance(alternative.get("price"), (int, float))
             and float(alternative.get("price")) <= budget_value
         ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
 
         analysis["price_check_status"] = "completed_best_effort"
     return analysis
