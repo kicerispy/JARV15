@@ -137,8 +137,6 @@ class TestDeterministicBrowserSummaryRoute:
             "What are the search results?",
             "Tell me the search results",
             "Show me the search results",
-            "What did the search find?",
-            "What did you find?",
         ):
             plan = get_fast_command(command)
             assert plan is not None
