@@ -2,6 +2,7 @@ import os
 import threading
 import collections
 import time
+import inspect
 
 
 # ============================================================
@@ -884,6 +885,30 @@ def speak(text):
 
         _last_spoken_key = speech_key
         _last_spoken_at = now
+
+    if os.environ.get("JARVIS_TRACE_TTS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        caller_lines = []
+        try:
+            stack = inspect.stack()[1:7]
+            for frame_info in stack:
+                frame = frame_info.frame
+                function = frame.f_code.co_name
+                filename = os.path.basename(frame.f_code.co_filename)
+                line = frame_info.lineno
+                caller_lines.append(
+                    f"{filename}:{line}::{function}"
+                )
+        except Exception:
+            caller_lines = []
+        print(
+            "JARVIS TTS TRACE: "
+            + " <- ".join(caller_lines)
+        )
 
     print(
         f"JARVIS TTS: {text}"
