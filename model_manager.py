@@ -198,11 +198,17 @@ class ModelManager:
         )
 
     def planner(self, messages: list, *, format: str = "json"):
-        """Generate a planner response using the configured planner model."""
+        """Generate a bounded, deterministic planner response."""
         return self.generate(
             model=self.planner_model,
             messages=messages,
             format=format,
+            options={
+                "temperature": 0,
+                "num_predict": config.PLANNER_NUM_PREDICT,
+            },
+            keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
+            think=False,
         )
 
     def recovery(self, messages: list, *, format: str = "json"):
