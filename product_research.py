@@ -6,6 +6,7 @@ import json
 import re
 from datetime import datetime
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 from browser_controller import (
     browser_goto,
@@ -224,6 +225,76 @@ def _is_search_url(url: str) -> bool:
     )
 
 
+def _canonical_search_href(href: str) -> str:
+    """Resolve common search-engine redirect hrefs into an absolute URL."""
+    value = str(href or "").strip()
+    if not value:
+        return ""
+
+    try:
+        parsed = urlparse(value)
+        query = parse_qs(parsed.query)
+
+        for key in ("url", "q", "u"):
+            targets = query.get(key) or []
+            if not targets:
+                continue
+
+            target = unquote(str(targets[0] or "")).strip()
+            if target.startswith(("http://", "https://")):
+                return target
+    except Exception:
+        pass
+
+    return value if value.startswith(("http://", "https://")) else ""
+
+
+def _fallback_results_from_links(
+    snapshot: dict[str, Any],
+    engine: str,
+) -> list[dict[str, Any]]:
+    """Recover external search candidates when dedicated result selectors miss."""
+    links = (
+        snapshot.get("links", [])
+        if isinstance(snapshot, dict)
+        else []
+    )
+
+    recovered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+
+        url = _canonical_search_href(
+            str(link.get("href") or "")
+        ).split("#", 1)[0]
+
+        if not url or _is_search_url(url) or url in seen:
+            continue
+
+        title = " ".join(
+            str(link.get("text") or "").split()
+        ).strip()
+
+        if len(title) < 8:
+            continue
+
+        seen.add(url)
+        recovered.append({
+            "url": url[:1000],
+            "title": title[:300],
+            "snippet": "",
+            "engine": engine,
+        })
+
+        if len(recovered) >= MAX_RESULTS_PER_QUERY:
+            break
+
+    return recovered
+
+
 def _discover(queries: list[str]) -> list[dict[str, Any]]:
     discovered: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -240,6 +311,18 @@ def _discover(queries: list[str]) -> list[dict[str, Any]]:
                     snapshot.get("results", [])
                     if isinstance(snapshot, dict)
                     else []
+                )
+
+                if not results and isinstance(snapshot, dict):
+                    results = _fallback_results_from_links(
+                        snapshot,
+                        engine,
+                    )
+
+                logger.info(
+                    "JARVIS PRODUCT RESEARCH: "
+                    f"{engine} returned {len(results)} candidate result(s) "
+                    f"for query={query!r}"
                 )
 
                 for result in results[:MAX_RESULTS_PER_QUERY]:
@@ -286,6 +369,12 @@ def _discover(queries: list[str]) -> list[dict[str, Any]]:
                     "JARVIS PRODUCT RESEARCH: "
                     f"discovery failed for {engine}/{query}: {exc}"
                 )
+
+    if not discovered:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: "
+            "all search engines returned zero usable source candidates."
+        )
 
     return discovered
 
