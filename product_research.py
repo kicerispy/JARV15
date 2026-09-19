@@ -272,16 +272,8 @@ def _parse_argument(argument: str) -> dict[str, Any]:
 
 
 def _queries(subject, budget):
-    """
-    Generate search-engine-friendly discovery queries.
-
-    Avoid depending exclusively on 'site:' operators. Bing can return
-    zero results for those even when relevant pages exist.
-    """
-
+    """Generate a compact set of high-information search queries."""
     subject = str(subject or "").strip()
-
-    # Defensive normalization keeps malformed planner/task text out of search queries.
     normalized_subject, normalized_budget = _extract_item_and_budget(subject)
     if normalized_subject:
         subject = normalized_subject
@@ -293,123 +285,21 @@ def _queries(subject, budget):
     except Exception:
         budget_text = ""
 
+    clean = subject.replace('"', "").strip()
+    if not clean:
+        return []
+
+    phrase = f'"{clean}"'
     queries = [
-        # General product research
-        f"{subject} reviews price under {budget_text}".strip(),
-
-        # Manufacturer coverage early so source discovery cannot fill the
-        # candidate ceiling before official specifications/product pages
-        # are queried.
-        f"{subject} official manufacturer specifications".strip(),
-        f"{subject} official product page".strip(),
-
-        # Comparative expert research
-        f"{subject} best comparison under {budget_text}".strip(),
-        f"{subject} expert review".strip(),
-        f"{subject} problems issues".strip(),
-
-        # Community
-        f"{subject} reddit review owners".strip(),
-        f"{subject} reddit problems".strip(),
-        f"{subject} Head-Fi discussion".strip(),
-        f"{subject} AVForums discussion".strip(),
-        f"{subject} headphone forum discussion".strip(),
-
-        # YouTube
-        f"{subject} review YouTube".strip(),
-        f"{subject} comparison YouTube".strip(),
-        f"{subject} hands on YouTube".strip(),
-
-        # Retail
-        f"{subject} Amazon".strip(),
-        f"{subject} Best Buy".strip(),
-        f"{subject} Walmart".strip(),
-
-        # Alternatives
-        f"{subject} cheaper alternatives".strip(),
+        f"{phrase} reviews under {budget_text}".strip(),
+        f"{phrase} best budget {budget_text}".strip(),
+        f"{phrase} comparison".strip(),
+        f"{phrase} expert review".strip(),
+        f"{clean} official manufacturer specifications".strip(),
+        f"{clean} official product page".strip(),
+        f"{phrase} cheaper alternatives".strip(),
     ]
-
-    # ------------------------------------------------------------
-    # Broad exact-phrase discovery
-    #
-    # Keep the product/topic phrase intact so search engines do not
-    # reinterpret ambiguous terms such as "wireless".
-    #
-    # We intentionally avoid putting the budget on every query.
-    # Bing has already been observed to return unrelated results for
-    # some budget-qualified variants.
-    # ------------------------------------------------------------
-    clean_subject = (
-        str(subject or "")
-        .replace('"', "")
-        .strip()
-    )
-
-    if clean_subject:
-        subject_phrase = f'"{clean_subject}"'
-
-        phrase_queries = [
-            f"{subject_phrase} reviews"
-        ]
-
-        if budget_text:
-            phrase_queries.insert(
-                0,
-                f"{subject_phrase} reviews under {budget_text}",
-            )
-
-        phrase_queries.extend(
-            [
-                # Broad research.
-                f"{subject_phrase} comparison",
-                f"{subject_phrase} tested",
-                f"{subject_phrase} buying guide",
-
-                # Community / forums.
-                f'site:reddit.com {subject_phrase}',
-                f'site:head-fi.org {subject_phrase}',
-                f'site:avforums.com {subject_phrase}',
-                f'site:forums.tomshardware.com {subject_phrase}',
-                f'site:linustechtips.com {subject_phrase}',
-                f'site:slickdeals.net {subject_phrase}',
-
-                # Video.
-                f'site:youtube.com {subject_phrase} review',
-
-                # Retailers.
-                f'site:amazon.com {subject_phrase}',
-                f'site:bestbuy.com {subject_phrase}',
-                f'site:microcenter.com {subject_phrase}',
-                f'site:walmart.com {subject_phrase}',
-                f'site:target.com {subject_phrase}',
-                f'site:newegg.com {subject_phrase}',
-                f'site:bhphotovideo.com {subject_phrase}',
-                f'site:costco.com {subject_phrase}',
-                f'site:ebay.com {subject_phrase}',
-                f'site:crutchfield.com {subject_phrase}',
-                f'site:adorama.com {subject_phrase}',
-                f'site:samsclub.com {subject_phrase}',
-                f'site:woot.com {subject_phrase}',
-            ]
-        )
-
-        # Official manufacturer queries go first. Search-engine result
-        # quality is uneven, so do not allow broad exact-phrase discovery
-        # to consume the candidate ceiling before official sources are seen.
-        manufacturer_queries = [
-            f"{subject} official manufacturer specifications".strip(),
-            f"{subject} official product page".strip(),
-        ]
-
-        # Then use exact-phrase discovery and the remaining research queries
-        # as broader coverage/fallbacks.
-        queries = manufacturer_queries + phrase_queries + [
-            query
-            for query in queries
-            if query not in manufacturer_queries
-        ]
-
-    return list(dict.fromkeys(q for q in queries if q))
+    return list(dict.fromkeys(query for query in queries if query))
 
 def _is_search_url(url: str) -> bool:
     """Return True only for search-engine result pages."""
@@ -2651,12 +2541,7 @@ def _discover(queries):
             ("amazon.com", "https://www.amazon.com/s?k={q}"),
             ("bestbuy.com", "https://www.bestbuy.com/site/searchpage.jsp?st={q}"),
             ("walmart.com", "https://www.walmart.com/search?q={q}"),
-            ("target.com", "https://www.target.com/s?searchTerm={q}"),
-            ("microcenter.com", "https://www.microcenter.com/search/search_results.aspx?Ntt={q}"),
-            ("costco.com", "https://www.costco.com/CatalogSearch?keyword={q}"),
-            ("newegg.com", "https://www.newegg.com/p/pl?d={q}"),
             ("bhphotovideo.com", "https://www.bhphotovideo.com/c/search?q={q}&sts=ma"),
-            ("ebay.com", "https://www.ebay.com/sch/i.html?_nkw={q}"),
         )
 
         for domain, template in retailer_seeds:
@@ -2681,21 +2566,6 @@ def _discover(queries):
                 "reddit.com",
                 f"https://www.reddit.com/search/?q={encoded_item}&type=link",
                 "reddit discussions",
-            ),
-            (
-                "head-fi.org",
-                f"https://www.head-fi.org/search/?q={encoded_item}",
-                "Head-Fi discussions",
-            ),
-            (
-                "avforums.com",
-                f"https://www.avforums.com/search/?q={encoded_item}",
-                "AVForums discussions",
-            ),
-            (
-                "slickdeals.net",
-                f"https://slickdeals.net/newsearch.php?q={encoded_item}",
-                "Slickdeals discussions",
             ),
         )
 
@@ -2860,9 +2730,9 @@ def _choose_sources(discovered):
     quotas = {
         "manufacturer": 2,
         "independent_review": 4,
-        "retailer": 3,
-        "video": 2,
-        "community": 3,
+        "retailer": 2,
+        "video": 1,
+        "community": 1,
     }
 
     max_generic_web_sources = 2
@@ -3449,6 +3319,22 @@ def _wait_for_research_page(
     return best_snapshot
 
 
+def _research_evidence_has_core_coverage(evidence):
+    types = {}
+    for source in evidence:
+        source_type = str(source.get("source_type") or "")
+        types[source_type] = types.get(source_type, 0) + 1
+    return (
+        len(evidence) >= 8
+        and types.get("independent_review", 0) >= 3
+        and types.get("retailer", 0) >= 2
+        and types.get("manufacturer", 0) >= 1
+        and (
+            types.get("video", 0) >= 1
+            or types.get("community", 0) >= 1
+        )
+    )
+
 def _collect_evidence(sources):
     """
     Extract research evidence without touching the user's visible
@@ -3603,6 +3489,13 @@ def _collect_evidence(sources):
                 ),
             }
         )
+
+        if _research_evidence_has_core_coverage(evidence):
+            print(
+                "[JARVIS] JARVIS PRODUCT RESEARCH: "
+                f"core evidence coverage satisfied after {len(evidence)} source(s)."
+            )
+            break
 
     return evidence
 
@@ -4158,8 +4051,9 @@ def _enrich_product_price_comparisons(
     try:
         enriched = compare_products_prices(
             products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
             max_products=min(4, len(products)),
-            max_stores=8,
+            max_stores=5,
         )
     except Exception as exc:
         logger.warning(
