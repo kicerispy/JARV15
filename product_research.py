@@ -18,7 +18,7 @@ from model_manager import ModelManager
 from product_price_checker import compare_products_prices
 
 MAX_RESULTS_PER_QUERY = 3
-MAX_SOURCES = 16
+MAX_SOURCES = 20
 MAX_PAGE_CHARS = 8000
 MIN_CONFIDENT_SOURCES = 4
 
@@ -28,8 +28,18 @@ _PRODUCT_BRANDS = {
     "audio technica", "audio-technica", "bowers wilkins", "bowers & wilkins",
     "steelseries", "audeze", "nothing", "skullcandy", "technics",
     "beyerdynamic", "bang & olufsen", "master & dynamic", "master dynamic",
+    "dell", "lenovo", "asus", "acer", "hp", "microsoft", "surface",
+    "razer", "logitech", "corsair", "keychron", "hyperx", "epos",
+    "nintendo", "playstation", "xbox", "meta", "oculus", "garmin",
+    "fitbit", "gopro", "canon", "nikon", "fujifilm", "panasonic",
+    "lg", "tcl", "hisense", "philips", "vizio", "roku", "nest",
+    "ring", "ecobee", "dyson", "irobot", "shark", "braun", "oral b",
+    "kitchenaid", "cuisinart", "ninja", "vitamix", "keurig", "breville",
+    "dewalt", "makita", "milwaukee", "ridgid", "ryobi", "stanley",
+    "crucial", "western digital", "wd", "seagate", "kingston",
+    "synology", "tp link", "tp-link", "netgear", "eero", "ubiquiti",
+    "belkin",
 }
-
 _GENERIC_PRODUCT_WORDS = {
     "wireless", "wired", "bluetooth", "headphone", "headphones", "earbud",
     "earbuds", "earphone", "earphones", "headset", "audio", "noise",
@@ -301,33 +311,50 @@ def _parse_argument(argument: str) -> dict[str, Any]:
 
 
 def _queries(subject, budget):
-    """Generate a compact set of high-information search queries."""
+    """Generate broad research angles without using the browser."""
     subject = str(subject or "").strip()
     normalized_subject, normalized_budget = _extract_item_and_budget(subject)
     if normalized_subject:
         subject = normalized_subject
     if budget is None and normalized_budget is not None:
         budget = normalized_budget
-
     try:
         budget_text = f"${float(budget):g}"
     except Exception:
         budget_text = ""
-
-    clean = subject.replace('"', "").strip()
+    clean = subject.replace(chr(34), "").strip()
     if not clean:
         return []
-
     phrase = f'"{clean}"'
     queries = [
         f"{phrase} reviews under {budget_text}".strip(),
         f"{phrase} best budget {budget_text}".strip(),
+        f"{phrase} best overall".strip(),
         f"{phrase} comparison".strip(),
         f"{phrase} expert review".strip(),
+        f"{phrase} pros cons".strip(),
+        f"{phrase} alternatives".strip(),
+        f"{phrase} cheaper alternatives under {budget_text}".strip(),
+        f"{phrase} best value under {budget_text}".strip(),
+        f"{phrase} most comfortable".strip(),
+        f"{phrase} different types".strip(),
+        f"{phrase} premium alternative".strip(),
         f"{clean} official manufacturer specifications".strip(),
         f"{clean} official product page".strip(),
-        f"{phrase} cheaper alternatives".strip(),
     ]
+    lowered = clean.lower()
+    audio = any(term in lowered for term in (
+        "headphone", "headphones", "earbud", "earbuds",
+        "earphone", "earphones", "headset", "audio",
+    ))
+    if audio:
+        queries.extend([
+            f"{phrase} earbuds under {budget_text}".strip(),
+            f"{phrase} over ear comfortable under {budget_text}".strip(),
+            f"{phrase} on ear alternatives under {budget_text}".strip(),
+            f"{phrase} AirPods alternatives under {budget_text}".strip(),
+            f"{phrase} active noise cancelling alternatives under {budget_text}".strip(),
+        ])
     return list(dict.fromkeys(query for query in queries if query))
 
 def _is_search_url(url: str) -> bool:
@@ -1357,6 +1384,7 @@ def _research_canonical_url(href):
         for key in (
             "q",
             "url",
+            "uddg",
         ):
             values = query.get(key)
 
@@ -1523,132 +1551,41 @@ class _ResearchLinkParser(HTMLParser):
 
 
 
-def _research_http_search(engine, query):
-    """HTTP-only search discovery; browser use is reserved for final verification."""
-    engine = str(engine or "").lower().strip()
-    query = str(query or "").strip()
-    if engine not in {"google", "bing"}:
-        raise ValueError(f"Unsupported research search engine: {engine!r}")
-
-    endpoint = (
-        "https://www.google.com/search"
-        if engine == "google"
-        else "https://www.bing.com/search"
-    )
-    encoded_query = requests.utils.quote(query, safe="")
-    search_url = f"{endpoint}?q={encoded_query}&hl=en&num=10"
-
-    print(
-        "[JARVIS] JARVIS PRODUCT RESEARCH: "
-        f"HTTP-only {engine} search: {query}"
-    )
-
-    try:
-        response = requests.get(
-            search_url,
-            headers=_RESEARCH_HEADERS,
-            timeout=_RESEARCH_HTTP_TIMEOUT,
-            allow_redirects=True,
-        )
-    except Exception as exc:
-        print(
-            "[JARVIS] JARVIS PRODUCT RESEARCH: "
-            f"{engine} HTTP search failed: {exc}"
-        )
-        return {"blocked": False, "results": []}
-
-    body = response.text or ""
-    title, readable = _research_html_text(body)
-    combined = (
-        str(response.url or search_url)
-        + "\\n"
-        + title
-        + "\\n"
-        + readable
-    ).lower()
-
-    blocked_markers = (
-        "google.com/sorry",
-        "unusual traffic",
-        "captcha",
-        "recaptcha",
-        "not a robot",
-        "verify you are human",
-        "prove your humanity",
-        "access denied",
-        "checking your browser",
-        "before you continue",
-    )
-
-    if response.status_code >= 400 or any(
-        marker in combined
-        for marker in blocked_markers
-    ):
-        print(
-            "[JARVIS] JARVIS PRODUCT RESEARCH: "
-            f"{engine} HTTP search blocked/challenged "
-            f"(status={response.status_code})."
-        )
-        return {"blocked": True, "results": []}
-
+def _research_parse_search_html(body, query):
     parser = _ResearchLinkParser()
     try:
-        parser.feed(body)
+        parser.feed(body or "")
         parser.close()
     except Exception:
         pass
-
     results = []
     seen = set()
     requested_domain = _research_requested_domain(query)
     focus_terms = _research_query_focus_terms(query)
-
     for item in parser.results:
         href = str(item.get("href") or "").strip()
-        title_text = " ".join(
-            str(item.get("text") or "").split()
-        ).strip()
+        title_text = " ".join(str(item.get("text") or "").split()).strip()
         if not href:
             continue
-
         canonical = _research_canonical_url(href) or href
         domain = _research_domain(canonical)
         if not domain:
             continue
-
-        if requested_domain and not (
-            domain == requested_domain
-            or domain.endswith("." + requested_domain)
-        ):
+        if requested_domain and not (domain == requested_domain or domain.endswith("." + requested_domain)):
             continue
-
-        if (
-            domain == "google.com"
-            or domain.endswith(".google.com")
-            or domain == "bing.com"
-            or domain.endswith(".bing.com")
-        ):
+        if (domain == "google.com" or domain.endswith(".google.com") or
+                domain == "bing.com" or domain.endswith(".bing.com") or
+                domain == "duckduckgo.com" or domain.endswith(".duckduckgo.com")):
             continue
-
-        if _research_domain_matches(domain, _RESEARCH_TELECOM_DOMAINS):
-            if not _research_query_is_telecom(query):
-                continue
-
+        if _research_domain_matches(domain, _RESEARCH_TELECOM_DOMAINS) and not _research_query_is_telecom(query):
+            continue
         if len(title_text) < 4:
             title_text = domain
-
         key = canonical.lower().rstrip("/")
         if key in seen:
             continue
-
         source_type = _research_source_type(canonical, title_text)
-        relevance = _research_query_relevance(
-            title_text,
-            "",
-            canonical,
-            query,
-        )
-
+        relevance = _research_query_relevance(title_text, "", canonical, query)
         recognized_domain = (
             _research_domain_matches(domain, _RESEARCH_VIDEO_DOMAINS)
             or _research_domain_matches(domain, _RESEARCH_COMMUNITY_DOMAINS)
@@ -1656,38 +1593,131 @@ def _research_http_search(engine, query):
             or _research_domain_matches(domain, _RESEARCH_MANUFACTURER_DOMAINS)
             or _research_domain_matches(domain, _RESEARCH_REVIEW_DOMAINS)
         )
-
         if relevance < 3:
             if not recognized_domain:
                 continue
-
             haystack = " ".join((title_text, canonical)).lower()
-            if not any(
-                re.search(rf"\\b{re.escape(term)}\\b", haystack)
-                for term in focus_terms
-            ):
+            if not any(re.search(rf"\b{re.escape(term)}\b", haystack) for term in focus_terms):
                 continue
-
         seen.add(key)
-        results.append(
-            {
-                "title": title_text[:500],
-                "url": canonical,
-                "domain": domain,
-                "source_type": source_type,
-                "snippet": "",
-                "query": query,
-            }
-        )
-
+        results.append({
+            "title": title_text[:500],
+            "url": canonical,
+            "domain": domain,
+            "source_type": source_type,
+            "snippet": "",
+            "query": query,
+        })
         if len(results) >= 20:
             break
+    return results
 
-    print(
-        "[JARVIS] JARVIS PRODUCT RESEARCH: "
-        f"{engine} produced {len(results)} candidate(s) via HTTP"
-    )
-    return {"blocked": False, "results": results}
+
+def _research_duckduckgo_search(query):
+    url = "https://html.duckduckgo.com/html/?q=" + requests.utils.quote(str(query or ""), safe="")
+    try:
+        response = requests.get(url, headers=_RESEARCH_HEADERS, timeout=_RESEARCH_HTTP_TIMEOUT, allow_redirects=True)
+    except Exception as exc:
+        print("[JARVIS] JARVIS PRODUCT RESEARCH: DuckDuckGo HTTP search failed: " + str(exc))
+        return []
+    if response.status_code >= 400:
+        return []
+    body = response.text or ""
+    if any(marker in body.lower() for marker in ("captcha", "verify you are human", "not a robot", "access denied")):
+        return []
+    matches = re.finditer(r'<a[^>]+class=["\'][^"\']*result__a[^"\']*["\'][^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', body, flags=re.IGNORECASE | re.DOTALL)
+    recovered = []
+    for match in matches:
+        href = match.group(1)
+        title = re.sub(r"<[^>]+>", " ", match.group(2))
+        title = " ".join(title.split())
+        canonical = _research_canonical_url(href) or href
+        if canonical:
+            recovered.append({"title": title[:500], "url": canonical, "snippet": "", "query": query})
+        if len(recovered) >= 20:
+            break
+    return recovered
+
+
+def _research_bing_rss_search(query):
+    url = "https://www.bing.com/search?format=rss&q=" + requests.utils.quote(str(query or ""), safe="")
+    try:
+        response = requests.get(url, headers=_RESEARCH_HEADERS, timeout=_RESEARCH_HTTP_TIMEOUT, allow_redirects=True)
+    except Exception as exc:
+        print("[JARVIS] JARVIS PRODUCT RESEARCH: Bing RSS search failed: " + str(exc))
+        return []
+    if response.status_code >= 400:
+        return []
+    body = response.text or ""
+    if any(marker in body.lower() for marker in ("captcha", "verify you are human", "not a robot", "access denied")):
+        return []
+    try:
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(body)
+    except Exception:
+        return []
+    rows = []
+    for item in root.findall(".//item"):
+        title = " ".join(str(item.findtext("title") or "").split())
+        url_value = str(item.findtext("link") or "").strip()
+        description = " ".join(str(item.findtext("description") or "").split())
+        if not title or not url_value:
+            continue
+        rows.append({
+            "title": title[:500],
+            "url": _research_canonical_url(url_value) or url_value,
+            "domain": _research_domain(url_value),
+            "source_type": _research_source_type(url_value, title),
+            "snippet": description[:800],
+            "query": query,
+        })
+    return rows[:20]
+
+
+def _research_http_search(engine, query):
+    """HTTP-only search discovery with multiple non-browser providers."""
+    engine = str(engine or "").lower().strip()
+    query = str(query or "").strip()
+    if engine == "google":
+        providers = ("google", "duckduckgo", "bing_rss")
+    elif engine == "bing":
+        providers = ("bing", "bing_rss", "duckduckgo")
+    else:
+        raise ValueError(f"Unsupported research search engine: {engine!r}")
+    endpoints = {
+        "google": "https://www.google.com/search",
+        "bing": "https://www.bing.com/search",
+    }
+    for provider in providers:
+        if provider in endpoints:
+            url = endpoints[provider] + "?q=" + requests.utils.quote(query, safe="") + "&hl=en&num=10"
+            print("[JARVIS] JARVIS PRODUCT RESEARCH: HTTP-only " + provider + " search: " + query)
+            try:
+                response = requests.get(url, headers=_RESEARCH_HEADERS, timeout=_RESEARCH_HTTP_TIMEOUT, allow_redirects=True)
+            except Exception as exc:
+                print("[JARVIS] JARVIS PRODUCT RESEARCH: " + provider + " HTTP search failed: " + str(exc))
+                continue
+            body = response.text or ""
+            combined = (str(response.url or url) + "\n" + body[:12000]).lower()
+            blocked_markers = ("google.com/sorry","unusual traffic","captcha","recaptcha","not a robot","verify you are human","prove your humanity","access denied","checking your browser","before you continue")
+            if response.status_code >= 400 or any(marker in combined for marker in blocked_markers):
+                print("[JARVIS] JARVIS PRODUCT RESEARCH: " + provider + " blocked/challenged; trying next provider.")
+                continue
+            parsed = _research_parse_search_html(body, query)
+            if parsed:
+                print("[JARVIS] JARVIS PRODUCT RESEARCH: " + provider + " produced " + str(len(parsed)) + " candidate(s) via HTTP.")
+                return {"blocked": False, "results": parsed}
+        elif provider == "duckduckgo":
+            parsed = _research_duckduckgo_search(query)
+            if parsed:
+                print("[JARVIS] JARVIS PRODUCT RESEARCH: duckduckgo produced " + str(len(parsed)) + " candidate(s) via HTTP.")
+                return {"blocked": False, "results": parsed}
+        elif provider == "bing_rss":
+            parsed = _research_bing_rss_search(query)
+            if parsed:
+                print("[JARVIS] JARVIS PRODUCT RESEARCH: bing_rss produced " + str(len(parsed)) + " candidate(s) via HTTP.")
+                return {"blocked": False, "results": parsed}
+    return {"blocked": False, "results": []}
 
 def _research_enough_sources(
     sources,
@@ -2183,14 +2213,14 @@ def _choose_sources(discovered):
     """
 
     quotas = {
-        "manufacturer": 2,
-        "independent_review": 4,
-        "retailer": 2,
-        "video": 1,
-        "community": 1,
+        "manufacturer": 3,
+        "independent_review": 6,
+        "retailer": 3,
+        "video": 2,
+        "community": 2,
     }
 
-    max_generic_web_sources = 2
+    max_generic_web_sources = 4
 
     selected = []
     domains = set()
