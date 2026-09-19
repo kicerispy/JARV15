@@ -1097,7 +1097,11 @@ def browser_press_key(
         before_title = await page.title()
 
         try:
-            await locator.first.press(requested_key, timeout=5_000)
+            # Focus the DOM target, then send the key through the page keyboard.
+            # This avoids Locator.press waiting on a navigation triggered by
+            # Enter, which previously produced ~27 second command latency.
+            await locator.first.focus(timeout=5_000)
+            await page.keyboard.press(requested_key)
         except Exception as exc:
             return {
                 "success": False,
@@ -1383,6 +1387,25 @@ def browser_extract_text(
                     }""",
                 )
                 extracted = str(shadow_text or "").strip()
+            except Exception:
+                pass
+
+        # Use Playwright's accessibility snapshot when available. This
+        # captures rendered/accessible text from controls and content that
+        # may not be exposed by body.innerText on highly dynamic pages.
+        if (
+            not extracted
+            and selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            try:
+                snapshot = await locator.first.aria_snapshot(
+                    timeout=5_000
+                )
+                extracted = str(snapshot or "").strip()
+            except (AttributeError, TypeError):
+                pass
             except Exception:
                 pass
 
