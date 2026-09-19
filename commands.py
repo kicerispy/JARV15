@@ -1561,7 +1561,49 @@ def deterministic_route(user_request):
                 return None
 
             if normalized_target in _generic_first_result_targets:
-                return None
+                ordinal_map = {
+                    "first": 1,
+                    "the first": 1,
+                    "first result": 1,
+                    "the first result": 1,
+                    "first video": 1,
+                    "the first video": 1,
+                    "first link": 1,
+                    "the first link": 1,
+                    "first one": 1,
+                    "the first one": 1,
+                    "second result": 2,
+                    "the second result": 2,
+                    "second video": 2,
+                    "the second video": 2,
+                    "second link": 2,
+                    "the second link": 2,
+                    "third result": 3,
+                    "the third result": 3,
+                    "third video": 3,
+                    "the third video": 3,
+                    "third link": 3,
+                    "the third link": 3,
+                    "last result": -1,
+                    "the last result": -1,
+                    "last video": -1,
+                    "the last video": -1,
+                    "last link": -1,
+                    "the last link": -1,
+                }
+
+                index = ordinal_map.get(normalized_target)
+                if index is not None:
+                    return {
+                        "steps": [
+                            {
+                                "tool": "browser_click_result",
+                                "argument": json.dumps({
+                                    "index": index,
+                                })
+                            }
+                        ]
+                    }
 
             return {
                 "steps": [
