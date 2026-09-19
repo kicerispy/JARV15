@@ -2198,7 +2198,7 @@ def _research_requested_domain(query):
     )
     if not match:
         return ""
-    return match.group(1).strip().lstrip("www.")
+    return match.group(1).strip().removeprefix("www.")
 
 
 def _research_add_results(
@@ -2230,7 +2230,7 @@ def _research_add_results(
 
         result_domain = str(
             normalized.get("domain") or _research_domain(url) or ""
-        ).strip().lower().lstrip("www.")
+        ).strip().lower().removeprefix("www.")
         normalized["domain"] = result_domain
         normalized["requested_domain_match"] = bool(
             requested_domain
