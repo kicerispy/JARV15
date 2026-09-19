@@ -188,6 +188,24 @@ def _contains_action_word(text: str) -> bool:
     return bool(words & _ACTION_WORDS)
 
 
+def _looks_direct_browser_navigation(text: str) -> bool:
+    """Recognize direct URL navigation without involving the planner."""
+    return bool(
+        re.match(
+            r"^(?:go to|navigate to|open|visit)\\s+"
+            r"(?:https?://|www\\.)[^\\s]+$",
+            text,
+            re.IGNORECASE,
+        )
+        or re.match(
+            r"^(?:go to|navigate to|open|visit)\\s+"
+            r"[a-z0-9.-]+\\.[a-z]{2,}(?:/[^\\s]*)?$",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _looks_multi_step(text: str) -> bool:
     """Detect explicit multi-action phrasing without involving an LLM."""
     separators = (" and ", " then ", " after that ", " next ", ";")
@@ -215,6 +233,9 @@ def route_command(command: str) -> RouteDecision:
 
     if not text:
         return RouteDecision("conversation", "empty request", 0.50)
+
+    if _looks_direct_browser_navigation(text):
+        return RouteDecision("fast", "direct browser URL", 0.99)
 
     if text in _CONTEXTUAL_EXACT or re.match(
         r"^(?:click|open|play|select|choose|pick)\s+"
