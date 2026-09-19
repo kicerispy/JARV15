@@ -3154,7 +3154,47 @@ def _choose_sources(discovered):
         if len(selected) >= MAX_SOURCES:
             break
 
-    # Only a small number of arbitrary sites may fill the remaining slots.
+    # Fill every remaining slot with another recognized source before
+    # allowing arbitrary web_source fallback pages. This prevents low-quality
+    # SEO/specification aggregators from displacing useful review/community/
+    # retailer/manufacturer evidence.
+    if len(selected) < MAX_SOURCES:
+        remaining = [
+            source
+            for source in clean_sources
+            if (
+                normalize_domain(source) not in domains
+                and source.get("source_type") != "web_source"
+            )
+        ]
+
+        remaining.sort(
+            key=lambda item: (
+                item.get(
+                    "_priority_score",
+                    0,
+                ),
+                item.get(
+                    "_relevance_score",
+                    0,
+                ),
+            ),
+            reverse=True,
+        )
+
+        for source in remaining:
+            if len(selected) >= MAX_SOURCES:
+                break
+
+            domain = normalize_domain(source)
+
+            if not domain or domain in domains:
+                continue
+
+            selected.append(source)
+            domains.add(domain)
+
+    # Only use arbitrary web_source candidates as a final fallback.
     generic_candidates = [
         source
         for source in by_type.get(
@@ -3195,44 +3235,6 @@ def _choose_sources(discovered):
         selected.append(source)
         domains.add(domain)
         generic_count += 1
-
-    # Finally use any remaining recognized source candidate if a quota could
-    # not be satisfied because a domain/category was unavailable.
-    if len(selected) < MAX_SOURCES:
-        remaining = [
-            source
-            for source in clean_sources
-            if (
-                normalize_domain(source) not in domains
-                and source.get("source_type") != "web_source"
-            )
-        ]
-
-        remaining.sort(
-            key=lambda item: (
-                item.get(
-                    "_priority_score",
-                    0,
-                ),
-                item.get(
-                    "_relevance_score",
-                    0,
-                ),
-            ),
-            reverse=True,
-        )
-
-        for source in remaining:
-            if len(selected) >= MAX_SOURCES:
-                break
-
-            domain = normalize_domain(source)
-
-            if not domain or domain in domains:
-                continue
-
-            selected.append(source)
-            domains.add(domain)
 
     for source in selected:
         source.pop(
@@ -3696,6 +3698,11 @@ def _synthesize(
     else:
         budget_note = "No explicit maximum budget."
 
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=2000,
+    )
+
     prompt = f"""
 You are JARVIS's evidence-constrained product research analyst.
 
@@ -3705,7 +3712,7 @@ ITEM / CATEGORY: {item}
 
 SOURCE EVIDENCE:
 {json.dumps(
-    _compact_evidence_for_synthesis(evidence),
+    compact_evidence,
     ensure_ascii=False,
 )}
 
@@ -3716,33 +3723,29 @@ specifications, or capabilities.
 Evidence rules:
 - Manufacturer sources are strongest for specifications.
 - Retailers are strongest for observed price and customer ratings.
-- Independent reviews are strongest for testing and comparative analysis.
-- Video sources are useful for demonstrations, hands-on impressions, and
-  comparisons, but do not treat a creator's opinion as an objective measurement.
-- Community sources are anecdotal. Repeated independent reports can identify
-  patterns worth mentioning, but a single post is not proof.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
 - Prefer agreement across independent domains and source types.
-- Do not treat a tiny rating sample like a large one.
-- State conflicts or potentially stale pricing.
-- A cheaper product is not automatically better value.
-- An alternative must reasonably serve the same use case.
+- State conflicts or stale pricing.
 - Use null when evidence is missing.
 - Cite factual claims with source IDs.
 
-Separate these outcomes:
-1. best match for the requested item/use case
-2. best value
-3. cheapest credible option
-4. better-reviewed alternative
-These may be the same product or different products.
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
 
-Return ONLY JSON:
+JSON shape:
 {{
-  "summary": "2-5 sentence conclusion",
+  "summary": "",
   "confidence": "high|medium|low",
   "products": [
     {{
-      "name": "product",
+      "name": "",
       "model_number": null,
       "price": null,
       "rating": null,
@@ -3758,44 +3761,130 @@ Return ONLY JSON:
   "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
   "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
   "comparisons": [
-    {{
-      "product_a": "",
-      "product_b": "",
-      "comparison": "",
-      "source_ids": []
-    }}
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
   ],
   "tradeoffs": [],
   "warnings": []
 }}
 """
 
-    try:
-        response = ModelManager().product_research(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Output valid JSON only. "
-                        "Be strict about evidence."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ]
-        )
-    except Exception as exc:
-        logger.warning(
-            "JARVIS PRODUCT RESEARCH: synthesis failed: "
-            f"{exc}"
-        )
-        return {}
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
 
-    return _parse_json(
-        _response_text(response)
-    )
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1200,
+        )[:10]
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
 def _normalized_name(value: Any) -> str:
     return " ".join(
         str(value or "").lower().split()
