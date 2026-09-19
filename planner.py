@@ -382,7 +382,9 @@ When the user asks to find products, compare prices, inspect reviews, or locate
 cheaper/better alternatives, prefer the product_research tool as the primary
 orchestration tool. It searches multiple result sets and source types, gathers
 bounded evidence, and returns separate best-match, value, cheaper-option, and
-better-reviewed outcomes. Do not replace it with a long sequence of generic
+better-reviewed outcomes. The argument may be the full user request or JSON
+such as {"item":"wireless headphones","budget":150,"request":"find the best
+one and compare reviews"}. Do not replace it with a long sequence of generic
 browser clicks unless the request specifically asks for a particular website
 workflow.
 
