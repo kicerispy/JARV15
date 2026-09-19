@@ -95,10 +95,16 @@ class BackgroundTaskController:
 
     @staticmethod
     def _speech_key(message: str) -> str:
-        """Build a stable key for user-facing speech de-duplication."""
+        """Build a key from the exact text that will reach TTS."""
+        try:
+            from response_pipeline import clean_for_speech
+            cleaned = clean_for_speech(str(message or ""))
+        except Exception:
+            cleaned = str(message or "")
+
         text = unicodedata.normalize(
             "NFKC",
-            str(message or ""),
+            cleaned,
         )
 
         # Remove zero-width/control formatting that can make visually identical
