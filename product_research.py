@@ -291,3 +291,214 @@ def _choose_sources(
             domains.add(domain)
 
     return selected
+
+
+def _numeric_hints(text: str) -> dict[str, list[Any]]:
+    value = str(text or "")
+    prices = []
+    for raw in re.findall(
+        r"(?<![\w])\$\s*([0-9]{1,6}(?:,[0-9]{3})*(?:\.\d{1,2})?)",
+        value,
+    ):
+        try:
+            number = float(raw.replace(",", ""))
+            if 1 <= number <= 100000:
+                prices.append(number)
+        except ValueError:
+            pass
+
+    ratings = []
+    for raw in re.findall(
+        r"(?<![\d])(\d(?:\.\d)?)\s*(?:/\s*5|out\s+of\s+5|stars?)",
+        value,
+        re.IGNORECASE,
+    ):
+        try:
+            number = float(raw)
+            if 0 <= number <= 5:
+                ratings.append(number)
+        except ValueError:
+            pass
+
+    review_counts = []
+    for raw in re.findall(
+        r"([0-9][0-9,]*)\s+(?:customer\s+)?(?:ratings?|reviews?)\b",
+        value,
+        re.IGNORECASE,
+    ):
+        try:
+            number = int(raw.replace(",", ""))
+            if 1 <= number <= 100000000:
+                review_counts.append(number)
+        except ValueError:
+            pass
+
+    return {
+        "prices": prices[:8],
+        "ratings": ratings[:8],
+        "review_counts": review_counts[:8],
+    }
+
+
+def _collect_evidence(
+    sources: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    evidence = []
+    original = browser_page_info()
+    original_url = (
+        str(original.get("url", "") or "").strip()
+        if isinstance(original, dict)
+        else ""
+    )
+
+    try:
+        for index, source in enumerate(sources, 1):
+            url = str(source.get("url") or "").strip()
+            if not url:
+                continue
+
+            try:
+                navigation = browser_goto(url)
+            except Exception as exc:
+                navigation = {
+                    "title": "",
+                    "url": url,
+                }
+                logger.debug(
+                    "JARVIS PRODUCT RESEARCH: "
+                    f"navigation failed for {url}: {exc}"
+                )
+
+            try:
+                snapshot = browser_page_snapshot()
+            except Exception:
+                snapshot = {}
+
+            readable = (
+                " ".join(
+                    str(
+                        snapshot.get(
+                            "readable_text",
+                            "",
+                        )
+                        or ""
+                    ).split()
+                )[:MAX_PAGE_CHARS]
+                if isinstance(snapshot, dict)
+                else ""
+            )
+
+            title = " ".join(
+                str(
+                    (
+                        snapshot.get("title")
+                        if isinstance(snapshot, dict)
+                        else ""
+                    )
+                    or (
+                        navigation.get("title")
+                        if isinstance(navigation, dict)
+                        else ""
+                    )
+                    or source.get("title")
+                    or ""
+                ).split()
+            )[:300]
+
+            evidence.append(
+                {
+                    "id": index,
+                    "url": url,
+                    "domain": source.get("domain") or _domain(url),
+                    "source_type": (
+                        source.get("source_type")
+                        or _source_type(url)
+                    ),
+                    "title": title,
+                    "snippet": source.get("snippet", ""),
+                    "text": readable,
+                    "query": source.get("query", ""),
+                    "engine": source.get("engine", ""),
+                    "numeric_hints": _numeric_hints(
+                        " ".join(
+                            [
+                                source.get("title", ""),
+                                source.get("snippet", ""),
+                                readable,
+                            ]
+                        )
+                    ),
+                }
+            )
+    finally:
+        if original_url and not _is_search_url(original_url):
+            try:
+                browser_goto(original_url)
+            except Exception:
+                pass
+
+    return evidence
+
+
+def _response_text(response: Any) -> str:
+    message = getattr(
+        response,
+        "message",
+        None,
+    )
+
+    if isinstance(message, dict):
+        return str(
+            message.get("content")
+            or ""
+        ).strip()
+
+    if message is not None:
+        return str(
+            getattr(
+                message,
+                "content",
+                "",
+            )
+            or ""
+        ).strip()
+
+    if (
+        isinstance(response, dict)
+        and isinstance(
+            response.get("message"),
+            dict,
+        )
+    ):
+        return str(
+            response["message"].get(
+                "content"
+            )
+            or ""
+        ).strip()
+
+    return ""
+
+
+def _parse_json(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip()
+
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        pass
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+
+    if start >= 0 and end > start:
+        try:
+            value = json.loads(
+                raw[start : end + 1]
+            )
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            pass
+
+    return {}
