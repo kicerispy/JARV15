@@ -327,6 +327,7 @@ def _queries(subject, budget):
 
         # Alternatives
         f"{subject} cheaper alternatives".strip(),
+    ]
 
     # ------------------------------------------------------------
     # Broad exact-phrase discovery
