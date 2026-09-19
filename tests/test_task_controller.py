@@ -516,3 +516,22 @@ def test_internal_source_results_have_concise_speech_summaries():
         "code_search",
         "browser_controller.py:42: browser_connect",
     ) == "I searched the project code for relevant matches."
+
+def test_background_speech_deduplicates_across_queue_drains():
+    controller = BackgroundTaskController(None)
+
+    assert controller._queue_speech("Task complete.") is False
+
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 1
+    assert spoken == ["Task complete."]
+
+    # The first copy has already been delivered, so a later completion layer
+    # cannot enqueue the same user-facing message again.
+    assert controller._queue_speech("Task complete.") is False
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 0
+    assert spoken == ["Task complete."]
