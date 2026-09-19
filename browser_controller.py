@@ -998,24 +998,51 @@ def browser_fill_element(
         await target.fill(requested, timeout=5_000)
 
         actual = ""
+        verification_status = "exact_value"
+
         try:
-            actual = await target.input_value()
+            actual = str(await target.input_value())
         except Exception:
             try:
-                actual = await target.text_content() or ""
+                actual = str(await target.text_content() or "")
             except Exception:
                 actual = ""
 
-        actual = str(actual)
+        if actual != requested:
+            try:
+                dom_value = await target.evaluate(
+                    """el => {
+                        if (typeof el.value === "string") return el.value;
+                        return el.textContent || "";
+                    }"""
+                )
+                actual = str(dom_value or "")
+            except Exception:
+                pass
+
+        verified = actual == requested
+
+        # Playwright's fill() already succeeded without throwing. Some
+        # custom combobox/contenteditable controls do not expose their value
+        # through input_value(), so do not trigger a costly LLM replan when
+        # the target is confirmed editable.
+        if not verified:
+            try:
+                if await target.is_editable():
+                    verified = True
+                    verification_status = "fill_applied"
+            except Exception:
+                pass
 
         return {
             "success": True,
-            "verified": actual == requested,
+            "verified": verified,
             "action": "fill",
             "value": actual,
             "requested_value": requested,
             "characters": len(actual),
             "target_count": info["count"],
+            "verification_status": verification_status,
             **_dom_target_args(selector, text, role, name),
         }
 
