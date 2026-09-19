@@ -851,6 +851,108 @@ def _browser_dom_target(target: str):
     return {"text": target}
 
 
+def looks_like_product_research_request(text: str) -> bool:
+    """Return True for shopping/review/alternative requests that need research."""
+    normalized = normalize_command(text).lower()
+
+    if not normalized:
+        return False
+
+    research_signals = (
+        "review",
+        "reviews",
+        "rating",
+        "ratings",
+        "rated",
+        "alternative",
+        "alternatives",
+        "best value",
+        "cheaper",
+        "cheapest",
+        "worth buying",
+        "compare products",
+        "compare prices",
+        "comparison",
+        "price",
+        "buy",
+        "purchase",
+    )
+
+    product_signals = (
+        "product",
+        "products",
+        "headphone",
+        "headphones",
+        "earbuds",
+        "laptop",
+        "laptops",
+        "computer",
+        "computers",
+        "monitor",
+        "monitors",
+        "phone",
+        "phones",
+        "tablet",
+        "tablets",
+        "keyboard",
+        "keyboards",
+        "mouse",
+        "mice",
+        "camera",
+        "cameras",
+        "television",
+        "tv",
+        "router",
+        "routers",
+        "ssd",
+        "gpu",
+        "cpu",
+        "chair",
+        "shoes",
+        "vacuum",
+        "appliance",
+        "model",
+        "models",
+    )
+
+    has_research_signal = any(
+        signal in normalized
+        for signal in research_signals
+    )
+
+    has_product_signal = any(
+        signal in normalized
+        for signal in product_signals
+    )
+
+    budget_pattern = bool(
+        re.search(
+            r"(?:under|below|less than|up to)\\s*\\$?\\s*[0-9]",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+
+    best_product_question = bool(
+        re.search(
+            r"\\b(?:best|top|cheapest)\\b.*"
+            r"\\b(?:product|products|model|models)\\b",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+
+    return bool(
+        has_product_signal
+        and (
+            has_research_signal
+            or budget_pattern
+            or "best " in normalized
+            or best_product_question
+        )
+    )
+
+
 def build_browser_dom_plan(user_request):
     """Build deterministic Playwright DOM actions from natural language."""
     normalized = normalize_command(user_request)
@@ -1255,6 +1357,21 @@ def deterministic_route(user_request):
             if plan:
                 print("JARVIS: Reddit search detected.")
                 return plan
+
+    # ==================================================
+    # PRODUCT RESEARCH
+    # ==================================================
+
+    if looks_like_product_research_request(user_request):
+        print("JARVIS: Product research request detected.")
+        return {
+            "steps": [{
+                "tool": "product_research",
+                "argument": json.dumps({
+                    "request": user_request,
+                }),
+            }],
+        }
 
     # ==================================================
     # GENERIC BROWSER DOM ACTIONS
