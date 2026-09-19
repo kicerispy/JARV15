@@ -685,7 +685,9 @@ def _snapshot_spoken_preview(
     return spoken_preview
 
 
-def browser_page_snapshot() -> dict[str, Any]:
+def browser_page_snapshot(
+    max_links: int = 30,
+) -> dict[str, Any]:
     """Return a bounded, structured observation of the current browser page."""
     async def _snapshot():
         page = await _init_browser()
@@ -729,10 +731,15 @@ def browser_page_snapshot() -> dict[str, Any]:
             limit=20,
         )
 
+        try:
+            link_limit = max(1, min(int(max_links), 200))
+        except Exception:
+            link_limit = 30
+
         links = await _snapshot_links(
             page,
             "a",
-            limit=30,
+            limit=link_limit,
         )
 
         inputs = []
