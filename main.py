@@ -1766,6 +1766,60 @@ def main():
     typed_input.start()
 
     # ==================================================
+    # SPEECH DEDUPLICATION
+    # ==================================================
+
+    speech_dedup_lock = threading.Lock()
+    active_speech = set()
+    recent_speech = {}
+    duplicate_speech_window = 2.5
+
+    def _speech_key(text: str) -> str:
+        return " ".join(str(text or "").strip().split())
+
+    def _claim_speech(text: str):
+        key = _speech_key(text)
+
+        if not key:
+            return ""
+
+        now = time.monotonic()
+
+        with speech_dedup_lock:
+            expired = [
+                value
+                for value, timestamp in recent_speech.items()
+                if now - timestamp >= duplicate_speech_window
+            ]
+
+            for value in expired:
+                recent_speech.pop(value, None)
+
+            if key in active_speech:
+                return None
+
+            recent_at = recent_speech.get(key)
+            if (
+                recent_at is not None
+                and now - recent_at < duplicate_speech_window
+            ):
+                return None
+
+            active_speech.add(key)
+
+        return key
+
+    def _finish_speech(key: str, completed: bool) -> None:
+        if not key:
+            return
+
+        with speech_dedup_lock:
+            active_speech.discard(key)
+
+            if completed:
+                recent_speech[key] = time.monotonic()
+
+    # ==================================================
     # SPEAK FUNCTION
     # ==================================================
 
@@ -1784,23 +1838,46 @@ def main():
                 )
                 return False
 
-            set_barehands_state("speaking")
+            speech_key = _claim_speech(text)
+
+            if speech_key is None:
+                logger.info(
+                    "JARVIS: Suppressed duplicate speech: "
+                    f"{_speech_key(text)}"
+                )
+                return False
+
+            if not speech_key:
+                return False
+
+            completed = False
 
             try:
-                with state.io_lock:
-                    result = speak_response(
-                        text,
-                        voice_speak,
-                    )
+                set_barehands_state("speaking")
+
+                try:
+                    with state.io_lock:
+                        result = speak_response(
+                            text,
+                            voice_speak,
+                        )
+                finally:
+                    set_barehands_state("idle")
+
+                completed = True
+
+                logger.info(
+                    f"PERF: TTS call: "
+                    f"{perf_now() - speak_start:.3f}s"
+                )
+
+                return result
+
             finally:
-                set_barehands_state("idle")
-
-            logger.info(
-                f"PERF: TTS call: "
-                f"{perf_now() - speak_start:.3f}s"
-            )
-
-            return result
+                _finish_speech(
+                    speech_key,
+                    completed,
+                )
 
         except Exception as e:
 
