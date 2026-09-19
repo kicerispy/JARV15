@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import threading
 import time
-import inspect
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Optional
 
@@ -82,6 +81,9 @@ class BackgroundTaskController:
         # also prevents the same completion from being spoken again after the
         # first copy has already been drained.
         self._task_spoken_messages: set[str] = set()
+        self._last_delivered_speech = ""
+        self._last_delivered_speech_at = 0.0
+        self._speech_delivery_dedup_window = 5.0
         self._completion_event = threading.Event()
 
     def _is_running_locked(self) -> bool:
@@ -359,15 +361,39 @@ class BackgroundTaskController:
                 if self._pending_speech_count == 0:
                     self._last_pending_message = ""
 
-            try:
-                if speak_callback:
-                    speak_callback(message)
-            except Exception as exc:
+            normalized_message = " ".join(
+                str(message or "").strip().split()
+            ).casefold()
+            now = time.monotonic()
+
+            with self._lock:
+                duplicate = (
+                    bool(normalized_message)
+                    and normalized_message == self._last_delivered_speech
+                    and now - self._last_delivered_speech_at
+                    < self._speech_delivery_dedup_window
+                )
+
+                if not duplicate:
+                    self._last_delivered_speech = normalized_message
+                    self._last_delivered_speech_at = now
+
+            if duplicate:
+                logger.info(
+                    "JARVIS TASK CONTROLLER: "
+                    "Suppressed duplicate delivered speech: "
+                    f"{message}"
+                )
+            else:
+                try:
+                    if speak_callback:
+                        speak_callback(message)
+                except Exception as exc:
                 logger.debug(
                     f"JARVIS TASK CONTROLLER: Queued speech failed: {exc}"
                 )
-            finally:
-                self._speech_queue.task_done()
+                finally:
+                    self._speech_queue.task_done()
 
             drained += 1
 
