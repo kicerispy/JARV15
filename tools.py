@@ -2923,56 +2923,46 @@ def run_browser_tool(
             browser_extract_text,
         )
 
+        # Preserve compatibility with older monkeypatches/alternate browser
+        # controller implementations: omit the optional accessible-name
+        # argument when the caller did not provide one.
+        dom_kwargs = {
+            "selector": payload.get("selector", ""),
+            "text": payload.get("text", ""),
+            "role": payload.get("role", ""),
+        }
+        if payload.get("name"):
+            dom_kwargs["name"] = payload.get("name")
+
         if tool_name == "browser_find_element":
-            return normalize(browser_find_element(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                name=payload.get("name", ""),
-            ))
+            return normalize(browser_find_element(**dom_kwargs))
 
         if tool_name == "browser_click_element":
-            return normalize(browser_click_element(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                name=payload.get("name", ""),
-            ))
+            return normalize(browser_click_element(**dom_kwargs))
 
         if tool_name == "browser_fill_element":
-            return normalize(browser_fill_element(
-                value=payload.get("value", ""),
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                name=payload.get("name", ""),
-            ))
+            fill_kwargs = {
+                "value": payload.get("value", ""),
+                **dom_kwargs,
+            }
+            return normalize(browser_fill_element(**fill_kwargs))
 
         if tool_name == "browser_press_key":
-            return normalize(browser_press_key(
-                key=payload.get("key", ""),
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                name=payload.get("name", ""),
-            ))
+            press_kwargs = {
+                "key": payload.get("key", ""),
+                **dom_kwargs,
+            }
+            return normalize(browser_press_key(**press_kwargs))
 
         if tool_name == "browser_wait_for_element":
-            return normalize(browser_wait_for_element(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                name=payload.get("name", ""),
-                timeout=int(payload.get("timeout", 10000)),
-            ))
+            wait_kwargs = {
+                **dom_kwargs,
+                "timeout": int(payload.get("timeout", 10000)),
+            }
+            return normalize(browser_wait_for_element(**wait_kwargs))
 
         if tool_name == "browser_extract_text":
-            return normalize(browser_extract_text(
-                selector=payload.get("selector", ""),
-                text=payload.get("text", ""),
-                role=payload.get("role", ""),
-                name=payload.get("name", ""),
-            ))
+            return normalize(browser_extract_text(**dom_kwargs))
 
     if tool_name == "browser_page_info":
         return normalize(browser_page_info())
