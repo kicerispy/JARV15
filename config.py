@@ -362,6 +362,18 @@ CHAT_NUM_PREDICT = int(
     )
 )
 
+PLANNER_NUM_PREDICT = int(
+    os.environ.get(
+        "JARVIS_PLANNER_NUM_PREDICT",
+        "160",
+    )
+)
+
+PLANNER_MODEL_KEEP_ALIVE = os.environ.get(
+    "JARVIS_PLANNER_MODEL_KEEP_ALIVE",
+    "10m",
+).strip() or "10m"
+
 # Preload the coding model in a background thread after startup so the first
 # autonomous repair does not pay the full Ollama model-load penalty.
 PRELOAD_CODING_MODEL = os.environ.get(
