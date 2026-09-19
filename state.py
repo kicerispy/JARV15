@@ -102,6 +102,8 @@ class TaskState:
     _progress_callback: Any = field(default=None, repr=False, compare=False)
     _last_progress_key: Optional[str] = field(default=None, repr=False, compare=False)
     completion_spoken: bool = False
+    background_speech_owned: bool = False
+    final_speech: Optional[str] = None
 
     def prepare(self, description: str, total_steps: int) -> None:
         """Reserve the task state for a queued background task."""
@@ -119,6 +121,7 @@ class TaskState:
             self.recovery_count = 0
             self._last_progress_key = None
             self.completion_spoken = False
+            self.final_speech = None
 
     def start(self, description: str, total_steps: int) -> bool:
         """Start a task unless cancellation was requested while it was queued."""
@@ -140,6 +143,7 @@ class TaskState:
             self.recovery_count = 0
             self._last_progress_key = None
             self.completion_spoken = False
+            self.final_speech = None
             return True
 
     def update_step(self, step_number: int, tool_name: str) -> None:
@@ -210,6 +214,39 @@ class TaskState:
         """Record that a final user-facing completion message was delivered."""
         with self._lock:
             self.completion_spoken = True
+
+    def set_background_speech_owned(self, enabled: bool) -> None:
+        """Select whether the background controller owns final-result speech."""
+        with self._lock:
+            self.background_speech_owned = bool(enabled)
+
+    def is_background_speech_owned(self) -> bool:
+        """Return whether final-result speech is owned by the controller."""
+        with self._lock:
+            return self.background_speech_owned
+
+    def set_final_speech(self, message: Optional[str]) -> None:
+        """Store the final user-facing message for background delivery."""
+        text = str(message or "").strip()
+        with self._lock:
+            self.final_speech = text or None
+
+    def has_pending_final_speech(self) -> bool:
+        """Return whether a final user-facing message is awaiting delivery."""
+        with self._lock:
+            return bool(self.final_speech)
+
+    def take_final_speech(self) -> Optional[str]:
+        """Take and clear the final user-facing message atomically."""
+        with self._lock:
+            message = self.final_speech
+            self.final_speech = None
+            return message
+
+    def clear_final_speech(self) -> None:
+        """Clear any staged final user-facing message."""
+        with self._lock:
+            self.final_speech = None
 
     def was_completion_spoken(self) -> bool:
         """Return whether a final user-facing completion message was delivered."""
