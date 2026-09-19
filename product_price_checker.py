@@ -495,6 +495,83 @@ class BrowserPriceChecker:
             model_number,
         )
 
+        # A search-result page can contain several products and unrelated
+        # prices. When we can resolve an exact product link, inspect that
+        # public product page too so the price is tied to the product itself.
+        if direct_url and direct_url != url and score >= 0.80:
+            try:
+                self.browser_goto(direct_url)
+
+                if self.browser_wait_for_element is not None:
+                    try:
+                        self.browser_wait_for_element(
+                            selector="body",
+                            timeout=5000,
+                        )
+                    except Exception:
+                        pass
+
+                direct_raw = self.browser_extract_text(selector="body")
+                direct_body = _coerce_text(direct_raw)
+
+                if not is_blocked(direct_body):
+                    direct_score = match_score(
+                        product_name,
+                        direct_body,
+                        model_number,
+                    )
+                    direct_price = best_nearby_price(
+                        direct_body,
+                        product_name,
+                        model_number=model_number,
+                    )
+
+                    if direct_score >= score:
+                        score = direct_score
+
+                    if direct_score >= 0.80 and direct_price is not None:
+                        price = direct_price
+
+            except TypeError:
+                try:
+                    self.browser_goto(direct_url)
+
+                    if self.browser_wait_for_element is not None:
+                        try:
+                            self.browser_wait_for_element(
+                                selector="body",
+                                timeout=5000,
+                            )
+                        except Exception:
+                            pass
+
+                    direct_raw = self.browser_extract_text("body")
+                    direct_body = _coerce_text(direct_raw)
+
+                    if not is_blocked(direct_body):
+                        direct_score = match_score(
+                            product_name,
+                            direct_body,
+                            model_number,
+                        )
+                        direct_price = best_nearby_price(
+                            direct_body,
+                            product_name,
+                            model_number=model_number,
+                        )
+
+                        if direct_score >= score:
+                            score = direct_score
+
+                        if direct_score >= 0.80 and direct_price is not None:
+                            price = direct_price
+                except Exception:
+                    pass
+            except Exception:
+                # Search-page evidence remains usable when the direct product
+                # page is protected or otherwise unavailable.
+                pass
+
         notes = ""
         if score < 0.55:
             notes = "Search page returned text, but an exact product match was not verified."
@@ -594,8 +671,8 @@ def _get_product_value(product: Any, *keys: str) -> str:
 def compare_products_prices(
     products: Iterable[Dict[str, Any]],
     stores: Optional[Iterable[str]] = None,
-    max_products: int = 3,
-    max_stores: int = 6,
+    max_products: int = 4,
+    max_stores: int = 8,
 ) -> List[Dict[str, Any]]:
     """Add cross-store price evidence to a small set of discovered products.
 
