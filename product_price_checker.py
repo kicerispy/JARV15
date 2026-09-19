@@ -124,6 +124,78 @@ PRICE_RE = re.compile(
     r"(?<![\w])(?:US\s*)?\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{2})?)(?![\w])"
 )
 
+_PRICE_NEGATIVE_CONTEXT = (
+    "save",
+    "savings",
+    "you save",
+    "was",
+    "list price",
+    "list:",
+    "coupon",
+    "discount",
+    "off",
+    "msrp",
+    "rrp",
+    "original price",
+)
+
+_PRICE_POSITIVE_CONTEXT = (
+    "current price",
+    "sale price",
+    "price:",
+    "price",
+    "now",
+    "buy",
+    "add to cart",
+    "our price",
+)
+
+
+def _price_candidates(text: str):
+    for match in PRICE_RE.finditer(str(text or "")):
+        raw = match.group(1).replace(",", "")
+        try:
+            value = round(float(raw), 2)
+        except ValueError:
+            continue
+
+        left = str(text[max(0, match.start() - 100):match.start()]).lower()
+        right = str(text[match.end():match.end() + 100]).lower()
+        context = f"{left} {right}"
+
+        score = 0.0
+        for marker in _PRICE_POSITIVE_CONTEXT:
+            if marker in context:
+                score += 2.0
+
+        for marker in _PRICE_NEGATIVE_CONTEXT:
+            if marker in context:
+                score -= 5.0
+
+        # Very small dollar values on a premium product are commonly coupon,
+        # savings, shipping, or other secondary numbers. Treat them as weak
+        # candidates unless the context explicitly identifies them as a price.
+        if value < 10.0 and "price" not in context and "now" not in context:
+            score -= 4.0
+
+        yield value, match.start(), match.end(), score
+
+
+def _select_best_price(text: str) -> Optional[float]:
+    candidates = list(_price_candidates(text))
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            item[3],
+            -item[1],
+        ),
+        reverse=True,
+    )
+    return candidates[0][0]
+
+
 MODEL_RE = re.compile(
     r"\b(?:[A-Z]{1,5}[- ]?[A-Z0-9]{2,}(?:[- ][A-Z0-9]{1,}){0,3})\b"
 )
@@ -210,14 +282,14 @@ def best_nearby_price(
             for raw_variant in (model_number, model_number.replace("-", " ")):
                 idx = lower.find(raw_variant.lower())
                 if idx >= 0:
-                    values = extract_prices(text[max(0, idx - window): idx + window])
-                    if values:
-                        return min(values)
+                    nearby = text[max(0, idx - window): idx + window]
+                    selected = _select_best_price(nearby)
+                    if selected is not None:
+                        return selected
 
     tokens = product_tokens(query)
     if not tokens:
-        values = extract_prices(text)
-        return min(values) if values else None
+        return _select_best_price(text)
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     best: Optional[tuple[float, float]] = None
@@ -229,19 +301,72 @@ def best_nearby_price(
             continue
 
         neighborhood = " ".join(lines[max(0, i - 1): min(len(lines), i + 2)])
-        values = extract_prices(neighborhood)
-        for value in values:
-            # Prefer prices on the same line, then nearby lines, and prefer
-            # higher product-token overlap. Do not blindly select the lowest
-            # dollar amount because pages contain coupons, savings, and strikethroughs.
+        for value, _start, _end, price_context_score in _price_candidates(
+            neighborhood
+        ):
+            # Combine product-token overlap with explicit price-context
+            # signals. Savings/list/MSRP/coupon values are strongly penalized.
             same_line = bool(extract_prices(line))
             distance_bonus = 1.0 if same_line else 0.25
-            score = overlap + distance_bonus
+            score = overlap + distance_bonus + (price_context_score * 0.15)
             candidate = (score, value)
             if best is None or candidate[0] > best[0]:
                 best = candidate
 
     return best[1] if best else None
+
+
+def _canonical_retailer_url(
+    store_key: str,
+    url: str,
+) -> str:
+    """Resolve common retailer tracking redirects to a clean product URL."""
+    value = str(url or "").strip()
+    if not value:
+        return ""
+
+    try:
+        parsed = urlparse(value)
+        query = parse_qs(parsed.query)
+
+        for key in (
+            "r",
+            "rd",
+            "url",
+            "u",
+            "redirect",
+            "redirect_url",
+            "dest",
+            "destination",
+        ):
+            for target in query.get(key) or []:
+                candidate = unquote(str(target or "")).strip()
+                if candidate.startswith(("http://", "https://")):
+                    value = candidate
+                    parsed = urlparse(value)
+                    break
+            else:
+                continue
+            break
+
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        path = parsed.path or ""
+
+        if store_key == "amazon" and host == "amazon.com":
+            asin_match = re.search(
+                r"/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})",
+                path,
+                re.IGNORECASE,
+            )
+            if asin_match:
+                return (
+                    "https://www.amazon.com/dp/"
+                    + asin_match.group(1).upper()
+                )
+
+        return value
+    except Exception:
+        return value
 
 
 def _host_is_expected(host: str, expected_domain: str) -> bool:
@@ -460,6 +585,10 @@ class BrowserPriceChecker:
 
             try:
                 absolute = urljoin(search_url, href)
+                absolute = _canonical_retailer_url(
+                    store_key,
+                    absolute,
+                )
                 host = (urlparse(absolute).hostname or "").lower()
                 if host.startswith("www."):
                     host = host[4:]
@@ -657,14 +786,34 @@ class BrowserPriceChecker:
                         except Exception:
                             pass
 
+                    direct_snapshot = {}
+                    if self.browser_page_snapshot is not None:
+                        try:
+                            direct_snapshot = self.browser_page_snapshot(
+                                max_links=20
+                            ) or {}
+                        except TypeError:
+                            direct_snapshot = self.browser_page_snapshot() or {}
+
+                    final_url = str(
+                        direct_snapshot.get("url") or direct_url
+                    ).strip()
+
                     direct_raw = self.browser_extract_text("body")
                     direct_body = _coerce_text(direct_raw)
 
-                    if not is_blocked(direct_body):
+                    if (
+                        not is_blocked(direct_body)
+                        and _is_direct_product_url(store_key, final_url)
+                    ):
                         direct_score = match_score(
                             product_name,
                             direct_body,
                             model_number,
+                        )
+                        identity_score = _direct_identity_score(
+                            product_name,
+                            direct_snapshot,
                         )
                         direct_price = best_nearby_price(
                             direct_body,
@@ -675,11 +824,18 @@ class BrowserPriceChecker:
                         if direct_score >= score:
                             score = direct_score
 
-                        if direct_score >= 0.80:
+                        if (
+                            identity_score >= 0.80
+                            and direct_score >= 0.80
+                        ):
                             direct_product_page_seen = True
 
-                        if direct_score >= 0.80 and direct_price is not None:
+                        if (
+                            direct_product_page_seen
+                            and direct_price is not None
+                        ):
                             price = direct_price
+                            direct_url = final_url
                 except Exception:
                     pass
             except Exception:
