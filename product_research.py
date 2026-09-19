@@ -370,10 +370,82 @@ def _discover(queries: list[str]) -> list[dict[str, Any]]:
                     f"discovery failed for {engine}/{query}: {exc}"
                 )
 
-    if not discovered:
+    if discovered:
+        return discovered
+
+    # Browser search can occasionally expose a loaded page without exposing
+    # organic result anchors. Fall back to the existing HTTP search tool rather
+    # than forcing the agent to repeat the exact same research plan.
+    try:
+        from web_tools import web_search
+
+        fallback_seen: set[str] = set()
+        for query in queries:
+            try:
+                fallback_results = web_search(
+                    query,
+                    max_results=MAX_RESULTS_PER_QUERY,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "JARVIS PRODUCT RESEARCH: "
+                    f"HTTP fallback failed for {query!r}: {exc}"
+                )
+                continue
+
+            for result in fallback_results:
+                if not isinstance(result, dict):
+                    continue
+
+                url = str(
+                    result.get("url") or ""
+                ).strip().split("#", 1)[0]
+
+                if (
+                    not url
+                    or _is_search_url(url)
+                    or url in fallback_seen
+                ):
+                    continue
+
+                fallback_seen.add(url)
+                discovered.append(
+                    {
+                        "url": url,
+                        "domain": _domain(url),
+                        "source_type": _source_type(url),
+                        "title": " ".join(
+                            str(result.get("title") or "").split()
+                        )[:300],
+                        "snippet": " ".join(
+                            str(result.get("snippet") or "").split()
+                        )[:800],
+                        "engine": "http_fallback",
+                        "query": query,
+                    }
+                )
+
+                if len(discovered) >= MAX_SOURCES * 2:
+                    break
+
+            if len(discovered) >= MAX_SOURCES * 2:
+                break
+    except Exception as exc:
+        logger.debug(
+            "JARVIS PRODUCT RESEARCH: "
+            f"HTTP fallback unavailable: {exc}"
+        )
+
+    if discovered:
+        logger.info(
+            "JARVIS PRODUCT RESEARCH: "
+            f"HTTP fallback recovered {len(discovered)} source candidate(s)."
+        )
+    else:
         logger.warning(
             "JARVIS PRODUCT RESEARCH: "
-            "all search engines returned zero usable source candidates."
+            "all search engines and HTTP fallback returned zero usable "
+            "source candidates."
         )
 
     return discovered
@@ -865,7 +937,7 @@ def research_product(
         return {
             "success": False,
             "verified": False,
-            "retryable": True,
+            "retryable": False,
             "message": (
                 "I could not collect usable "
                 "online sources for that item."
