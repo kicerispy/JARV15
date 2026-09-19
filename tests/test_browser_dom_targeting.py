@@ -204,6 +204,39 @@ def test_read_current_browser_page_routes_to_browser_snapshot():
     }]
 
 
+def test_snapshot_canonical_url_unwraps_search_redirects():
+    from browser_controller import _snapshot_canonical_url
+
+    assert _snapshot_canonical_url(
+        "/goto?url=https%3A%2F%2Fexample.com%2Fdocs"
+    ) == "https://example.com/docs"
+
+    assert _snapshot_canonical_url(
+        "https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fnews"
+    ) == "https://example.com/news"
+
+
+def test_snapshot_speech_preview_is_bounded():
+    from tool_executor import format_browser_result
+
+    result = {
+        "title": "Example Search",
+        "spoken_preview": (
+            "I found 4 search results. First: Alpha. Second: Beta. Third: Gamma."
+        ),
+        "results": [
+            {"index": "1", "title": "Alpha", "snippet": "A useful snippet.", "url": "https://example.com/a"},
+            {"index": "2", "title": "Beta", "snippet": "Another useful snippet.", "url": "https://example.com/b"},
+            {"index": "3", "title": "Gamma", "snippet": "More useful context.", "url": "https://example.com/c"},
+            {"index": "4", "title": "Delta", "snippet": "Additional context.", "url": "https://example.com/d"},
+        ],
+    }
+
+    spoken = format_browser_result("browser_page_snapshot", result)
+    assert spoken == result["spoken_preview"]
+    assert len(spoken) < 200
+
+
 def test_browser_snapshot_is_in_browser_dispatcher(monkeypatch):
     import browser_controller
     import tools
