@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import atexit
@@ -1263,31 +1263,24 @@ def browser_extract_text(
 
         extracted = ""
 
-        # For whole-page reads, use the same direct DOM text path that the
-        # readiness probe and diagnostics use. This keeps a page that is
-        # demonstrably exposing readable text from being reduced to an empty
-        # result by locator-specific extraction behavior.
+        # For whole-page reads, use the same locator.evaluate path that
+        # diagnostics use below. The live DOM has proven this call can see
+        # thousands of characters even when locator.inner_text() is empty.
         if (
             selector_value.lower() == "body"
             and not text_value
             and not role_value
         ):
             try:
-                direct_page_text = await page.evaluate(
-                    """() => {
-                        const body = document.body;
-                        if (!body) return "";
-                        return (
-                            body.innerText ||
-                            body.textContent ||
-                            document.documentElement?.innerText ||
-                            document.documentElement?.textContent ||
-                            ""
-                        ).trim();
-                    }"""
+                direct_body_text = await page.locator("body").evaluate(
+                    """el => (
+                        el.innerText ||
+                        el.textContent ||
+                        ""
+                    ).trim()"""
                 )
-                if isinstance(direct_page_text, str) and direct_page_text:
-                    extracted = direct_page_text
+                if isinstance(direct_body_text, str) and direct_body_text:
+                    extracted = direct_body_text
             except Exception:
                 pass
 
@@ -1531,6 +1524,38 @@ def browser_extract_text(
         except Exception:
             diagnostics["html_length"] = -1
 
+        try:
+            diagnostics["body_text_preview"] = str(
+                await page.locator("body").evaluate(
+                    """el => (
+                        el.innerText ||
+                        el.textContent ||
+                        ""
+                    ).trim().slice(0, 300)"""
+                )
+            )
+        except Exception:
+            diagnostics["body_text_preview"] = ""
+
+        # Final verified extraction checkpoint. The diagnostics above
+        # already prove that this exact locator/evaluate path can see the
+        # page text, so use it one last time immediately before deciding
+        # that the page has no readable content.
+        if not extracted:
+            try:
+                final_body_text = await page.locator("body").evaluate(
+                    """el => (
+                        el.innerText ||
+                        el.textContent ||
+                        ""
+                    ).trim()"""
+                )
+
+                if final_body_text:
+                    extracted = str(final_body_text).strip()
+            except Exception:
+                pass
+
         metadata_only = False
         if not extracted:
             try:
@@ -1558,12 +1583,10 @@ def browser_extract_text(
             "target_count": info["count"],
             "metadata_only": metadata_only,
             "diagnostics": diagnostics,
-            **_dom_target_args(
-                selector_value,
-                text_value,
-                role_value,
-                name_value,
-            ),
+            "selector": selector_value,
+            "target_text": text_value,
+            "role": role_value,
+            "name": name_value,
         }
 
     try:
