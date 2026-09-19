@@ -237,15 +237,15 @@ Browser workflow:
 1. Navigate to the intended page.
 2. Inspect the page with browser_page_info or browser_find_element.
 3. For semantic controls, prefer ARIA role plus accessible name, for example
-   {"role":"button","name":"Sign in"} or {"role":"textbox","name":"Email"}.
+   {{"role":"button","name":"Sign in"}} or {{"role":"textbox","name":"Email"}}.
 4. Use browser_fill_element for text inputs.
 5. Use browser_press_key for Enter or other keyboard actions.
 6. Use browser_click_element for links, buttons, tabs, menus, and controls.
 7. Use browser_wait_for_element when content may load asynchronously.
 8. Use browser_extract_text or browser_page_info to verify the result.
-8. Use browser_click_result for second, third, or last search results.
-9. Use browser_back for requests to go back to the previous page.
-10. When an action fails, use the browser state and observations to
+9. Use browser_click_result for second, third, or last search results.
+10. Use browser_back for requests to go back to the previous page.
+11. When an action fails, use the browser state and observations to
    choose a different strategy during replanning.
 
 DOM TOOL ARGUMENT FORMAT:
