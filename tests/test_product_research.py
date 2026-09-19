@@ -106,6 +106,40 @@ def test_shopping_question_routes_to_agent():
     assert "product research" in decision.reason
 
 
+def test_find_best_product_routes_to_product_research_before_dom():
+    from commands import get_fast_command
+
+    plan = get_fast_command(
+        "Find the best wireless headphones under $150, compare reviews and cheaper alternatives, and tell me which option gives me the best value."
+    )
+
+    assert plan == {
+        "steps": [{
+            "tool": "product_research",
+            "argument": (
+                '{"request": "Find the best wireless headphones under $150, '
+                'compare reviews and cheaper alternatives, and tell me which '
+                'option gives me the best value."}'
+            ),
+        }],
+    }
+
+
+def test_find_page_text_still_routes_to_browser_find_text():
+    from commands import get_fast_command
+
+    plan = get_fast_command(
+        "Find Downloads on this page"
+    )
+
+    assert plan == {
+        "steps": [{
+            "tool": "browser_find_text",
+            "argument": '{"query": "Downloads"}',
+        }],
+    }
+
+
 def test_product_research_dispatches_through_public_tool(monkeypatch):
     import tools
 
