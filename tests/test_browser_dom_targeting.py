@@ -272,6 +272,33 @@ def test_direct_url_navigation_routes_without_planner():
         }]
 
 
+def test_planner_scopes_browser_requests_to_browser_tools():
+    from planner import _planner_tool_scope
+
+    scope = _planner_tool_scope(
+        "Find the pricing on this webpage and click Sign in"
+    )
+
+    assert scope is not None
+    assert "browser_find_text" in scope
+    assert "browser_click_element" in scope
+    assert "write_file" not in scope
+    assert "code_diagnose" not in scope
+
+
+def test_planner_scopes_coding_requests_to_coding_tools():
+    from planner import _planner_tool_scope
+
+    scope = _planner_tool_scope(
+        "Debug the Python exception in browser_controller.py"
+    )
+
+    assert scope is not None
+    assert "read_file" in scope
+    assert "code_test" in scope
+    assert "browser_click_element" not in scope
+
+
 def test_direct_url_planner_fallback_is_deterministic():
     from planner import create_plan
 
