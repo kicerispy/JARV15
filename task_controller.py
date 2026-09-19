@@ -142,6 +142,11 @@ class BackgroundTaskController:
             self._task_spoken_messages.clear()
             self._last_delivered_speech = ""
             self._last_delivered_speech_at = 0.0
+            try:
+                task_state.set_background_speech_owned(True)
+                task_state.clear_final_speech()
+            except Exception:
+                pass
             self._completion_event.clear()
 
             thread = threading.Thread(
@@ -590,12 +595,27 @@ class BackgroundTaskController:
     def _finish_worker(self, task: Any) -> None:
         with self._lock:
             self._last_task = task
+            task_state = self._task_state
+
+            # Background completion speech is staged by the executor and
+            # delivered here exactly once, before the completion event wakes
+            # the main loop.
+            final_speech = None
+            if getattr(task, "status", "") == "completed" and task_state is not None:
+                try:
+                    final_speech = task_state.take_final_speech()
+                except Exception:
+                    final_speech = None
 
             if self._task is task:
                 self._task = None
                 self._task_state = None
 
             self._thread = None
+
+            if final_speech:
+                self._queue_speech(final_speech)
+
             self._completion_event.set()
 
         try:
