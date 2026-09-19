@@ -3819,6 +3819,70 @@ def _compact_evidence_for_synthesis(
     return compact
 
 
+def _extract_candidate_signals(evidence: list[dict[str, Any]], budget: float | None = None) -> list[dict[str, Any]]:
+    """Extract concrete product candidates directly from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    stop_words = {"read", "more", "amazon", "walmart", "best", "buy", "price", "product", "products", "page", "review", "reviews", "headphones", "headphone", "wireless", "earbuds", "earbud", "popular", "latest", "new", "all", "shop", "now", "compare"}
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = " ".join(str(source.get("text") or "").split())
+        for brand in brands:
+            for match in re.finditer(rf"\b({re.escape(brand)})\b", page_text, re.IGNORECASE):
+                words = re.findall(r"[A-Za-z0-9][A-Za-z0-9&./+\-]*", page_text[match.end():match.end() + 120])
+                parts = [match.group(1)]
+                for word in words:
+                    normalized_word = re.sub(r"[^a-z0-9]+", "", word.lower())
+                    if normalized_word in stop_words or normalized_word in {re.sub(r"[^a-z0-9]+", "", b.lower()) for b in brands}:
+                        break
+                    parts.append(word)
+                    if len(parts) >= 5:
+                        break
+                candidate = " ".join(parts).strip(" ,.;:()[]")
+                if not _is_specific_product_name(candidate):
+                    continue
+                neighborhood = page_text[max(0, match.start() - 80):match.end() + 220]
+                prices = []
+                for raw in re.findall(r"(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)", neighborhood)[:4]:
+                    try:
+                        value = float(raw.replace(",", ""))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = " ".join(candidate.lower().split())
+                record = signals.setdefault(key, {"name": candidate, "source_ids": [], "observed_prices": []})
+                source_id = source.get("id")
+                if source_id not in record["source_ids"]:
+                    record["source_ids"].append(source_id)
+                for price in prices:
+                    if price not in record["observed_prices"]:
+                        record["observed_prices"].append(price)
+    for record in signals.values():
+        prices = record.get("observed_prices") or []
+        record["budget_signal"] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(signals.values(), key=lambda item: (item.get("budget_signal", False), len(item.get("source_ids") or []), len(item.get("observed_prices") or [])), reverse=True)[:12]
+
+def _inject_candidate_products(analysis: dict[str, Any], evidence: list[dict[str, Any]], budget: float | None) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products") if isinstance(analysis.get("products"), list) else []
+    existing = {" ".join(str(p.get("name") or "").lower().split()) for p in products if isinstance(p, dict)}
+    for signal in _extract_candidate_signals(evidence, budget):
+        if len(products) >= 6:
+            break
+        if not signal.get("budget_signal"):
+            continue
+        name = str(signal.get("name") or "").strip()
+        key = " ".join(name.lower().split())
+        if not name or key in existing:
+            continue
+        products.append({"name": name, "model_number": None, "price": None, "rating": None, "review_count": None, "source_ids": signal.get("source_ids") or [], "pros": [], "cons": [], "fit": "budget_alternative", "candidate_signal": True, "observed_prices": signal.get("observed_prices") or []})
+        existing.add(key)
+    analysis["products"] = products
+    return analysis
+
 def _synthesize(
     request: str,
     item: str,
@@ -3838,6 +3902,7 @@ def _synthesize(
         evidence,
         per_source_chars=1500,
     )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
 
     prompt = f"""
 You are JARVIS's evidence-constrained product research analyst.
@@ -3845,6 +3910,12 @@ You are JARVIS's evidence-constrained product research analyst.
 USER REQUEST: {request}
 ITEM / CATEGORY: {item}
 {budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
 
 SOURCE EVIDENCE:
 {json.dumps(
