@@ -444,7 +444,7 @@ def test_browser_find_text_speech_is_concise():
             "found": True,
             "query": "Downloads",
             "matches": [{
-                "excerpt": "Downloads Documentation Success Stories Events # Simple arithmetic ";
+                "excerpt": "Downloads Documentation Success Stories Events # Simple arithmetic",
             }],
         },
     )
