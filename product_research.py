@@ -4225,13 +4225,10 @@ def _enrich_product_price_comparisons(
                 key=lambda offer: float(offer.get("price"))
             )
 
-            product["price_comparison"]["budget_verified_offers"] = budget_offers
-            product["price_comparison"]["budget_eligible"] = bool(budget_offers)
-            product["price_comparison"]["budget_cheapest"] = (
-                budget_offers[0]
-                if budget_offers
-                else None
-            )
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+            product["price_comparison"] = comparison
 
         def product_is_budget_eligible(name: str) -> bool:
             record = _find_analysis_product(analysis, name)
@@ -4248,8 +4245,8 @@ def _enrich_product_price_comparisons(
                 and float(listed_price) <= budget_value
             )
 
-        # A maximum budget is a hard user constraint. Never expose an
-        # over-budget named recommendation as the final best/value choice.
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
         for field in (
             "best_match",
             "best_value",
@@ -4264,70 +4261,43 @@ def _enrich_product_price_comparisons(
             if not name or product_is_budget_eligible(name):
                 continue
 
-            fallback = None
-            fit_order = (
-                "best_match",
-                "budget_alternative",
-                "strong_alternative",
-                "mixed",
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the
+                        "budget-constrained best match because its listed or
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget,
+                "and no verified under-budget replacement was established."
             )
-
-            for fit in fit_order:
-                for candidate in enriched:
-                    if not isinstance(candidate, dict):
-                        continue
-
-                    candidate_name = str(
-                        candidate.get("name")
-                        or candidate.get("product")
-                        or ""
-                    ).strip()
-
-                    if not candidate_name:
-                        continue
-
-                    if str(candidate.get("fit") or "") != fit:
-                        continue
-
-                    if product_is_budget_eligible(candidate_name):
-                        fallback = candidate_name
-                        break
-
-                if fallback:
-                    break
-
-            if fallback:
-                source_product = _find_analysis_product(
-                    analysis,
-                    fallback,
-                ) or {}
-
-                choice["name"] = fallback
-                choice["reason"] = (
-                    "Selected from the synthesized candidates because its "
-                    "listed price or verified retailer price meets the "
-                    + "$"
-                    + format(budget_value, ",.2f")
-                    + " maximum budget."
-                )
-                choice["source_ids"] = source_product.get("source_ids") or []
-            else:
-                choice["name"] = None
-                choice["reason"] = (
-                    "No synthesized candidate had a listed or verified "
-                    "price at or below the "
-                    + "$"
-                    + format(budget_value, ",.2f")
-                    + " budget."
-                )
-                choice["source_ids"] = []
+            choice["source_ids"] = []
 
         analysis["budget_constraint"] = {
             "maximum": budget_value,
             "enforced": True,
         }
 
-    analysis["price_check_status"] = "completed_best_effort"
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        analysis["price_check_status"] = "completed_best_effort"
     return analysis
 
 
@@ -4384,7 +4354,11 @@ def _summary(
         )
         if product_record:
             comparison = product_record.get("price_comparison") or {}
-            cheapest = comparison.get("cheapest")
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
             if isinstance(cheapest, dict):
                 store = str(cheapest.get("label") or "").strip()
                 price = cheapest.get("price")
@@ -4601,13 +4575,28 @@ def research_product(
         "purchase_links": [
             {
                 "product": str(product.get("name") or product.get("product") or "").strip(),
-                "seller": (((product.get("price_comparison") or {}).get("cheapest") or {}).get("label")),
-                "price": (((product.get("price_comparison") or {}).get("cheapest") or {}).get("price")),
-                "url": (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url")),
+                "seller": (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("label"))
+                    if budget is not None
+                    else (((product.get("price_comparison") or {}).get("cheapest") or {}).get("label")),
+                "price": (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("price"))
+                    if budget is not None
+                    else (((product.get("price_comparison") or {}).get("cheapest") or {}).get("price")),
+                "url": (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("url"))
+                    if budget is not None
+                    else (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url")),
             }
             for product in (analysis.get("products") or [])[:4]
             if isinstance(product, dict)
-            and (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url"))
+            and (
+                (
+                    budget is None
+                    and (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url"))
+                )
+                or (
+                    budget is not None
+                    and (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("url"))
+                )
+            )
         ],
         "summary": summary,
         "confidence": str(
