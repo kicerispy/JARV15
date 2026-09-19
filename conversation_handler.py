@@ -12,6 +12,7 @@ from logger import logger
 from memory import get_memories
 from state import ActiveContext
 from model_manager import ModelManager
+from response_pipeline import speak_response
 
 
 MODEL_MANAGER = ModelManager()
@@ -136,7 +137,11 @@ def handle_normal_conversation(
 
     logger.info(f"JARVIS: {jarvis_reply}")
 
-    interrupted = speak_callback(jarvis_reply)
+    interrupted = speak_response(
+        jarvis_reply,
+        speak_callback,
+    )
+
     if interrupted:
         return "interrupted"
     return "done"
