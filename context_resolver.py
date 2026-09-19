@@ -47,14 +47,11 @@ def _deterministic_followup(user_input: str, active_context: Dict[str, Any]) -> 
         last_url = str(
             active_context.get("last_result_url") or ""
         ).strip()
-        current_url = str(
-            active_context.get("page_url") or ""
-        ).strip()
 
-        # Once JARVIS has navigated to the selected result, the original
-        # Google/YouTube result element is no longer in the DOM. Re-open the
-        # remembered URL instead of trying to click stale visible text.
-        if last_url and current_url and last_url != current_url:
+        # Once a result has actually been selected, its canonical URL is the
+        # most reliable identity. Use it directly rather than searching the
+        # current DOM for a stale/full result-card text value.
+        if last_url:
             return "open the previously selected browser result"
 
         if last_title:
