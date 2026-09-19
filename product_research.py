@@ -21,6 +21,7 @@ from browser_controller import (
 )
 from logger import logger
 from model_manager import ModelManager
+from product_price_checker import compare_products_prices
 
 MAX_RESULTS_PER_QUERY = 3
 MAX_SOURCES = 16
@@ -3363,6 +3364,7 @@ Return ONLY JSON:
   "products": [
     {{
       "name": "product",
+      "model_number": null,
       "price": null,
       "rating": null,
       "review_count": null,
@@ -3376,6 +3378,14 @@ Return ONLY JSON:
   "best_value": {{"name": null, "reason": "", "source_ids": []}},
   "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
   "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {
+      "product_a": "",
+      "product_b": "",
+      "comparison": "",
+      "source_ids": []
+    }
+  ],
   "tradeoffs": [],
   "warnings": []
 }}
@@ -3407,6 +3417,152 @@ Return ONLY JSON:
     return _parse_json(
         _response_text(response)
     )
+
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            max_products=min(4, len(products)),
+            max_stores=6,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+    analysis["price_check_status"] = "completed_best_effort"
+    return analysis
 
 
 def _summary(
@@ -3455,14 +3611,68 @@ def _summary(
         if not name:
             continue
 
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = comparison.get("cheapest")
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
         if reason:
             parts.append(
-                f"{label}: {name}. {reason}"
+                f"{label}: {name}. {reason}{price_note}"
             )
         else:
             parts.append(
-                f"{label}: {name}."
+                f"{label}: {name}.{price_note}"
             )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
 
     tradeoffs = analysis.get("tradeoffs") or []
     for tradeoff in list(tradeoffs)[:2]:
@@ -3565,6 +3775,10 @@ def research_product(
         evidence,
     )
 
+    analysis = _enrich_product_price_comparisons(
+        analysis
+    )
+
     verified = bool(
         analysis
         and (
@@ -3602,6 +3816,17 @@ def research_product(
         ],
         "evidence": evidence,
         "analysis": analysis,
+        "purchase_links": [
+            {
+                "product": str(product.get("name") or product.get("product") or "").strip(),
+                "seller": (((product.get("price_comparison") or {}).get("cheapest") or {}).get("label")),
+                "price": (((product.get("price_comparison") or {}).get("cheapest") or {}).get("price")),
+                "url": (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url")),
+            }
+            for product in (analysis.get("products") or [])[:4]
+            if isinstance(product, dict)
+            and (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url"))
+        ],
         "summary": summary,
         "confidence": str(
             analysis.get(
