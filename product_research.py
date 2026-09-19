@@ -4001,9 +4001,19 @@ Keep every reason to one short sentence.
     return run_synthesis(prompt)
 
 def _extract_candidate_signals(evidence: list[dict[str, Any]], budget: float | None = None) -> list[dict[str, Any]]:
-    """Extract concrete product names from evidence before LLM ranking."""
+    """Extract concrete product candidates from evidence for deterministic verification."""
     signals = {}
     brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    brand_words = {
+        re.sub(r"[^a-z0-9]+", "", brand.lower())
+        for brand in brands
+    }
+    stop_words = {
+        "read", "more", "amazon", "walmart", "best", "buy", "see", "it",
+        "price", "product", "products", "page", "review", "reviews",
+        "headphones", "headphone", "wireless", "earbuds", "earbud",
+        "popular", "latest", "new", "all", "shop", "now", "compare",
+    }
 
     for source in evidence:
         if not isinstance(source, dict):
@@ -4015,25 +4025,31 @@ def _extract_candidate_signals(evidence: list[dict[str, Any]], budget: float | N
             continue
 
         for brand in brands:
-            pattern = re.compile(
-                rf"\b{re.escape(brand)}\b(?:\s+[A-Za-z0-9][A-Za-z0-9&./+\-]*){{1,5}}"
-                ,
-                re.IGNORECASE,
-            )
+            pattern = re.compile(rf"\b({re.escape(brand)})\b", re.IGNORECASE)
             for match in pattern.finditer(text):
-                candidate = " ".join(match.group(0).split()).strip(" ,.;:()[]")
-                candidate = re.sub(r"\s+(?:amazon|walmart|best buy|see it|read more)$", "", candidate, flags=re.IGNORECASE)
+                words = re.findall(r"[A-Za-z0-9][A-Za-z0-9&./+\-]*", text[match.end():match.end() + 140])
+                parts = [match.group(1)]
+                for word in words:
+                    normalized_word = re.sub(r"[^a-z0-9]+", "", word.lower())
+                    if normalized_word in stop_words or normalized_word in brand_words:
+                        break
+                    if len(parts) >= 6:
+                        break
+                    parts.append(word)
+                if len(parts) < 2:
+                    continue
+
+                candidate = " ".join(parts).strip(" ,.;:()[]")
                 if not _is_specific_product_name(candidate):
                     continue
 
-                tail = text[match.end():match.end() + 220]
-                neighborhood = f"{candidate} {tail}"
+                neighborhood = text[match.end():match.end() + 240]
                 raw_prices = re.findall(
                     r"(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)",
                     neighborhood,
                 )
                 prices = []
-                for raw in raw_prices[:3]:
+                for raw in raw_prices[:4]:
                     try:
                         value = float(raw.replace(",", ""))
                     except ValueError:
@@ -4070,6 +4086,48 @@ def _extract_candidate_signals(evidence: list[dict[str, Any]], budget: float | N
         reverse=True,
     )
     return output[:12]
+
+def _inject_verified_candidate_lane(analysis: dict[str, Any], evidence: list[dict[str, Any]], budget: float | None) -> dict[str, Any]:
+    """Ensure concrete evidence-derived candidates reach retailer verification."""
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list):
+        products = []
+
+    existing = {
+        " ".join(str(product.get("name") or "").lower().split())
+        for product in products
+        if isinstance(product, dict)
+    }
+
+    signals = _extract_candidate_signals(evidence, budget)
+    additions = []
+    for signal in signals:
+        if len(products) + len(additions) >= 6:
+            break
+        name = str(signal.get("name") or "").strip()
+        key = " ".join(name.lower().split())
+        if not name or key in existing or not signal.get("budget_signal"):
+            continue
+        additions.append({
+            "name": name,
+            "model_number": None,
+            "price": None,
+            "rating": None,
+            "review_count": None,
+            "source_ids": signal.get("source_ids") or [],
+            "pros": [],
+            "cons": [],
+            "fit": "budget_alternative",
+            "candidate_signal": True,
+            "observed_prices": signal.get("observed_prices") or [],
+        })
+        existing.add(key)
+
+    analysis["products"] = additions + products
+    return analysis
 
 def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
     """Remove category-only model outputs before retailer verification."""
@@ -4655,6 +4713,7 @@ def research_product(
         evidence,
     )
 
+    analysis = _inject_verified_candidate_lane(analysis, evidence, budget)
     analysis = _sanitize_analysis_product_identity(analysis)
 
     analysis = _enrich_product_price_comparisons(
