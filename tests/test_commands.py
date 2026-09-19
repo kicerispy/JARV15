@@ -128,3 +128,20 @@ class TestShouldResolveContext:
             "What did you find?",
         ):
             assert should_resolve_context(command) is True
+
+class TestDeterministicBrowserSummaryRoute:
+    """Tests for direct search-result snapshot routing."""
+
+    def test_search_result_summary_uses_snapshot(self):
+        from commands import get_fast_command
+
+        for command in (
+            "What are the search results?",
+            "Tell me the search results",
+            "Show me the search results",
+            "What did the search find?",
+            "What did you find?",
+        ):
+            plan = get_fast_command(command)
+            assert plan is not None
+            assert plan["steps"][0]["tool"] == "browser_page_snapshot"
