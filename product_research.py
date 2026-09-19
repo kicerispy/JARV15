@@ -3819,7 +3819,7 @@ def _enrich_product_price_comparisons(
         enriched = compare_products_prices(
             products,
             max_products=min(4, len(products)),
-            max_stores=6,
+            max_stores=8,
         )
     except Exception as exc:
         logger.warning(
