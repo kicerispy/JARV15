@@ -1289,6 +1289,56 @@ def browser_extract_text(
             except Exception:
                 pass
 
+        # Walk open shadow roots as well. Some modern web apps render
+        # their visible text inside shadow DOM, which body.innerText does not
+        # always expose to Playwright.
+        if (
+            not extracted
+            and selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            try:
+                shadow_text = await page.evaluate(
+                    """() => {
+                        const chunks = [];
+                        const skip = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
+
+                        const walk = (root) => {
+                            if (!root) return;
+
+                            for (const node of root.childNodes || []) {
+                                if (node.nodeType === Node.TEXT_NODE) {
+                                    const value = (node.textContent || "").trim();
+                                    if (value) chunks.push(value);
+                                    continue;
+                                }
+
+                                if (node.nodeType !== Node.ELEMENT_NODE) {
+                                    continue;
+                                }
+
+                                if (skip.has(node.tagName)) {
+                                    continue;
+                                }
+
+                                const shadow = node.shadowRoot;
+                                if (shadow) {
+                                    walk(shadow);
+                                }
+
+                                walk(node);
+                            }
+                        };
+
+                        walk(document.body);
+                        return chunks.join("\n");
+                    }""",
+                )
+                extracted = str(shadow_text or "").strip()
+            except Exception:
+                pass
+
         # Final top-level DOM fallback for heavily client-rendered pages.
         if (
             not extracted
