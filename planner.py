@@ -3,6 +3,7 @@ JARVIS task planner - converts user requests into tool calls.
 """
 import ast
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 import config
