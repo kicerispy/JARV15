@@ -4270,8 +4270,8 @@ def _enrich_product_price_comparisons(
                 if best_value_name and product_is_budget_eligible(best_value_name):
                     choice["name"] = best_value_name
                     choice["reason"] = (
-                        "The synthesized best-value candidate is used as the
-                        "budget-constrained best match because its listed or
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
                         "verified retailer price meets the maximum budget."
                     )
                     choice["source_ids"] = best_value.get("source_ids") or []
@@ -4279,7 +4279,7 @@ def _enrich_product_price_comparisons(
 
             choice["name"] = None
             choice["reason"] = (
-                "The synthesized choice exceeded the hard maximum budget,
+                "The synthesized choice exceeded the hard maximum budget, "
                 "and no verified under-budget replacement was established."
             )
             choice["source_ids"] = []
