@@ -564,3 +564,13 @@ def test_delivery_layer_normalizes_formatting_differences():
         lambda message: spoken.append(message) or False
     ) == 2
     assert spoken == ["Found 'Downloads' on the page."]
+
+
+def test_speech_key_matches_tts_normalization():
+    controller = BackgroundTaskController(None)
+
+    assert controller._speech_key(
+        "JARVIS: Found 'Downloads' on the page."
+    ) == controller._speech_key(
+        "Found 'Downloads' on the page."
+    )
