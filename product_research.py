@@ -2194,6 +2194,36 @@ def _discover(queries):
             ):
                 break
 
+    # Even after core coverage is satisfied, run a small variety pass so
+    # JARVIS does not stop before researching genuinely different approaches.
+    variety_markers = (
+        'alternatives', 'most comfortable', 'different types',
+        'premium alternative', 'earbuds under', 'over ear comfortable',
+        'on ear alternatives', 'airpods alternatives',
+    )
+    variety_queries = [
+        query
+        for query in queries
+        if any(marker in str(query or '').lower() for marker in variety_markers)
+    ]
+    if variety_queries:
+        print(
+            '[JARVIS] JARVIS PRODUCT RESEARCH: running variety/adjacent-source pass.'
+        )
+        for query in variety_queries:
+            result = _research_http_search('google', query)
+            candidates = result.get('results', [])
+            _research_add_results(
+                discovered, candidates, seen_urls, engine='google', query=query
+            )
+            if len(discovered) >= _RESEARCH_MAX_DISCOVERY:
+                break
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"discovery complete: "
+        f"{len(discovered)} candidate source(s)"
+    )
     print(
         "[JARVIS] JARVIS PRODUCT RESEARCH: "
         f"discovery complete: "
@@ -2599,7 +2629,8 @@ def _choose_sources(discovered):
         domains.add(domain)
         generic_count += 1
 
-    for source in selected:
+    for index, source in enumerate(selected, 1):
+        source["id"] = index
         source.pop(
             "_relevance_score",
             None,
@@ -3091,68 +3122,167 @@ def _compact_evidence_for_synthesis(
     return compact
 
 
-def _extract_candidate_signals(evidence: list[dict[str, Any]], budget: float | None = None) -> list[dict[str, Any]]:
-    """Extract concrete product candidates directly from collected evidence."""
+def _candidate_form_factor(name):
+    value = normalize_product_text(name)
+    if any(term in value for term in ('earbud', 'earbuds', 'true wireless', 'tws', 'in ear')):
+        return 'earbuds'
+    if any(term in value for term in ('over ear', 'over-ear', 'headphone', 'headphones')):
+        return 'over_ear'
+    if any(term in value for term in ('on ear', 'on-ear')):
+        return 'on_ear'
+    if any(term in value for term in ('open ear', 'open-ear', 'bone conduction')):
+        return 'open_ear'
+    if 'headset' in value:
+        return 'headset'
+    return 'other'
+
+
+def _clean_candidate_name(candidate):
+    value = ' '.join(str(candidate or '').split()).strip(' ,.;:()[]')
+    if not value:
+        return ''
+    value = re.sub(r'\s+\$', ' $', value)
+    # Cut off price/specification spillover after a concrete model token.
+    words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', value)
+    if not words:
+        return ''
+    cleaned = []
+    model_seen = False
+    stop_after_model = {
+        'good', 'great', 'excellent', 'sound', 'quality', 'top', 'of', 'line',
+        'app', 'battery', 'comfortable', 'comfort', 'anc', 'noise', 'cancellation',
+        'tested', 'review', 'reviews', 'price', 'msrp', 'save', 'see',
+    }
+    for word in words:
+        low = word.lower().strip()
+        if low in stop_after_model and model_seen:
+            break
+        if low in {'best', 'overall', 'pick', 'choice', 'winner'} and model_seen:
+            break
+        if re.fullmatch(r'\d{1,5}(?:\.\d+)?', word) and cleaned:
+            # Standalone numbers after a product usually represent price/spec data.
+            if model_seen:
+                break
+        cleaned.append(word)
+        if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s+4)\b', low, re.I):
+            model_seen = True
+        if len(cleaned) >= 6:
+            break
+    result = ' '.join(cleaned).strip(' ,.;:()[]')
+    return result if _is_specific_product_name(result) else ''
+
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
     signals = {}
     brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
-    stop_words = {"read", "more", "amazon", "walmart", "best", "buy", "price", "product", "products", "page", "review", "reviews", "headphones", "headphone", "wireless", "earbuds", "earbud", "popular", "latest", "new", "all", "shop", "now", "compare"}
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
     for source in evidence:
         if not isinstance(source, dict):
             continue
-        page_text = " ".join(str(source.get("text") or "").split())
+        page_text = ' '.join(str(source.get('text') or '').split())
         for brand in brands:
-            for match in re.finditer(rf"\b({re.escape(brand)})\b", page_text, re.IGNORECASE):
-                words = re.findall(r"[A-Za-z0-9][A-Za-z0-9&./+\-]*", page_text[match.end():match.end() + 120])
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
                 parts = [match.group(1)]
+                model_seen = False
                 for word in words:
-                    normalized_word = re.sub(r"[^a-z0-9]+", "", word.lower())
-                    if normalized_word in stop_words or normalized_word in {re.sub(r"[^a-z0-9]+", "", b.lower()) for b in brands}:
-                        break
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
                     parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
                     if len(parts) >= 5:
                         break
-                candidate = " ".join(parts).strip(" ,.;:()[]")
-                if not _is_specific_product_name(candidate):
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
                     continue
-                neighborhood = page_text[max(0, match.start() - 80):match.end() + 220]
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
                 prices = []
-                for raw in re.findall(r"(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)", neighborhood)[:4]:
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
                     try:
-                        value = float(raw.replace(",", ""))
+                        value = float(raw.replace(',', ''))
                     except ValueError:
                         continue
                     if 1 <= value <= 100000:
                         prices.append(value)
-                key = " ".join(candidate.lower().split())
-                record = signals.setdefault(key, {"name": candidate, "source_ids": [], "observed_prices": []})
-                source_id = source.get("id")
-                if source_id not in record["source_ids"]:
-                    record["source_ids"].append(source_id)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
                 for price in prices:
-                    if price not in record["observed_prices"]:
-                        record["observed_prices"].append(price)
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
     for record in signals.values():
-        prices = record.get("observed_prices") or []
-        record["budget_signal"] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
-    return sorted(signals.values(), key=lambda item: (item.get("budget_signal", False), len(item.get("source_ids") or []), len(item.get("observed_prices") or [])), reverse=True)[:12]
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
 
-def _inject_candidate_products(analysis: dict[str, Any], evidence: list[dict[str, Any]], budget: float | None) -> dict[str, Any]:
+def _inject_candidate_products(analysis, evidence, budget):
     if not isinstance(analysis, dict):
         return {}
-    products = analysis.get("products") if isinstance(analysis.get("products"), list) else []
-    existing = {" ".join(str(p.get("name") or "").lower().split()) for p in products if isinstance(p, dict)}
-    for signal in _extract_candidate_signals(evidence, budget):
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
         if len(products) >= 6:
             break
-        if not signal.get("budget_signal"):
+        if not signal.get('budget_signal'):
             continue
-        name = str(signal.get("name") or "").strip()
-        key = " ".join(name.lower().split())
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
         if not name or key in existing:
             continue
-        products.append({"name": name, "model_number": None, "price": None, "rating": None, "review_count": None, "source_ids": signal.get("source_ids") or [], "pros": [], "cons": [], "fit": "budget_alternative", "candidate_signal": True, "observed_prices": signal.get("observed_prices") or []})
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
         existing.add(key)
-    analysis["products"] = products
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
     return analysis
 
 def _synthesize(
