@@ -2641,6 +2641,7 @@ BROWSER_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "browser_find_text",
     "browser_click_first_result",
     "browser_connect",
     "browser_search_google",
@@ -2823,6 +2824,7 @@ def run_browser_tool(
         browser_goto,
         browser_page_info,
         browser_page_snapshot,
+        browser_find_text,
     )
 
     argument = str(argument or "").strip()
@@ -2903,6 +2905,7 @@ def run_browser_tool(
         "browser_press_key",
         "browser_wait_for_element",
         "browser_extract_text",
+        "browser_find_text",
     }:
         try:
             payload = _parse_browser_object_argument(
@@ -2923,6 +2926,7 @@ def run_browser_tool(
             browser_press_key,
             browser_wait_for_element,
             browser_extract_text,
+            browser_find_text,
         )
 
         # Preserve compatibility with older monkeypatches/alternate browser
@@ -2965,6 +2969,15 @@ def run_browser_tool(
 
         if tool_name == "browser_extract_text":
             return normalize(browser_extract_text(**dom_kwargs))
+
+        if tool_name == "browser_find_text":
+            return normalize(
+                browser_find_text(
+                    query=payload.get("query", ""),
+                    context_chars=payload.get("context_chars", 120),
+                    max_matches=payload.get("max_matches", 3),
+                )
+            )
 
     if tool_name == "browser_page_info":
         return normalize(browser_page_info())
