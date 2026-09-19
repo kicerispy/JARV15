@@ -499,6 +499,72 @@ async def _snapshot_links(page, selector: str, limit: int = 30) -> list[dict[str
     return links
 
 
+def _snapshot_canonical_url(href: str) -> str:
+    """Normalize common search-engine redirect URLs to their destination."""
+    value = str(href or "").strip()
+    if not value:
+        return ""
+
+    try:
+        parsed = urlparse(value)
+        query = parse_qs(parsed.query)
+
+        for key in ("url", "q", "u"):
+            targets = query.get(key) or []
+            if targets:
+                target = unquote(str(targets[0] or "")).strip()
+                if target.startswith(("http://", "https://")):
+                    return target
+    except Exception:
+        pass
+
+    return value
+
+
+async def _snapshot_result_snippet(link, site: str) -> str:
+    """Extract a short result snippet without walking the whole page."""
+    selectors = {
+        "google": (
+            ".VwiC3b",
+            ".aCOpRe",
+            "[data-sncf]",
+        ),
+        "bing": (
+            ".b_caption p",
+        ),
+        "youtube": (
+            "#description-text",
+            "yt-formatted-string#description-text",
+        ),
+    }.get(site, ())
+
+    try:
+        snippet = await link.evaluate(
+            """(el, selectors) => {
+                const roots = [
+                    el.closest('div.MjjYud'),
+                    el.closest('li.b_algo'),
+                    el.closest('ytd-video-renderer'),
+                    el.parentElement,
+                ].filter(Boolean);
+
+                for (const root of roots) {
+                    for (const selector of selectors) {
+                        const node = root.querySelector(selector);
+                        if (!node) continue;
+                        const value = (node.innerText || node.textContent || '').trim();
+                        if (value) return value;
+                    }
+                }
+                return '';
+            }""",
+            list(selectors),
+        )
+        return " ".join(str(snippet or "").split())[:500]
+    except Exception:
+        return ""
+
+
 async def _snapshot_search_results(page) -> list[dict[str, str]]:
     """Extract lightweight search-result identities for common search pages."""
     url = str(getattr(page, "url", "") or "").lower()
@@ -512,6 +578,7 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
                 heading = link.locator("h3").first
                 title = " ".join((await heading.inner_text(timeout=1500)).split())
                 href = (await link.get_attribute("href") or "").strip()
+                snippet = await _snapshot_result_snippet(link, "google")
             except Exception:
                 continue
 
@@ -519,7 +586,8 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
                 candidates.append({
                     "index": str(index + 1),
                     "title": title[:300],
-                    "url": href[:1000],
+                    "snippet": snippet,
+                    "url": _snapshot_canonical_url(href)[:1000],
                 })
 
     elif "bing.com" in url:
@@ -529,6 +597,7 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
             try:
                 title = " ".join((await link.inner_text(timeout=1500)).split())
                 href = (await link.get_attribute("href") or "").strip()
+                snippet = await _snapshot_result_snippet(link, "bing")
             except Exception:
                 continue
 
@@ -536,7 +605,8 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
                 candidates.append({
                     "index": str(index + 1),
                     "title": title[:300],
-                    "url": href[:1000],
+                    "snippet": snippet,
+                    "url": _snapshot_canonical_url(href)[:1000],
                 })
 
     elif "youtube.com" in url:
@@ -549,6 +619,7 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
             try:
                 title = " ".join((await item.inner_text(timeout=1500)).split())
                 href = (await item.get_attribute("href") or "").strip()
+                snippet = await _snapshot_result_snippet(item, "youtube")
             except Exception:
                 continue
 
@@ -556,7 +627,8 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
                 candidates.append({
                     "index": str(index + 1),
                     "title": title[:300],
-                    "url": href[:1000],
+                    "snippet": snippet,
+                    "url": _snapshot_canonical_url(href)[:1000],
                 })
 
     return candidates
@@ -670,16 +742,18 @@ def browser_page_snapshot() -> dict[str, Any]:
         spoken_preview = readable_text[:900]
         if results:
             result_titles = [
-                item["title"]
-                for item in results[:5]
-                if item.get("title")
+                str(item.get("title", "")).strip()
+                for item in results[:3]
+                if isinstance(item, dict) and item.get("title")
             ]
             if result_titles:
-                spoken_preview = (
-                    "Search results: "
-                    + "; ".join(result_titles)
-                    + "."
-                )
+                ordinal_names = ("First", "Second", "Third")
+                spoken_parts = [
+                    f"I found {len(results)} search result{'s' if len(results) != 1 else ''}."
+                ]
+                for ordinal, title_text in zip(ordinal_names, result_titles):
+                    spoken_parts.append(f"{ordinal}: {title_text[:180]}.")
+                spoken_preview = " ".join(spoken_parts)[:900]
 
         return {
             "success": True,
