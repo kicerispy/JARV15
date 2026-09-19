@@ -26,12 +26,12 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_page_info": "Read the current browser page title and URL.",
     "browser_click_result": "Click a numbered or last organic Google/YouTube result. Argument is JSON.",
     "browser_back": "Navigate the controlled browser back one page.",
-    "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role.",
-    "browser_click_element": "Click a browser DOM element by CSS selector, visible text, or ARIA role.",
-    "browser_fill_element": "Fill a browser input by CSS selector, visible text, or ARIA role. Argument is JSON.",
-    "browser_press_key": "Press a keyboard key on a browser element by CSS selector, visible text, or ARIA role. Argument is JSON.",
-    "browser_wait_for_element": "Wait for a browser DOM element to become visible. Argument is JSON.",
-    "browser_extract_text": "Extract text from a browser DOM element. Argument is JSON.",
+    "browser_find_element": "Find a browser DOM element by CSS selector, visible text, or ARIA role with optional accessible name.",
+    "browser_click_element": "Click a browser DOM element by CSS selector, visible text, or ARIA role with optional accessible name.",
+    "browser_fill_element": "Fill a browser input by CSS selector, visible text, or ARIA role with optional accessible name. Argument is JSON.",
+    "browser_press_key": "Press a keyboard key on a browser element by CSS selector, visible text, or ARIA role with optional accessible name. Argument is JSON.",
+    "browser_wait_for_element": "Wait for a browser DOM element to become visible using selector, text, role, or accessible name. Argument is JSON.",
+    "browser_extract_text": "Extract text from a browser DOM element selected by selector, text, role, or accessible name. Argument is JSON.",
     "browser_click_first_result": "Click the first organic Google or YouTube result through the controlled browser DOM. Argument is JSON.",
     "weather": "Get current weather. argument = location, or empty for default.",
     "current_time": "Get current time. argument = timezone/city, or empty for local.",
@@ -236,11 +236,13 @@ Browser workflow:
 
 1. Navigate to the intended page.
 2. Inspect the page with browser_page_info or browser_find_element.
-3. Use browser_fill_element for text inputs.
-4. Use browser_press_key for Enter or other keyboard actions.
-5. Use browser_click_element for links, buttons, and controls.
-6. Use browser_wait_for_element when content may load asynchronously.
-7. Use browser_extract_text or browser_page_info to verify the result.
+3. For semantic controls, prefer ARIA role plus accessible name, for example
+   {"role":"button","name":"Sign in"} or {"role":"textbox","name":"Email"}.
+4. Use browser_fill_element for text inputs.
+5. Use browser_press_key for Enter or other keyboard actions.
+6. Use browser_click_element for links, buttons, tabs, menus, and controls.
+7. Use browser_wait_for_element when content may load asynchronously.
+8. Use browser_extract_text or browser_page_info to verify the result.
 8. Use browser_click_result for second, third, or last search results.
 9. Use browser_back for requests to go back to the previous page.
 10. When an action fails, use the browser state and observations to
@@ -249,11 +251,16 @@ Browser workflow:
 DOM TOOL ARGUMENT FORMAT:
 
 DOM browser tools use a JSON object encoded as the step's argument string.
+Supported target fields are selector, text, role, and optional name.
+"name" is an accessible-name filter used with "role".
 
 Examples:
 
 browser_find_element
 argument = {{"role":"searchbox"}}
+
+browser_find_element
+argument = {{"role":"button","name":"Sign in"}}
 
 browser_find_element
 argument = {{"text":"Sign in"}}
@@ -268,10 +275,10 @@ browser_press_key
 argument = {{"role":"searchbox","key":"Enter"}}
 
 browser_click_element
-argument = {{"role":"button","text":"Submit"}}
+argument = {{"role":"button","name":"Submit"}}
 
 browser_wait_for_element
-argument = {{"text":"Results","timeout":10000}}
+argument = {{"role":"heading","name":"Results","timeout":10000}}
 
 browser_extract_text
 argument = {{"selector":"main"}}
