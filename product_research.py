@@ -3315,10 +3315,13 @@ def _source_visit_blocked(snapshot):
         "recaptcha",
         "verify you are human",
         "not a robot",
+        "checking your browser",
+        "checking you are a real head-fi'er",
+        "help us keep head-fi secure",
+        "looks like something is not right, please wait",
+        "security check",
         "unusual traffic",
         "access denied",
-        "security check",
-        "checking your browser",
         "just a moment",
     )
 
@@ -3894,6 +3897,10 @@ Evidence rules:
 - Video and community sources are supporting evidence, not proof.
 - Prefer agreement across independent domains and source types.
 - State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- Prefer a current verified retailer price at or below the budget over MSRP.
 - Use null when evidence is missing.
 - Cite factual claims with source IDs.
 
@@ -4098,6 +4105,7 @@ def _find_analysis_product(
 
 def _enrich_product_price_comparisons(
     analysis: dict[str, Any],
+    budget: float | None = None,
 ) -> dict[str, Any]:
     """
     Add best-effort cross-store price evidence to synthesized products.
@@ -4194,6 +4202,131 @@ def _enrich_product_price_comparisons(
                 )
 
     analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            product["price_comparison"]["budget_verified_offers"] = budget_offers
+            product["price_comparison"]["budget_eligible"] = bool(budget_offers)
+            product["price_comparison"]["budget_cheapest"] = (
+                budget_offers[0]
+                if budget_offers
+                else None
+            )
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        # A maximum budget is a hard user constraint. Never expose an
+        # over-budget named recommendation as the final best/value choice.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            fallback = None
+            fit_order = (
+                "best_match",
+                "budget_alternative",
+                "strong_alternative",
+                "mixed",
+            )
+
+            for fit in fit_order:
+                for candidate in enriched:
+                    if not isinstance(candidate, dict):
+                        continue
+
+                    candidate_name = str(
+                        candidate.get("name")
+                        or candidate.get("product")
+                        or ""
+                    ).strip()
+
+                    if not candidate_name:
+                        continue
+
+                    if str(candidate.get("fit") or "") != fit:
+                        continue
+
+                    if product_is_budget_eligible(candidate_name):
+                        fallback = candidate_name
+                        break
+
+                if fallback:
+                    break
+
+            if fallback:
+                source_product = _find_analysis_product(
+                    analysis,
+                    fallback,
+                ) or {}
+
+                choice["name"] = fallback
+                choice["reason"] = (
+                    "Selected from the synthesized candidates because its "
+                    "listed price or verified retailer price meets the "
+                    + "$"
+                    + format(budget_value, ",.2f")
+                    + " maximum budget."
+                )
+                choice["source_ids"] = source_product.get("source_ids") or []
+            else:
+                choice["name"] = None
+                choice["reason"] = (
+                    "No synthesized candidate had a listed or verified "
+                    "price at or below the "
+                    + "$"
+                    + format(budget_value, ",.2f")
+                    + " budget."
+                )
+                choice["source_ids"] = []
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
     analysis["price_check_status"] = "completed_best_effort"
     return analysis
 
@@ -4421,7 +4554,8 @@ def research_product(
     )
 
     analysis = _enrich_product_price_comparisons(
-        analysis
+        analysis,
+        budget=budget,
     )
 
     best_match = analysis.get("best_match") or {}
