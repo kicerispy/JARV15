@@ -216,6 +216,12 @@ def _select_best_price(text: str) -> Optional[float]:
         ),
         reverse=True,
     )
+
+    # If every candidate is surrounded by negative pricing context
+    # (coupon/savings/list/original price), do not treat it as current price.
+    if candidates[0][3] < 0:
+        return None
+
     return candidates[0][0]
 
 
