@@ -178,7 +178,9 @@ _CONVERSATION_STARTS = (
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip().lower())
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    normalized = re.sub(r"[,.!?]+$", "", normalized).strip()
+    return normalized
 
 
 def _contains_action_word(text: str) -> bool:
