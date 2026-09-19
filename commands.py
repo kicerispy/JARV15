@@ -1761,8 +1761,6 @@ def deterministic_route(user_request):
         "what're the search results",
         "tell me the search results",
         "show me the search results",
-        "what did the search find",
-        "what did you find",
         "read the page",
         "read this page",
         "read the page text",
