@@ -3834,6 +3834,11 @@ Evidence rules:
 - For a hard-budget request, prioritize products explicitly described as
   budget/cheap picks or supported by an explicit non-MSRP price at or below
   the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- The best_match must come from the evidence-supported budget set. If the
+  evidence only supports premium products above budget, leave best_match null
+  rather than promoting a premium flagship.
+- Include at least two budget-eligible candidates when the evidence supports
+  them, so deterministic retailer verification has alternatives to check.
 - Prefer a current verified retailer price at or below the budget over MSRP.
 - Use null when evidence is missing.
 - Cite factual claims with source IDs.
