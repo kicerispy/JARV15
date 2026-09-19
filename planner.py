@@ -94,6 +94,7 @@ JSON_ARGUMENT_TOOLS = {
     "browser_press_key",
     "browser_wait_for_element",
     "browser_extract_text",
+    "browser_find_text",
     "code_diagnose",
     "dev_command",
 }
