@@ -574,3 +574,38 @@ def test_speech_key_matches_tts_normalization():
     ) == controller._speech_key(
         "Found 'Downloads' on the page."
     )
+
+
+def test_controller_queues_staged_final_speech_once_on_worker_finish():
+    controller = BackgroundTaskController(None)
+    task_state = TaskState()
+    task_state.prepare("find downloads", 1)
+    task_state.start("find downloads", 1)
+    task_state.set_background_speech_owned(True)
+    task_state.set_final_speech("Found 'Downloads' on the page.")
+
+    task = type("Task", (), {
+        "task_id": "final-speech-task",
+        "request": "find downloads",
+        "goal": "find downloads",
+        "status": "completed",
+        "execution_result": "done",
+        "error": None,
+        "replan_count": 0,
+    })()
+
+    controller._task = task
+    controller._task_state = task_state
+
+    controller._finish_worker(task)
+
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 1
+    assert spoken == ["Found 'Downloads' on the page."]
+
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 0
+    assert spoken == ["Found 'Downloads' on the page."]
