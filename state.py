@@ -121,6 +121,7 @@ class TaskState:
             self.recovery_count = 0
             self._last_progress_key = None
             self.completion_spoken = False
+            self.background_speech_owned = False
             self.final_speech = None
 
     def start(self, description: str, total_steps: int) -> bool:
@@ -143,6 +144,7 @@ class TaskState:
             self.recovery_count = 0
             self._last_progress_key = None
             self.completion_spoken = False
+            self.background_speech_owned = False
             self.final_speech = None
             return True
 
