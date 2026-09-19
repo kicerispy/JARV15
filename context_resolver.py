@@ -21,6 +21,12 @@ _CONTEXTUAL_PATTERNS = (
     (r"^(?:go\s+)?back$", "go back in the browser"),
     (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:page|page contents|page text|this page)$",
      "read the current browser page"),
+    (r"^(?:what are|what're)\s+(?:the\s+)?search results$",
+     "read the current browser page"),
+    (r"^(?:tell me|show me)\s+(?:the\s+)?search results$",
+     "read the current browser page"),
+    (r"^what did (?:the search|you) find$",
+     "read the current browser page"),
     (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:title|page title)$",
      "inspect the current browser page"),
 )
