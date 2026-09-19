@@ -44,6 +44,19 @@ def _deterministic_followup(user_input: str, active_context: Dict[str, Any]) -> 
             return resolved
 
     if normalized in {"click it", "open it", "play it", "select it", "use it", "open that", "click that", "play that"}:
+        last_url = str(
+            active_context.get("last_result_url") or ""
+        ).strip()
+        current_url = str(
+            active_context.get("page_url") or ""
+        ).strip()
+
+        # Once JARVIS has navigated to the selected result, the original
+        # Google/YouTube result element is no longer in the DOM. Re-open the
+        # remembered URL instead of trying to click stale visible text.
+        if last_url and current_url and last_url != current_url:
+            return "open the previously selected browser result"
+
         if last_title:
             return f"click the browser element with visible text {last_title!r}"
         if site in {"google", "youtube"} and active_context.get("last_query"):
