@@ -1784,6 +1784,91 @@ class JarvisAgent:
                     ]
                 )
 
+        # Make the recovery history explicit so the planner does not blindly
+        # repeat a strategy that already failed.
+        browser_recoveries = []
+
+        for evidence in task.evidence:
+            if not isinstance(evidence, dict):
+                continue
+
+            recovery = evidence.get("browser_recovery")
+            if not isinstance(recovery, dict):
+                continue
+
+            browser_recoveries.append(
+                recovery
+            )
+
+        if browser_recoveries:
+            lines.extend(
+                [
+                    "",
+                    "Browser recovery history:",
+                    (
+                        "Do not blindly repeat a browser strategy already "
+                        "recorded as failed. Treat successful observations as "
+                        "the current browser state and choose a meaningfully "
+                        "different action when recovery is still required."
+                    ),
+                ]
+            )
+
+            for recovery_index, recovery in enumerate(
+                browser_recoveries,
+                start=1,
+            ):
+                recovered_by = str(
+                    recovery.get("recovered_by", "") or ""
+                ).strip()
+
+                observed_before = recovery.get("observed_before")
+                observed_after = recovery.get("observed_after")
+
+                summary_parts = [
+                    f"Recovery {recovery_index}:",
+                    (
+                        "method="
+                        + (recovered_by or "unspecified")
+                    ),
+                ]
+
+                if isinstance(observed_before, dict):
+                    summary_parts.append(
+                        "before="
+                        + repr(
+                            {
+                                "url": observed_before.get("url", ""),
+                                "title": observed_before.get("title", ""),
+                            }
+                        )
+                    )
+
+                if isinstance(observed_after, dict):
+                    summary_parts.append(
+                        "after="
+                        + repr(
+                            {
+                                "url": observed_after.get("url", ""),
+                                "title": observed_after.get("title", ""),
+                            }
+                        )
+                    )
+
+                if recovery.get("attempts") is not None:
+                    summary_parts.append(
+                        f"attempts={recovery.get('attempts')}"
+                    )
+
+                if recovery.get("recovery_count") is not None:
+                    summary_parts.append(
+                        f"retries={recovery.get('recovery_count')}"
+                    )
+
+                lines.append(
+                    " ".join(summary_parts)
+                )
+
         lines.extend(
             [
                 "",
