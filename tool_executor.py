@@ -1363,7 +1363,21 @@ def format_browser_result(
 
     if tool_name == "browser_extract_text":
         extracted = str(result.get("text", "") or "").strip()
-        return extracted or "The browser element contains no readable text."
+        if extracted:
+            return extracted
+
+        diagnostics = result.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            body_len = diagnostics.get("body_text_length")
+            document_len = diagnostics.get("document_text_length")
+            html_len = diagnostics.get("html_length")
+            return (
+                "The browser page contained no extractable text. "
+                f"DOM body text={body_len}, document text={document_len}, "
+                f"HTML={html_len} characters."
+            )
+
+        return "The browser page contained no extractable text."
 
     if tool_name == "browser_click_result":
         index = result.get("index", 1)
