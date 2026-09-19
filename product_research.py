@@ -4368,6 +4368,24 @@ def research_product(
         evidence,
     )
 
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
     analysis = _sanitize_analysis_product_identity(analysis)
 
     analysis = _inject_candidate_products(analysis, evidence, budget)
@@ -4437,6 +4455,7 @@ def research_product(
             }
             for source in evidence
         ],
+        "skipped_sources": skipped_sources,
         "evidence": evidence,
         "analysis": analysis,
         "purchase_links": _build_purchase_links(
