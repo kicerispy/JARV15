@@ -19,7 +19,7 @@ _CONTEXTUAL_PATTERNS = (
     (r"^(?:click|open|play|select|choose|pick)\s+(?:the\s+)?(?:last|final)\s+(?:result|link|video|one|item)$",
      "click the last browser result"),
     (r"^(?:go\s+)?back$", "go back in the browser"),
-    (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:page|page contents|page text)$",
+    (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:page|page contents|page text|this page)$",
      "read the current browser page"),
     (r"^(?:read|show|tell me)\s+(?:the\s+)?(?:title|page title)$",
      "inspect the current browser page"),
