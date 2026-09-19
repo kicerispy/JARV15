@@ -177,6 +177,8 @@ def _planner_tool_scope(
         "alternative",
         "alternatives",
         "cheaper",
+        "best",
+        "cheapest",
         "best value",
         "best price",
         "worth buying",
