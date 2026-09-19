@@ -67,6 +67,90 @@ def test_background_task_starts_without_blocking():
     assert controller.snapshot()["task_status"] == "completed"
 
 
+
+def test_cancellation_discards_stale_worker_speech():
+    agent = FakeAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+
+    task = type("Task", (), {
+        "task_id": "cancel-speech-task",
+        "request": "do a long task",
+        "goal": "finish the long task",
+        "status": "created",
+        "steps": [object(), object()],
+        "current_step": -1,
+        "replan_count": 0,
+        "error": None,
+        "started_at": None,
+        "completed_at": None,
+    })()
+
+    assert controller.start(
+        task,
+        {},
+        task_state,
+        None,
+    ) is True
+
+    assert agent.started.wait(timeout=1)
+
+    controller._queue_speech("Progress from before cancellation.")
+    assert controller.cancel_current() is True
+
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 0
+    assert spoken == []
+
+    # Worker announcements arriving after cancellation are ignored.
+    assert controller._queue_speech(
+        "Late progress after cancellation."
+    ) is False
+
+    agent.release.set()
+    assert controller.wait_for_current(timeout=1) is True
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 0
+
+
+def test_background_planning_can_be_cancelled_before_execution():
+    agent = PlanningFakeAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+
+    task = type("Task", (), {
+        "task_id": "planning-cancel-task",
+        "request": "inspect and fix the browser",
+        "goal": "",
+        "status": "created",
+        "steps": [],
+        "current_step": -1,
+        "replan_count": 0,
+        "error": None,
+        "started_at": None,
+        "completed_at": None,
+    })()
+
+    assert controller.start_planning(
+        task,
+        {},
+        task_state,
+    ) is True
+
+    assert agent.planning_started.wait(timeout=1)
+    assert controller.cancel_current() is True
+    assert task_state.is_cancelled() is True
+
+    agent.release_planning.set()
+    assert controller.wait_for_current(timeout=1) is True
+
+    assert agent.executed.is_set() is False
+    assert controller.snapshot()["task_status"] == "cancelled"
+
+
 def test_background_task_can_be_cancelled():
     agent = FakeAgent()
     controller = BackgroundTaskController(agent)
