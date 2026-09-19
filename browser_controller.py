@@ -288,11 +288,13 @@ def _dom_target_args(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ) -> dict[str, str]:
     return {
         "selector": str(selector or "").strip(),
         "text": str(text or "").strip(),
         "role": str(role or "").strip(),
+        "name": str(name or "").strip(),
     }
 
 
