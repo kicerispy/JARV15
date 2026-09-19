@@ -1344,7 +1344,22 @@ def deterministic_route(user_request):
                 "the last link",
             }
 
-            if target.lower().strip() in _generic_first_result_targets:
+            normalized_target = target.lower().strip()
+
+            # Contextual references must reach the context resolver before
+            # the generic screen-click fallback claims the request.
+            _contextual_click_targets = {
+                "it",
+                "that",
+                "this one",
+                "that one",
+                "same one",
+            }
+
+            if normalized_target in _contextual_click_targets:
+                return None
+
+            if normalized_target in _generic_first_result_targets:
                 return None
 
             return {
