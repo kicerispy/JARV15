@@ -47,6 +47,9 @@ def _deterministic_followup(user_input: str, active_context: Dict[str, Any]) -> 
         last_url = str(
             active_context.get("last_result_url") or ""
         ).strip()
+        current_url = str(
+            active_context.get("page_url") or ""
+        ).strip()
 
         # If the current page is already the selected result, there is no
         # longer a search-result DOM element to click. Re-open its canonical
