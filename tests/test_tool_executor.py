@@ -2,6 +2,112 @@ import unittest
 from unittest import mock
 
 
+class ToolExecutorProgressTests(unittest.TestCase):
+
+    def test_progress_reports_major_milestones_without_low_level_browser_chatter(self):
+        import tool_executor
+        from state import TaskState
+
+        task_state = TaskState()
+        task_state.prepare("browser task", 6)
+        spoken = []
+        task_state.set_progress_callback(
+            lambda message: spoken.append(message)
+        )
+
+        tool_executor._report_tool_progress(
+            task_state,
+            "browser_search_google",
+            1,
+            6,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "browser_find_element",
+            2,
+            6,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "browser_wait_for_element",
+            3,
+            6,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "browser_click_element",
+            4,
+            6,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "browser_fill_element",
+            5,
+            6,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "browser_extract_text",
+            6,
+            6,
+        )
+
+        assert spoken == [
+            "I'm searching the browser.",
+            "I'm interacting with the page.",
+            "I'm reading the page.",
+        ]
+
+    def test_code_progress_collapses_multiple_discovery_tools_into_one_milestone(self):
+        import tool_executor
+        from state import TaskState
+
+        task_state = TaskState()
+        task_state.prepare("repair task", 5)
+        spoken = []
+        task_state.set_progress_callback(
+            lambda message: spoken.append(message)
+        )
+
+        tool_executor._report_tool_progress(
+            task_state,
+            "code_search",
+            1,
+            5,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "find_file",
+            2,
+            5,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "read_file",
+            3,
+            5,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "edit_file",
+            4,
+            5,
+        )
+        tool_executor._report_tool_progress(
+            task_state,
+            "code_test",
+            5,
+            5,
+        )
+
+        assert spoken == [
+            "I'm locating the relevant code.",
+            "I'm inspecting the relevant source.",
+            "I'm applying the change.",
+            "I'm validating the result.",
+        ]
+
+
 class ToolExecutorFailureTests(unittest.TestCase):
 
     def test_unexpected_tool_exception_returns_failed_without_speaking(self):
