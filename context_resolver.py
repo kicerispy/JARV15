@@ -46,14 +46,14 @@ def _deterministic_followup(user_input: str, active_context: Dict[str, Any]) -> 
     if normalized in {"click it", "open it", "play it", "select it", "use it", "open that", "click that", "play that"}:
         if last_title:
             return f"click the browser element with visible text {last_title!r}"
-        if site:
-            return f"click the current browser result on {site}"
+        if site in {"google", "youtube"} and active_context.get("last_query"):
+            return f"click the first browser result on {site}"
 
     if normalized in {"that one", "this one", "the same one", "do it", "do that", "try it", "try that"}:
         if last_title:
             return f"click the browser element with visible text {last_title!r}"
-        if site:
-            return f"repeat the last browser action on {site}"
+        if site in {"google", "youtube"} and active_context.get("last_query"):
+            return f"click the first browser result on {site}"
 
     return None
 
