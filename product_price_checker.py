@@ -882,11 +882,31 @@ class BrowserPriceChecker:
                             product_name,
                             direct_snapshot,
                         )
-                        direct_price = best_nearby_price(
-                            direct_body,
-                            product_name,
-                            model_number=model_number,
-                        )
+                        direct_price = None
+                        for selector in profile.get("price_selectors", []) or []:
+                            try:
+                                selector_raw = self.browser_extract_text(selector=selector)
+                            except TypeError:
+                                selector_raw = self.browser_extract_text(selector)
+                            except Exception:
+                                continue
+                            candidate_price = _select_best_price(_coerce_text(selector_raw))
+                            if candidate_price is not None:
+                                direct_price = candidate_price
+                                break
+
+                        if direct_price is None:
+                            lower_direct = direct_body.lower()
+                            anchor_index = -1
+                            for lookup in (model_number, product_name):
+                                needle = str(lookup or "").strip().lower()
+                                if needle:
+                                    anchor_index = lower_direct.find(needle)
+                                    if anchor_index >= 0:
+                                        break
+                            if anchor_index >= 0:
+                                nearby = direct_body[anchor_index:anchor_index + 900]
+                                direct_price = _select_best_price(nearby)
 
                         if direct_score >= score:
                             score = direct_score
