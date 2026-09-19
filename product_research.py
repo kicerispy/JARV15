@@ -4141,10 +4141,10 @@ def _enrich_product_price_comparisons(
             continue
 
         comparison = product.get("price_comparison") or {}
-        if isinstance(budget, (int, float)) and budget >= 0:
-            eligible_offers = comparison.get("budget_verified_offers") or []
-        else:
-            eligible_offers = comparison.get("verified_offers") or []
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
 
         verified_price = None
         for offer in eligible_offers:
@@ -4257,6 +4257,17 @@ def _enrich_product_price_comparisons(
             comparison["budget_verified_offers"] = budget_offers
             comparison["budget_eligible"] = bool(budget_offers)
             comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
             product["price_comparison"] = comparison
 
         def product_is_budget_eligible(name: str) -> bool:
