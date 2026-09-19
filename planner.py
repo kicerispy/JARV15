@@ -101,14 +101,123 @@ JSON_ARGUMENT_TOOLS = {
 
 
 # ==========================================================
+# Planner Scope
+# ==========================================================
+
+_BROWSER_PLANNER_TOOLS = {
+    name
+    for name in AVAILABLE_TOOLS
+    if name.startswith("browser_")
+} | {
+    "open_program",
+    "open_website",
+    "search_website",
+    "capture_screen",
+    "analyze_screen",
+    "verify_screen",
+}
+
+_CODE_PLANNER_TOOLS = {
+    "write_file",
+    "read_file",
+    "edit_file",
+    "delete_file",
+    "code_search",
+    "code_test",
+    "code_diagnose",
+    "dev_command",
+    "code_checkpoint",
+    "code_restore_checkpoint",
+    "list_files",
+    "find_file",
+}
+
+def _planner_tool_scope(
+    user_command: str,
+) -> Optional[set[str]]:
+    """Return a narrow planner tool scope for clearly typed task domains."""
+    text = str(user_command or "").strip().lower()
+
+    if not text:
+        return None
+
+    code_signals = (
+        "code",
+        "coding",
+        "python",
+        "javascript",
+        "typescript",
+        "source file",
+        "stack trace",
+        "exception",
+        "traceback",
+        "compile",
+        "pytest",
+        "refactor",
+        "repository",
+        "git",
+        "bug",
+        "debug",
+        "repair",
+    )
+
+    browser_signals = (
+        "browser",
+        "chrome",
+        "website",
+        "web page",
+        "webpage",
+        "google",
+        "youtube",
+        "bing",
+        "url",
+        "link",
+        "button",
+        "search box",
+        "search field",
+        "textbox",
+        "email field",
+        "sign in",
+        "pricing",
+        "page",
+        "navigate",
+        "click",
+        "fill",
+        "press enter",
+        "scroll",
+        "download",
+    )
+
+    if any(signal in text for signal in code_signals):
+        return _CODE_PLANNER_TOOLS
+
+    if any(signal in text for signal in browser_signals):
+        return _BROWSER_PLANNER_TOOLS
+
+    return None
+
+
+# ==========================================================
 # Planner Prompt
 # ==========================================================
 
-def _planner_prompt() -> str:
+def _planner_prompt(
+    tool_names: Optional[set[str]] = None,
+) -> str:
     """Build the planner prompt with available tools."""
+    selected_tools = (
+        AVAILABLE_TOOLS
+        if not tool_names
+        else {
+            name: AVAILABLE_TOOLS[name]
+            for name in AVAILABLE_TOOLS
+            if name in tool_names
+        }
+    )
+
     tool_list = "\n".join(
         f"{name}: {desc}"
-        for name, desc in AVAILABLE_TOOLS.items()
+        for name, desc in selected_tools.items()
     )
     return f"""
 You are JARVIS's task planner â€” an expert software engineer and systems architect.
@@ -119,9 +228,14 @@ If the request needs no tool (a question, chit-chat, opinion,
 or something you'd just answer in conversation), return an
 empty steps list.
 
-Available tools:
+Available tools for this request:
 
 {tool_list}
+
+Tool-scope rule:
+- Use only tools in the scoped list above.
+- Prefer a deterministic browser tool over screen automation when available.
+- Do not invent tools or switch domains without evidence from the request.
 
 Rules:
 
@@ -1768,7 +1882,13 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 """
 
     else:
-        system_content = _planner_prompt() + context_str + history_str
+        planner_scope = _planner_tool_scope(user_command)
+
+        system_content = (
+            _planner_prompt(planner_scope)
+            + context_str
+            + history_str
+        )
 
     messages = [
         {
