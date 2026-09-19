@@ -42,6 +42,22 @@ class SmartRouterTests(unittest.TestCase):
                 command,
             )
 
+    def test_direct_browser_url_routes_fast(self):
+        from smart_router import route_command
+
+        for command in (
+            "Go to https://www.python.org",
+            "Navigate to https://www.example.com/docs",
+            "Visit www.python.org",
+        ):
+            decision = route_command(command)
+            self.assertEqual(
+                decision.kind,
+                "fast",
+                command,
+            )
+
+
     def test_multi_step_request_routes_agent(self):
         from smart_router import route_command
 
