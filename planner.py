@@ -1233,8 +1233,21 @@ def create_plan(
         "click on the first result",
         "click on first result",
 
+        "click the first browser result",
+        "click first browser result",
+        "click the first browser result on google",
+        "click first browser result on google",
+        "click the first browser result on youtube",
+        "click first browser result on youtube",
+
         "open the first result",
         "open first result",
+        "open the first browser result",
+        "open first browser result",
+        "open the first browser result on google",
+        "open first browser result on google",
+        "open the first browser result on youtube",
+        "open first browser result on youtube",
 
         "play the first result",
         "play first result",
