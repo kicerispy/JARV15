@@ -245,6 +245,7 @@ def test_status_message_reports_current_activity():
 
     controller._task = task
     controller._task_state = task_state
+    controller._thread = threading.current_thread()
 
     assert controller.status_message() == (
         "I'm validating the result. I'm on step 3 of 5."
