@@ -869,7 +869,7 @@ def build_browser_dom_plan(user_request):
     match = re.match(
         r"^(?:find|locate|look for) "
         r"(?:the )?(.+?) "
-        r"(?:on|in) (?:the )?(?:current )?page$",
+        r"(?:on|in) (?:the )?(?:current |this )?page$",
         normalized,
         re.IGNORECASE,
     )
