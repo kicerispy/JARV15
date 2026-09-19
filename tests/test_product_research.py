@@ -85,6 +85,16 @@ def test_product_research_scope_is_narrow():
     assert scope == {"product_research"}
 
 
+def test_best_product_question_gets_research_scope():
+    from planner import _planner_tool_scope
+
+    scope = _planner_tool_scope(
+        "What are the best headphones under $150?"
+    )
+
+    assert scope == {"product_research"}
+
+
 def test_shopping_question_routes_to_agent():
     from smart_router import route_command
 
