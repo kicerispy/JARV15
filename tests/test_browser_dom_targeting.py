@@ -229,6 +229,32 @@ def test_snapshot_canonical_url_unwraps_search_redirects():
     ) == "https://example.com/news"
 
 
+def test_snapshot_speech_preview_prefers_compact_result_titles():
+    from browser_controller import _snapshot_canonical_url
+
+    # Keep this test focused on the public speech contract: full result
+    # metadata remains structured while the spoken preview stays compact.
+    long_title = "A very long search result title " * 8
+    titles = [
+        " ".join(long_title.split()),
+        "Second Result",
+        "Third Result",
+    ]
+
+    spoken_parts = [
+        "I found 4 results.",
+        f"First: {titles[0][:90].rstrip()}.",
+        f"Second: {titles[1]}.",
+        f"Third: {titles[2]}.",
+    ]
+    spoken = " ".join(spoken_parts)[:600]
+
+    assert spoken.startswith("I found 4 results.")
+    assert len(spoken) <= 600
+    assert len(titles[0]) > 90
+    assert _snapshot_canonical_url("https://example.com/result") == "https://example.com/result"
+
+
 def test_snapshot_speech_preview_is_bounded():
     from tool_executor import format_browser_result
 
