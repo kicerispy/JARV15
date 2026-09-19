@@ -393,9 +393,21 @@ def _queries(subject, budget):
             ]
         )
 
-        # Exact-phrase discovery comes first. Existing queries stay
-        # afterward as additional coverage/fallbacks.
-        queries = phrase_queries + queries
+        # Official manufacturer queries go first. Search-engine result
+        # quality is uneven, so do not allow broad exact-phrase discovery
+        # to consume the candidate ceiling before official sources are seen.
+        manufacturer_queries = [
+            f"{subject} official manufacturer specifications".strip(),
+            f"{subject} official product page".strip(),
+        ]
+
+        # Then use exact-phrase discovery and the remaining research queries
+        # as broader coverage/fallbacks.
+        queries = manufacturer_queries + phrase_queries + [
+            query
+            for query in queries
+            if query not in manufacturer_queries
+        ]
 
     return list(dict.fromkeys(q for q in queries if q))
 
