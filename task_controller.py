@@ -247,6 +247,28 @@ class BackgroundTaskController:
                 self._completion_event.clear()
             return None, completed
 
+    def _clear_pending_speech_locked(self) -> int:
+        """Discard queued worker speech while the controller lock is held."""
+        cleared = 0
+
+        while True:
+            try:
+                self._speech_queue.get_nowait()
+            except Empty:
+                break
+
+            self._speech_queue.task_done()
+            cleared += 1
+
+        self._pending_speech_count = 0
+        self._last_pending_message = ""
+        return cleared
+
+    def clear_pending_speech(self) -> int:
+        """Discard worker speech that has not started playing yet."""
+        with self._lock:
+            return self._clear_pending_speech_locked()
+
     def _queue_speech(self, message: str) -> bool:
         """Queue worker speech for safe playback by the main loop."""
         text = str(message or "").strip()
@@ -255,6 +277,15 @@ class BackgroundTaskController:
             return False
 
         with self._lock:
+            task_state = self._task_state
+
+            if task_state is not None:
+                try:
+                    if task_state.is_cancelled():
+                        return False
+                except Exception:
+                    pass
+
             if (
                 self._pending_speech_count > 0
                 and text == self._last_pending_message
@@ -263,8 +294,8 @@ class BackgroundTaskController:
 
             self._last_pending_message = text
             self._pending_speech_count += 1
+            self._speech_queue.put(text)
 
-        self._speech_queue.put(text)
         return False
 
     def drain_speech(
@@ -276,6 +307,17 @@ class BackgroundTaskController:
         drained = 0
 
         while drained < max_messages:
+            with self._lock:
+                task_state = self._task_state
+
+                if task_state is not None:
+                    try:
+                        if task_state.is_cancelled():
+                            self._clear_pending_speech_locked()
+                            break
+                    except Exception:
+                        pass
+
             try:
                 message = self._speech_queue.get_nowait()
             except Empty:
@@ -517,6 +559,11 @@ class BackgroundTaskController:
 
             task.status = "cancellation_requested"
             task.error = "Cancellation requested by the user."
+
+            # Remove worker announcements already waiting in the queue.
+            # The main loop will provide the single explicit cancellation
+            # response instead of replaying stale progress afterward.
+            self._clear_pending_speech_locked()
 
         try:
             task_state.cancel()
