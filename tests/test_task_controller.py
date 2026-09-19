@@ -551,3 +551,16 @@ def test_delivery_layer_suppresses_duplicate_queue_entries():
         lambda message: spoken.append(message) or False
     ) == 2
     assert spoken == ["Task complete."]
+
+
+def test_delivery_layer_normalizes_formatting_differences():
+    controller = BackgroundTaskController(None)
+
+    controller._speech_queue.put("Found 'Downloads' on the page.")
+    controller._speech_queue.put("Found  'Downloads'   on the page.\u200b")
+
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 2
+    assert spoken == ["Found 'Downloads' on the page."]
