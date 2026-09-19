@@ -572,6 +572,10 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
 
     if "google." in url:
         locator = page.locator("div#search a:has(h3)")
+        try:
+            await locator.first.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            pass
         for index in range(min(await locator.count(), 10)):
             link = locator.nth(index)
             try:
@@ -592,6 +596,10 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
 
     elif "bing.com" in url:
         locator = page.locator("li.b_algo h2 a")
+        try:
+            await locator.first.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            pass
         for index in range(min(await locator.count(), 10)):
             link = locator.nth(index)
             try:
@@ -614,6 +622,10 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
             "ytd-video-renderer a#video-title, "
             "ytd-search ytd-video-renderer #video-title"
         )
+        try:
+            await locator.first.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            pass
         for index in range(min(await locator.count(), 10)):
             item = locator.nth(index)
             try:
