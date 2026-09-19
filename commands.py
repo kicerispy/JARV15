@@ -795,7 +795,7 @@ def build_browser_search_plan(
 
 def _browser_dom_target(target: str):
     """Convert a natural browser target into one semantic DOM target."""
-    target = clean_text(target).strip().rstrip("?.!").strip()
+    target = normalize_command(target).strip().rstrip("?.!").strip()
 
     if not target:
         return None
@@ -853,7 +853,7 @@ def _browser_dom_target(target: str):
 
 def build_browser_dom_plan(user_request):
     """Build deterministic Playwright DOM actions from natural language."""
-    normalized = clean_text(user_request)
+    normalized = normalize_command(user_request)
 
     # Find/inspect an element.
     match = re.match(
