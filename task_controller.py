@@ -643,7 +643,7 @@ class BackgroundTaskController:
                 task_status == "planning"
                 or status == "starting"
             ):
-                return "I'm getting the task underway."
+                return "I'm planning the task now."
 
             current = int(
                 state.get(
@@ -660,6 +660,48 @@ class BackgroundTaskController:
                 )
                 or 0
             )
+
+            current_tool = str(
+                state.get("current_tool", "") or ""
+            ).strip()
+
+            activity = {
+                "code_checkpoint": "I'm creating a safety checkpoint.",
+                "code_search": "I'm locating the relevant code.",
+                "find_file": "I'm locating the relevant file.",
+                "list_files": "I'm locating the relevant files.",
+                "read_file": "I'm inspecting the relevant source.",
+                "code_diagnose": "I'm checking what is actually failing.",
+                "edit_file": "I'm applying the change.",
+                "write_file": "I'm updating the code.",
+                "delete_file": "I'm removing the requested code.",
+                "code_test": "I'm validating the result.",
+                "browser_connect": "I'm connecting to the browser.",
+                "browser_search_google": "I'm searching the browser.",
+                "browser_search_bing": "I'm searching the browser.",
+                "browser_goto": "I'm navigating to the page.",
+                "browser_click_first_result": "I'm interacting with the page.",
+                "browser_click_first_bing_result": "I'm interacting with the page.",
+                "browser_click_result": "I'm interacting with the page.",
+                "browser_click_element": "I'm interacting with the page.",
+                "browser_fill_element": "I'm filling in the page.",
+                "browser_press_key": "I'm entering the requested input.",
+                "browser_extract_text": "I'm reading the page.",
+                "open_website": "I'm opening the website.",
+                "open_program": "I'm opening the application.",
+            }.get(
+                current_tool,
+                "",
+            )
+
+            if activity and total > 0 and current > 0:
+                return (
+                    f"{activity} "
+                    f"I'm on step {current} of {total}."
+                )
+
+            if activity:
+                return activity
 
             if total > 0 and current > 0:
                 return (
