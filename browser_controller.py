@@ -1116,7 +1116,34 @@ def browser_extract_text(
 ):
     async def _extract():
         page = await _init_browser()
-        locator = _locator(page, selector, text, role)
+
+        # A blank target means "read the current page". This makes the tool
+        # useful both from the deterministic router and from direct calls.
+        selector_value = str(selector or "").strip()
+        text_value = str(text or "").strip()
+        role_value = str(role or "").strip()
+
+        if not selector_value and not text_value and not role_value:
+            selector_value = "body"
+
+        # Give client-rendered pages a brief chance to populate after
+        # navigation before reading their DOM.
+        try:
+            await page.wait_for_load_state(
+                "domcontentloaded",
+                timeout=5_000,
+            )
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(500)
+
+        locator = _locator(
+            page,
+            selector_value,
+            text_value,
+            role_value,
+        )
         info = await _dom_target_info(locator)
 
         if not info["found"]:
@@ -1127,19 +1154,125 @@ def browser_extract_text(
                 "action": "extract_text",
                 "error": "No matching element found.",
                 **info,
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(
+                    selector_value,
+                    text_value,
+                    role_value,
+                ),
             }
 
-        extracted = (await locator.first.inner_text(timeout=5_000)).strip()
+        extracted = ""
+
+        try:
+            extracted = (
+                await locator.first.inner_text(timeout=5_000)
+            ).strip()
+        except Exception:
+            pass
+
+        # Some applications expose readable text through textContent even
+        # when Playwright's inner_text is empty.
+        if not extracted:
+            try:
+                extracted = (
+                    await locator.first.text_content(timeout=3_000)
+                or ""
+                ).strip()
+            except Exception:
+                pass
+
+        # If the requested target is the page body, inspect child frames too.
+        # Embedded applications sometimes render their useful DOM inside an
+        # iframe while the top-level body remains nearly empty.
+        frame_texts = []
+        if (
+            not extracted
+            and selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            for frame in page.frames:
+                try:
+                    frame_body = frame.locator("body")
+                    if await frame_body.count() == 0:
+                        continue
+
+                    frame_text = (
+                        await frame_body.first.inner_text(timeout=2_000)
+                    ).strip()
+
+                    if frame_text:
+                        frame_texts.append(frame_text)
+                except Exception:
+                    continue
+
+            if frame_texts:
+                unique = []
+                seen = set()
+                for value in frame_texts:
+                    if value in seen:
+                        continue
+                    seen.add(value)
+                    unique.append(value)
+                extracted = "\n\n".join(unique)
+
+        # Final top-level DOM fallback for heavily client-rendered pages.
+        if (
+            not extracted
+            and selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            try:
+                extracted = (
+                    await page.evaluate(
+                        """() => {
+                            const body = document.body;
+                            if (!body) return "";
+                            return (
+                                body.innerText ||
+                                body.textContent ||
+                                document.documentElement?.innerText ||
+                                document.documentElement?.textContent ||
+                                ""
+                            );
+                        }"""
+                    )
+                ).strip()
+            except Exception:
+                pass
+
+        metadata_only = False
+        if not extracted:
+            try:
+                title = (await page.title()).strip()
+            except Exception:
+                title = ""
+
+            url = str(getattr(page, "url", "") or "").strip()
+
+            metadata_lines = []
+            if title:
+                metadata_lines.append(f"Page title: {title}")
+            if url:
+                metadata_lines.append(f"URL: {url}")
+
+            extracted = "\n".join(metadata_lines)
+            metadata_only = bool(extracted)
 
         return {
             "success": True,
-            "verified": True,
+            "verified": bool(extracted) and not metadata_only,
             "action": "extract_text",
             "text": extracted,
             "characters": len(extracted),
             "target_count": info["count"],
-            **_dom_target_args(selector, text, role),
+            "metadata_only": metadata_only,
+            **_dom_target_args(
+                selector_value,
+                text_value,
+                role_value,
+            ),
         }
 
     try:
@@ -1153,7 +1286,6 @@ def browser_extract_text(
             "error": str(exc),
             **_dom_target_args(selector, text, role),
         }
-
 
 def capture_screenshot() -> bytes:
     async def _shot():
