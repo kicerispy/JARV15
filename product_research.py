@@ -292,14 +292,17 @@ def _queries(subject, budget):
 
     phrase = f'"{clean}"'
     queries = [
-        f"{phrase} reviews under {budget_text}".strip(),
-        f"{phrase} best budget {budget_text}".strip(),
+        f"{phrase} reviews".strip(),
         f"{phrase} comparison".strip(),
         f"{phrase} expert review".strip(),
         f"{clean} official manufacturer specifications".strip(),
         f"{clean} official product page".strip(),
         f"{phrase} cheaper alternatives".strip(),
     ]
+    if budget_text:
+        queries.insert(0, f"{phrase} reviews under {budget_text}".strip())
+        queries.insert(1, f"{phrase} best budget {budget_text}".strip())
+
     return list(dict.fromkeys(query for query in queries if query))
 
 def _is_search_url(url: str) -> bool:
