@@ -100,6 +100,7 @@ class TaskState:
     recovery_count: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _progress_callback: Any = field(default=None, repr=False, compare=False)
+    _last_progress_key: Optional[str] = field(default=None, repr=False, compare=False)
     completion_spoken: bool = False
 
     def prepare(self, description: str, total_steps: int) -> None:
@@ -116,6 +117,7 @@ class TaskState:
             self.last_error = None
             self.attempts = 0
             self.recovery_count = 0
+            self._last_progress_key = None
             self.completion_spoken = False
 
     def start(self, description: str, total_steps: int) -> bool:
@@ -136,6 +138,7 @@ class TaskState:
             self.last_error = None
             self.attempts = 0
             self.recovery_count = 0
+            self._last_progress_key = None
             self.completion_spoken = False
             return True
 
@@ -151,17 +154,33 @@ class TaskState:
         with self._lock:
             self._progress_callback = callback
 
-    def report_progress(self, message: str) -> None:
-        """Report a concise progress update without failing the task."""
+    def report_progress(
+        self,
+        message: str,
+        key: Optional[str] = None,
+    ) -> None:
+        """Report a milestone update once per logical progress stage."""
         if not message:
             return
 
+        text = str(message).strip()
+        if not text:
+            return
+
+        progress_key = str(
+            key if key is not None else text
+        ).strip().lower()
+
         with self._lock:
+            if progress_key == self._last_progress_key:
+                return
+
+            self._last_progress_key = progress_key
             callback = self._progress_callback
 
         if callback is not None:
             try:
-                callback(str(message))
+                callback(text)
             except Exception:
                 pass
 
