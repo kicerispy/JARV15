@@ -296,6 +296,14 @@ def _queries(subject, budget):
     queries = [
         # General product research
         f"{subject} reviews price under {budget_text}".strip(),
+
+        # Manufacturer coverage early so source discovery cannot fill the
+        # candidate ceiling before official specifications/product pages
+        # are queried.
+        f"{subject} official manufacturer specifications".strip(),
+        f"{subject} official product page".strip(),
+
+        # Comparative expert research
         f"{subject} best comparison under {budget_text}".strip(),
         f"{subject} expert review".strip(),
         f"{subject} problems issues".strip(),
@@ -312,10 +320,6 @@ def _queries(subject, budget):
         f"{subject} comparison YouTube".strip(),
         f"{subject} hands on YouTube".strip(),
 
-        # Manufacturer
-        f"{subject} official manufacturer specifications".strip(),
-        f"{subject} official product page".strip(),
-
         # Retail
         f"{subject} Amazon".strip(),
         f"{subject} Best Buy".strip(),
@@ -323,7 +327,6 @@ def _queries(subject, budget):
 
         # Alternatives
         f"{subject} cheaper alternatives".strip(),
-    ]
 
     # ------------------------------------------------------------
     # Broad exact-phrase discovery
@@ -604,8 +607,8 @@ _RESEARCH_HTTP_TIMEOUT = 15
 _RESEARCH_HEADLESS_TIMEOUT = 18
 _RESEARCH_TEXT_LIMIT = 6000
 _RESEARCH_MAX_DISCOVERY = max(
-    int(MAX_SOURCES) * 3,
-    24,
+    int(MAX_SOURCES) * 4,
+    48,
 )
 
 _RESEARCH_HEADERS = {
@@ -2171,10 +2174,7 @@ def _research_enough_sources(
             + 1
         )
 
-    if len(sources) >= _RESEARCH_MAX_DISCOVERY:
-        return True
-
-    if (
+    has_core_coverage = (
         len(sources) >= 12
         and types.get(
             "independent_review",
@@ -2198,8 +2198,16 @@ def _research_enough_sources(
                 0,
             ) >= 1
         )
-    ):
+    )
+
+    if has_core_coverage:
         return True
+
+    # Reaching the candidate ceiling without core coverage should not
+    # terminate discovery prematurely. Continue through the remaining
+    # targeted queries so a missing manufacturer/community/video family
+    # still has a chance to contribute.
+    return False
 
     return False
 
