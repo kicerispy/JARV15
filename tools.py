@@ -2634,6 +2634,11 @@ BAREHANDS_TOOLS = {
 }
 
 
+PRODUCT_RESEARCH_TOOLS = {
+    "product_research",
+}
+
+
 BROWSER_TOOLS = {
     "browser_find_element",
     "browser_click_element",
@@ -3008,6 +3013,10 @@ def _run_tool_raw(
 
     if tool_name in BAREHANDS_TOOLS:
         return getattr(barehands_tools, tool_name)(argument)
+
+    if tool_name in PRODUCT_RESEARCH_TOOLS:
+        from product_research import research_product
+        return research_product(argument)
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
