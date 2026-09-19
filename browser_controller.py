@@ -1242,6 +1242,30 @@ def browser_extract_text(
                     unique.append(value)
                 extracted = "\n\n".join(unique)
 
+        # Pull visible text from common semantic elements as a fallback
+        # when a browser page paints content but body.innerText is empty.
+        if (
+            not extracted
+            and selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            try:
+                semantic_text = await page.evaluate(
+                    """() => Array.from(
+                        document.querySelectorAll(
+                            "h1,h2,h3,h4,h5,h6,p,a,button,li,td,th,label,summary"
+                        )
+                    )
+                    .map(el => (el.innerText || el.textContent || "").trim())
+                    .filter(Boolean)
+                    .join("\n")
+                    """,
+                )
+                extracted = str(semantic_text or "").strip()
+            except Exception:
+                pass
+
         # Final top-level DOM fallback for heavily client-rendered pages.
         if (
             not extracted
@@ -1265,6 +1289,43 @@ def browser_extract_text(
                         }"""
                     )
                 ).strip()
+            except Exception:
+                pass
+
+        # Last-resort HTML fallback. This catches pages where the
+        # browser visibly contains text but the layout tree exposes little
+        # through innerText/textContent.
+        if (
+            not extracted
+            and selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            try:
+                import html as html_module
+                import re as regex_module
+
+                markup = await page.content()
+                stripped = regex_module.sub(
+                    r"<script\\b[^>]*>[\\s\\S]*?</script>|<style\\b[^>]*>[\\s\\S]*?</style>",
+                    " ",
+                    markup,
+                    flags=regex_module.IGNORECASE,
+                )
+                stripped = regex_module.sub(
+                    r"<[^>]+>",
+                    " ",
+                    stripped,
+                )
+                stripped = html_module.unescape(stripped)
+                stripped = regex_module.sub(
+                    r"\\s+",
+                    " ",
+                    stripped,
+                ).strip()
+
+                if len(stripped) > 20:
+                    extracted = stripped
             except Exception:
                 pass
 
