@@ -34,6 +34,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_wait_for_element": "Wait for a browser DOM element to become visible using selector, text, role, or accessible name. Argument is JSON.",
     "browser_extract_text": "Extract text from a browser DOM element selected by selector, text, role, or accessible name. Argument is JSON.",
     "browser_find_text": "Search the readable text of the current browser page for a phrase and return nearby context. Argument is JSON.",
+    "product_research": "Research a product or product category across multiple online sources. Compare reviews, prices, value, cheaper alternatives, and better-reviewed alternatives. Argument is the full user request or JSON.",
     "browser_click_first_result": "Click the first organic Google or YouTube result through the controlled browser DOM. Argument is JSON.",
     "weather": "Get current weather. argument = location, or empty for default.",
     "current_time": "Get current time. argument = timezone/city, or empty for local.",
@@ -95,6 +96,7 @@ JSON_ARGUMENT_TOOLS = {
     "browser_wait_for_element",
     "browser_extract_text",
     "browser_find_text",
+    "product_research",
     "code_diagnose",
     "dev_command",
 }
@@ -103,6 +105,11 @@ JSON_ARGUMENT_TOOLS = {
 # ==========================================================
 # Planner Scope
 # ==========================================================
+
+_RESEARCH_PLANNER_TOOLS = {
+    "product_research",
+}
+
 
 _BROWSER_PLANNER_TOOLS = {
     name
@@ -161,6 +168,23 @@ def _planner_tool_scope(
         "repair",
     )
 
+    research_signals = (
+        "product research",
+        "product",
+        "products",
+        "reviews",
+        "review",
+        "alternative",
+        "alternatives",
+        "cheaper",
+        "best value",
+        "best price",
+        "worth buying",
+        "which should i buy",
+        "compare prices",
+        "compare products",
+    )
+
     browser_signals = (
         "browser",
         "chrome",
@@ -190,6 +214,13 @@ def _planner_tool_scope(
 
     if any(signal in text for signal in code_signals):
         return _CODE_PLANNER_TOOLS
+
+    # Product/review/price research has its own orchestration tool. Keep the
+    # planner from expanding one research request into dozens of fragile DOM steps.
+    if any(signal in text for signal in research_signals) and (
+        any(word in text for word in ("find", "research", "review", "compare", "recommend", "buy", "price", "alternative"))
+    ):
+        return _RESEARCH_PLANNER_TOOLS
 
     if any(signal in text for signal in browser_signals):
         return _BROWSER_PLANNER_TOOLS
@@ -342,6 +373,16 @@ behave like a careful senior engineer working directly in the project:
 8. If validation fails, treat the failure output as new evidence and iterate.
 9. Stop only when the requested behavior is verified, or when the evidence
    shows that the problem cannot be safely completed.
+
+PRODUCT RESEARCH RULES:
+
+When the user asks to find products, compare prices, inspect reviews, or locate
+cheaper/better alternatives, prefer the product_research tool as the primary
+orchestration tool. It searches multiple result sets and source types, gathers
+bounded evidence, and returns separate best-match, value, cheaper-option, and
+better-reviewed outcomes. Do not replace it with a long sequence of generic
+browser clicks unless the request specifically asks for a particular website
+workflow.
 
 GENERIC BROWSER DOM RULES:
 
