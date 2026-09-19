@@ -244,6 +244,80 @@ def best_nearby_price(
     return best[1] if best else None
 
 
+def _host_is_expected(host: str, expected_domain: str) -> bool:
+    host = str(host or "").lower().strip().removeprefix("www.")
+    expected = str(expected_domain or "").lower().strip().removeprefix("www.")
+    return bool(expected and host == expected)
+
+
+def _is_direct_product_url(store_key: str, url: str) -> bool:
+    """Reject search/tracking/redirect URLs before they become product pages."""
+    try:
+        parsed = urlparse(str(url or ""))
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        path = (parsed.path or "").lower()
+    except Exception:
+        return False
+
+    profile = STORE_PROFILES.get(store_key) or {}
+    expected_domain = str(profile.get("domain") or "").lower().strip()
+    if not _host_is_expected(host, expected_domain):
+        return False
+
+    blocked_path_fragments = (
+        "/search",
+        "/searchpage",
+        "/catalogsearch",
+        "/newsearch",
+        "/cart",
+        "/checkout",
+        "/account",
+        "/signin",
+        "/login",
+        "/p/pl",
+        "/c/search",
+    )
+    if any(fragment in path for fragment in blocked_path_fragments):
+        return False
+
+    route_hints = {
+        "amazon": ("/dp/", "/gp/product/", "/gp/aw/d/"),
+        "bestbuy": ("/product/", "/site/"),
+        "walmart": ("/ip/",),
+        "target": ("/p/",),
+        "microcenter": ("/product/",),
+        "costco": ("/product",),
+        "newegg": ("/p/",),
+        "bhphoto": ("/c/product/",),
+    }
+    hints = route_hints.get(store_key)
+    if hints:
+        return any(path.startswith(hint) for hint in hints)
+
+    return bool(path and path != "/")
+
+
+def _direct_identity_score(product_name: str, snapshot: dict[str, Any]) -> float:
+    """Require the final product page title/headings to identify the product."""
+    if not isinstance(snapshot, dict):
+        return 0.0
+
+    candidates = [
+        " ".join(str(snapshot.get("title") or "").split())
+    ]
+    headings = snapshot.get("headings") or []
+    candidates.extend(
+        " ".join(str(value or "").split())
+        for value in headings
+        if str(value or "").strip()
+    )
+
+    return max(
+        (match_score(product_name, candidate) for candidate in candidates if candidate),
+        default=0.0,
+    )
+
+
 def match_score(product_name: str, observed_text: str, model_number: str = "") -> float:
     """Score whether observed text appears to describe the same product."""
     observed = normalize_product_text(observed_text)
@@ -419,18 +493,9 @@ class BrowserPriceChecker:
             if len(text) < 4 and score < 5.0:
                 continue
 
-            lowered = absolute.lower()
-            if any(
-                marker in lowered
-                for marker in (
-                    "/cart",
-                    "/checkout",
-                    "/account",
-                    "/signin",
-                    "/login",
-                    "/search",
-                )
-            ):
+            if not _is_direct_product_url(store_key, absolute):
+                # Search pages, tracking redirects, sponsored-ad links, and
+                # other non-product routes are not direct product evidence.
                 continue
 
             if best is None or score > best[0]:
@@ -528,14 +593,34 @@ class BrowserPriceChecker:
                     except Exception:
                         pass
 
+                direct_snapshot = {}
+                if self.browser_page_snapshot is not None:
+                    try:
+                        direct_snapshot = self.browser_page_snapshot(
+                            max_links=20
+                        ) or {}
+                    except TypeError:
+                        direct_snapshot = self.browser_page_snapshot() or {}
+
+                final_url = str(
+                    direct_snapshot.get("url") or direct_url
+                ).strip()
+
                 direct_raw = self.browser_extract_text(selector="body")
                 direct_body = _coerce_text(direct_raw)
 
-                if not is_blocked(direct_body):
+                if (
+                    not is_blocked(direct_body)
+                    and _is_direct_product_url(store_key, final_url)
+                ):
                     direct_score = match_score(
                         product_name,
                         direct_body,
                         model_number,
+                    )
+                    identity_score = _direct_identity_score(
+                        product_name,
+                        direct_snapshot,
                     )
                     direct_price = best_nearby_price(
                         direct_body,
@@ -546,11 +631,18 @@ class BrowserPriceChecker:
                     if direct_score >= score:
                         score = direct_score
 
-                    if direct_score >= 0.80:
+                    if (
+                        identity_score >= 0.80
+                        and direct_score >= 0.80
+                    ):
                         direct_product_page_seen = True
 
-                    if direct_score >= 0.80 and direct_price is not None:
+                    if (
+                        direct_product_page_seen
+                        and direct_price is not None
+                    ):
                         price = direct_price
+                        direct_url = final_url
 
             except TypeError:
                 try:
