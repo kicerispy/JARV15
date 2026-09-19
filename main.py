@@ -40,6 +40,7 @@ from conversation_handler import (
 )
 from logger import logger
 from model_manager import ModelManager
+from barehands_state import set_barehands_state
 from smart_router import route_command
 from memory import create_memory
 from planner import (
@@ -377,6 +378,9 @@ def process_command(
 
     if not user_input:
         return "done"
+
+    # Optional Barehands visual lifecycle state.
+    set_barehands_state("thinking")
 
     logger.info(
         f"USER: {user_input}"
@@ -1744,11 +1748,16 @@ def main():
                 )
                 return False
 
-            with state.io_lock:
-                result = speak_response(
-                    text,
-                    voice_speak,
-                )
+            set_barehands_state("speaking")
+
+            try:
+                with state.io_lock:
+                    result = speak_response(
+                        text,
+                        voice_speak,
+                    )
+            finally:
+                set_barehands_state("idle")
 
             logger.info(
                 f"PERF: TTS call: "
@@ -1783,12 +1792,17 @@ def main():
         if listen is None:
             return None
 
-        with state.io_lock:
-            return listen(
-                initial_audio=initial_audio,
-                mode=mode,
-                interrupt_event=interrupt_event,
-            )
+        set_barehands_state("listening")
+
+        try:
+            with state.io_lock:
+                return listen(
+                    initial_audio=initial_audio,
+                    mode=mode,
+                    interrupt_event=interrupt_event,
+                )
+        finally:
+            set_barehands_state("idle")
 
     # ==================================================
     # STARTUP MESSAGE
@@ -2035,13 +2049,18 @@ def main():
                     and state.task_controller.has_active_task()
                 )
 
-                with state.io_lock:
-                    triggered = (
-                        wait_for_wake_word(
-                            interrupt_event=typed_input.interrupt_event,
-                            active_task=active_task_for_wake,
+                set_barehands_state("listening")
+
+                try:
+                    with state.io_lock:
+                        triggered = (
+                            wait_for_wake_word(
+                                interrupt_event=typed_input.interrupt_event,
+                                active_task=active_task_for_wake,
+                            )
                         )
-                    )
+                finally:
+                    set_barehands_state("idle")
 
                 logger.info(
                     f"PERF: wake listener cycle: "
