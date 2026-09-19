@@ -1967,6 +1967,16 @@ def _research_http_search(
                     if not domain:
                         continue
 
+                    # Bing can ignore site: operators. Enforce the
+                    # requested domain ourselves so unrelated results never
+                    # masquerade as site-constrained evidence.
+                    requested_domain = _research_requested_domain(query)
+                    if requested_domain and not (
+                        domain == requested_domain
+                        or domain.endswith("." + requested_domain)
+                    ):
+                        continue
+
                     if (
                         domain == "google.com"
                         or domain.endswith(
@@ -2668,6 +2678,62 @@ def _discover(queries):
             ):
                 break
 
+    # Seed direct retailer search pages because Bing can ignore site:
+    # operators. This preserves retailer coverage without trusting mismatched
+    # search results.
+    retailer_seeds = (
+        ("amazon.com", "https://www.amazon.com/s?k={q}"),
+        ("bestbuy.com", "https://www.bestbuy.com/site/searchpage.jsp?st={q}"),
+        ("walmart.com", "https://www.walmart.com/search?q={q}"),
+        ("target.com", "https://www.target.com/s?searchTerm={q}"),
+        ("newegg.com", "https://www.newegg.com/p/pl?d={q}"),
+        ("bhphotovideo.com", "https://www.bhphotovideo.com/c/search?q={q}&sts=ma"),
+        ("microcenter.com", "https://www.microcenter.com/search/search_results.aspx?Ntt={q}"),
+        ("costco.com", "https://www.costco.com/CatalogSearch?keyword={q}"),
+        ("ebay.com", "https://www.ebay.com/sch/i.html?_nkw={q}"),
+    )
+
+    seed_item = ""
+    if queries:
+        seed_item = str(
+            _extract_item_and_budget(
+                queries[0]
+            )[0]
+            or ""
+        ).strip()
+
+    if seed_item:
+        encoded_item = requests.utils.quote(
+            seed_item,
+            safe="",
+        )
+
+        for domain, template in retailer_seeds:
+            if any(
+                str(source.get("domain") or "")
+                .lower()
+                .removeprefix("www.")
+                == domain
+                for source in discovered
+            ):
+                continue
+
+            _research_add_results(
+                discovered,
+                [
+                    {
+                        "title": f"{domain} search results",
+                        "url": template.format(q=encoded_item),
+                        "domain": domain,
+                        "source_type": "retailer",
+                        "snippet": "",
+                    }
+                ],
+                seen_urls,
+                engine="seed",
+                query=f"{seed_item} {domain}",
+            )
+
     print(
         "[JARVIS] JARVIS PRODUCT RESEARCH: "
         f"discovery complete: "
@@ -3238,7 +3304,7 @@ def _collect_evidence(sources):
 
         success = bool(
             fetched.get("success")
-        )
+        ) and len(readable) >= 200
 
         if success:
             print(
@@ -3254,6 +3320,7 @@ def _collect_evidence(sources):
                 f"NO USABLE EVIDENCE [{source_type}] "
                 f"{domain}"
             )
+            continue
 
         evidence.append(
             {
@@ -3385,6 +3452,46 @@ def _parse_json(text: str) -> dict[str, Any]:
 
 
 
+def _compact_evidence_for_synthesis(
+    evidence: list[dict[str, Any]],
+    per_source_chars: int = 2800,
+) -> list[dict[str, Any]]:
+    """
+    Reduce navigation boilerplate before sending evidence to the local LLM.
+    """
+    compact = []
+
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+
+        compact.append(
+            {
+                "id": source.get("id"),
+                "source_type": source.get("source_type"),
+                "domain": source.get("domain"),
+                "title": source.get("title"),
+                "url": source.get("url"),
+                "query": source.get("query"),
+                "requested_domain": source.get("requested_domain"),
+                "requested_domain_match": source.get(
+                    "requested_domain_match"
+                ),
+                "snippet": " ".join(
+                    str(source.get("snippet") or "").split()
+                )[:800],
+                "numeric_hints": source.get(
+                    "numeric_hints"
+                ) or {},
+                "text": " ".join(
+                    str(source.get("text") or "").split()
+                )[:per_source_chars],
+            }
+        )
+
+    return compact
+
+
 def _synthesize(
     request: str,
     item: str,
@@ -3408,7 +3515,10 @@ ITEM / CATEGORY: {item}
 {budget_note}
 
 SOURCE EVIDENCE:
-{json.dumps(evidence, ensure_ascii=False)}
+{json.dumps(
+    _compact_evidence_for_synthesis(evidence),
+    ensure_ascii=False,
+)}
 
 Use only the supplied evidence.
 Never invent product names, prices, ratings, review counts,
