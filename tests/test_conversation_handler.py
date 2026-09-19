@@ -31,7 +31,7 @@ class ConversationSpeechPipelineTests(unittest.TestCase):
                 }
             },
         ), mock.patch(
-            "conversation_handler.add_message",
+            "conversation.add_message",
         ):
             result = conversation_handler.handle_normal_conversation(
                 "Explain this.",
