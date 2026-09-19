@@ -164,10 +164,23 @@ def test_click_named_button_routes_to_dom_role_and_name():
     }]
 
 
-def test_dom_router_does_not_steal_contextual_result_clicks():
+def test_ordinal_result_clicks_route_to_browser_dom():
     from commands import get_fast_command
 
-    assert get_fast_command("Click the first result") is None
+    for command, index in (
+        ("Click the first result", 1),
+        ("Click the second result", 2),
+        ("Click the third result", 3),
+        ("Click the last result", -1),
+    ):
+        plan = get_fast_command(command)
+        assert plan is not None
+        assert plan["steps"] == [{
+            "tool": "browser_click_result",
+            "argument": (
+                '{"index": %d}' % index
+            ),
+        }]
 
 
 def test_open_chrome_remains_a_desktop_launch_command():
