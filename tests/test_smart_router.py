@@ -35,5 +35,21 @@ class SmartRouterTests(unittest.TestCase):
         self.assertEqual(decision.kind, "agent")
 
 
+    def test_ordinal_result_followups_route_contextual(self):
+        from smart_router import route_command
+
+        for command in (
+            "Click the second result",
+            "Choose the third result",
+            "Open the last link",
+        ):
+            decision = route_command(command)
+            self.assertEqual(
+                decision.kind,
+                "contextual",
+                command,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
