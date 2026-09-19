@@ -166,3 +166,21 @@ def test_product_research_dispatches_through_public_tool(monkeypatch):
     assert result.success is True
     assert captured["argument"] == '{"item":"wireless headphones","budget":150}'
     assert result.data["message"] == "Research complete."
+
+
+def test_product_research_fallback_recovers_external_links():
+    from product_research import _fallback_results_from_links
+
+    snapshot = {
+        "links": [
+            {"text": "Navigation", "href": "https://www.google.com/preferences"},
+            {"text": "RTINGS Wireless Headphones Review", "href": "https://www.rtings.com/headphones/reviews/example"},
+            {"text": "Best Wireless Headphones", "href": "https://www.bestbuy.com/site/example"},
+        ]
+    }
+
+    results = _fallback_results_from_links(snapshot, "google")
+
+    assert len(results) == 2
+    assert results[0]["url"] == "https://www.rtings.com/headphones/reviews/example"
+    assert results[1]["url"] == "https://www.bestbuy.com/site/example"
