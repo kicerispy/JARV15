@@ -1380,6 +1380,49 @@ def create_plan(
                 }
 
     # ========================================================
+    # DETERMINISTIC BROWSER READ ROUTER
+    # ========================================================
+    if normalized_command in {
+        "read the current browser page",
+        "read current browser page",
+        "read this page",
+        "read the page",
+        "read page",
+        "read the page text",
+        "show this page",
+    }:
+        return {
+            "goal": "read current browser page",
+            "steps": [
+                {
+                    "tool": "browser_extract_text",
+                    "argument": json.dumps({
+                        "selector": "body",
+                    }),
+                }
+            ],
+            "resolved_command": "read the current browser page",
+        }
+
+    if normalized_command in {
+        "inspect the current browser page",
+        "read the current browser title",
+        "read the page title",
+        "inspect the page title",
+    }:
+        return {
+            "goal": "inspect current browser page",
+            "steps": [
+                {
+                    "tool": "browser_page_info",
+                    "argument": "",
+                }
+            ],
+            "resolved_command": "inspect the current browser page",
+        }
+
+    # ========================================================
+    # ========================================================
     # DETERMINISTIC ORDINAL BROWSER RESULT ROUTER
     # ========================================================
     #
