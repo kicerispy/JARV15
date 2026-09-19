@@ -3394,7 +3394,7 @@ def _collect_one_evidence(index, source):
 
     print(
         "[JARVIS] JARVIS PRODUCT RESEARCH: "
-        f"EVIDENCE OK [{source_type}] {domain} method={fetched.get("method")} chars={len(readable)}"
+        f"EVIDENCE OK [{source_type}] {domain} method={fetched.get('method')} chars={len(readable)}"
     )
 
     return {
