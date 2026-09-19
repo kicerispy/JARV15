@@ -212,11 +212,21 @@ def _locator(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ):
-    """Build a Playwright locator from one explicit targeting strategy."""
+    """Build a Playwright locator from an explicit DOM targeting strategy.
+
+    name is an optional accessible name and is valid only with an ARIA role.
+    """
     selector = str(selector or "").strip()
     text = str(text or "").strip()
     role = str(role or "").strip()
+    name = str(name or "").strip()
+
+    if name and not role:
+        raise ValueError(
+            "Accessible name targeting requires an ARIA role."
+        )
 
     supplied = sum(bool(value) for value in (selector, text, role))
 
@@ -234,6 +244,8 @@ def _locator(
         return page.locator(selector)
 
     if role:
+        if name:
+            return page.get_by_role(role, name=name, exact=False)
         return page.get_by_role(role)
 
     return page.get_by_text(text, exact=False)
@@ -826,10 +838,11 @@ def browser_find_element(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ):
     async def _find():
         page = await _init_browser()
-        locator = _locator(page, selector, text, role)
+        locator = _locator(page, selector, text, role, name)
         info = await _dom_target_info(locator)
 
         return {
@@ -837,7 +850,7 @@ def browser_find_element(
             "verified": bool(info["found"] and info["visible"]),
             "action": "find_element",
             **info,
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
     try:
@@ -849,7 +862,7 @@ def browser_find_element(
             "retryable": True,
             "found": False,
             "error": str(exc),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
 
@@ -857,10 +870,11 @@ def browser_click_element(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ):
     async def _click():
         page = await _init_browser()
-        locator = _locator(page, selector, text, role)
+        locator = _locator(page, selector, text, role, name)
         info = await _dom_target_info(locator)
 
         if not info["found"]:
@@ -871,7 +885,7 @@ def browser_click_element(
                 "action": "click",
                 "error": "No matching element found.",
                 **info,
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(selector, text, role, name),
             }
 
         before_url = page.url
@@ -886,7 +900,7 @@ def browser_click_element(
                 "retryable": True,
                 "action": "click",
                 "error": str(exc),
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(selector, text, role, name),
             }
 
         await page.wait_for_timeout(350)
@@ -917,7 +931,7 @@ def browser_click_element(
                 if title_changed
                 else "click_accepted"
             ),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
     try:
@@ -929,7 +943,7 @@ def browser_click_element(
             "retryable": True,
             "action": "click",
             "error": str(exc),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
 
@@ -938,10 +952,11 @@ def browser_fill_element(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ):
     async def _fill():
         page = await _init_browser()
-        locator = _locator(page, selector, text, role)
+        locator = _locator(page, selector, text, role, name)
         info = await _dom_target_info(locator)
 
         if not info["found"]:
@@ -952,7 +967,7 @@ def browser_fill_element(
                 "action": "fill",
                 "error": "No matching element found.",
                 **info,
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(selector, text, role, name),
             }
 
         requested = str(value or "")
@@ -979,7 +994,7 @@ def browser_fill_element(
             "requested_value": requested,
             "characters": len(actual),
             "target_count": info["count"],
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
     try:
@@ -991,7 +1006,7 @@ def browser_fill_element(
             "retryable": True,
             "action": "fill",
             "error": str(exc),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
 
@@ -1000,10 +1015,11 @@ def browser_press_key(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ):
     async def _press():
         page = await _init_browser()
-        locator = _locator(page, selector, text, role)
+        locator = _locator(page, selector, text, role, name)
         info = await _dom_target_info(locator)
 
         if not info["found"]:
@@ -1014,7 +1030,7 @@ def browser_press_key(
                 "action": "press",
                 "error": "No matching element found.",
                 **info,
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(selector, text, role, name),
             }
 
         requested_key = str(key or "").strip()
@@ -1025,7 +1041,7 @@ def browser_press_key(
                 "retryable": False,
                 "action": "press",
                 "error": "Key cannot be empty.",
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(selector, text, role, name),
             }
 
         before_url = page.url
@@ -1040,7 +1056,7 @@ def browser_press_key(
                 "retryable": True,
                 "action": "press",
                 "error": str(exc),
-                **_dom_target_args(selector, text, role),
+                **_dom_target_args(selector, text, role, name),
             }
 
         await page.wait_for_timeout(250)
@@ -1060,7 +1076,7 @@ def browser_press_key(
             "after_title": after_title,
             "navigated": after_url != before_url,
             "title_changed": after_title != before_title,
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
     try:
@@ -1072,7 +1088,7 @@ def browser_press_key(
             "retryable": True,
             "action": "press",
             "error": str(exc),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
 
@@ -1084,7 +1100,7 @@ def browser_wait_for_element(
 ):
     async def _wait():
         page = await _init_browser()
-        locator = _locator(page, selector, text, role)
+        locator = _locator(page, selector, text, role, name)
 
         timeout_ms = max(1, int(timeout))
 
@@ -1102,7 +1118,7 @@ def browser_wait_for_element(
             "retryable": False,
             "timeout": timeout_ms,
             **info,
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
     try:
@@ -1115,7 +1131,7 @@ def browser_wait_for_element(
             "action": "wait_for_element",
             "found": False,
             "error": str(exc),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
 
@@ -1123,6 +1139,7 @@ def browser_extract_text(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
 ):
     async def _extract():
         page = await _init_browser()
@@ -1359,6 +1376,7 @@ def browser_extract_text(
                 selector_value,
                 text_value,
                 role_value,
+                "",
             ),
         }
 
@@ -1371,7 +1389,7 @@ def browser_extract_text(
             "retryable": True,
             "action": "extract_text",
             "error": str(exc),
-            **_dom_target_args(selector, text, role),
+            **_dom_target_args(selector, text, role, name),
         }
 
 def capture_screenshot() -> bytes:
