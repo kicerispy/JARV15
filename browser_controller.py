@@ -1263,10 +1263,39 @@ def browser_extract_text(
 
         extracted = ""
 
+        # For whole-page reads, use the same direct DOM text path that the
+        # readiness probe and diagnostics use. This keeps a page that is
+        # demonstrably exposing readable text from being reduced to an empty
+        # result by locator-specific extraction behavior.
+        if (
+            selector_value.lower() == "body"
+            and not text_value
+            and not role_value
+        ):
+            try:
+                direct_page_text = await page.evaluate(
+                    """() => {
+                        const body = document.body;
+                        if (!body) return "";
+                        return (
+                            body.innerText ||
+                            body.textContent ||
+                            document.documentElement?.innerText ||
+                            document.documentElement?.textContent ||
+                            ""
+                        ).trim();
+                    }"""
+                )
+                if isinstance(direct_page_text, str) and direct_page_text:
+                    extracted = direct_page_text
+            except Exception:
+                pass
+
         try:
-            extracted = (
-                await locator.first.inner_text(timeout=5_000)
-            ).strip()
+            if not extracted:
+                extracted = (
+                    await locator.first.inner_text(timeout=5_000)
+                ).strip()
         except Exception:
             pass
 
