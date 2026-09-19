@@ -194,6 +194,14 @@ _interrupt_lock = threading.Lock()
 
 _speak_lock = threading.Lock()
 
+# Suppress accidental back-to-back duplicate utterances caused by concurrent
+# task/completion delivery paths. Legitimate repeated speech after this short
+# window is still allowed.
+_DUPLICATE_SPEECH_WINDOW = 2.0
+_duplicate_speech_lock = threading.Lock()
+_last_spoken_text = ""
+_last_spoken_at = 0.0
+
 
 # ============================================================
 # LOAD PIPER
@@ -854,6 +862,23 @@ def speak(text):
     if not text:
         return False
 
+    # Final TTS-layer safety net: the task system may deliver the same final
+    # message through two completion paths during a race. Suppress only an
+    # identical utterance arriving immediately after the previous one.
+    now = time.monotonic()
+    global _last_spoken_text, _last_spoken_at
+    with _duplicate_speech_lock:
+        if (
+            text == _last_spoken_text
+            and now - _last_spoken_at < _DUPLICATE_SPEECH_WINDOW
+        ):
+            print(
+                f"JARVIS TTS: Suppressed duplicate utterance: {text}"
+            )
+            return False
+
+        _last_spoken_text = text
+        _last_spoken_at = now
 
     print(
         f"JARVIS TTS: {text}"
