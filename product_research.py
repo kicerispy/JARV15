@@ -3792,12 +3792,20 @@ def _synthesize(
         per_source_chars=1500,
     )
 
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
     prompt = f"""
 You are JARVIS's evidence-constrained product research analyst.
 
 USER REQUEST: {request}
 ITEM / CATEGORY: {item}
 {budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
 
 SOURCE EVIDENCE:
 {json.dumps(
@@ -3826,6 +3834,8 @@ Evidence rules:
 - For a hard-budget request, prioritize products explicitly described as
   budget/cheap picks or supported by an explicit non-MSRP price at or below
   the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Treat CANDIDATE SIGNALS as discovery hints extracted from the supplied evidence;
+  do not invent a product that is absent from those signals or source evidence.
 - The best_match must come from the evidence-supported budget set. If the
   evidence only supports premium products above budget, leave best_match null
   rather than promoting a premium flagship.
@@ -3989,6 +3999,77 @@ Keep every reason to one short sentence.
         )
 
     return run_synthesis(prompt)
+
+def _extract_candidate_signals(evidence: list[dict[str, Any]], budget: float | None = None) -> list[dict[str, Any]]:
+    """Extract concrete product names from evidence before LLM ranking."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        source_id = source.get("id")
+        source_type = str(source.get("source_type") or "")
+        text = " ".join(str(source.get("text") or "").split())
+        if not text:
+            continue
+
+        for brand in brands:
+            pattern = re.compile(
+                rf"\b{re.escape(brand)}\b(?:\s+[A-Za-z0-9][A-Za-z0-9&./+\-]*){{1,5}}"
+                ,
+                re.IGNORECASE,
+            )
+            for match in pattern.finditer(text):
+                candidate = " ".join(match.group(0).split()).strip(" ,.;:()[]")
+                candidate = re.sub(r"\s+(?:amazon|walmart|best buy|see it|read more)$", "", candidate, flags=re.IGNORECASE)
+                if not _is_specific_product_name(candidate):
+                    continue
+
+                tail = text[match.end():match.end() + 220]
+                neighborhood = f"{candidate} {tail}"
+                raw_prices = re.findall(
+                    r"(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)",
+                    neighborhood,
+                )
+                prices = []
+                for raw in raw_prices[:3]:
+                    try:
+                        value = float(raw.replace(",", ""))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+
+                key = " ".join(candidate.lower().split())
+                record = signals.setdefault(
+                    key,
+                    {"name": candidate, "source_ids": [], "observed_prices": [], "source_types": []},
+                )
+                if source_id not in record["source_ids"]:
+                    record["source_ids"].append(source_id)
+                if source_type and source_type not in record["source_types"]:
+                    record["source_types"].append(source_type)
+                for price in prices:
+                    if price not in record["observed_prices"]:
+                        record["observed_prices"].append(price)
+
+    output = list(signals.values())
+    for record in output:
+        prices = record.get("observed_prices") or []
+        record["budget_signal"] = bool(
+            isinstance(budget, (int, float))
+            and any(price <= float(budget) for price in prices)
+        )
+    output.sort(
+        key=lambda item: (
+            bool(item.get("budget_signal")),
+            len(item.get("source_ids") or []),
+            len(item.get("observed_prices") or []),
+        ),
+        reverse=True,
+    )
+    return output[:12]
 
 def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
     """Remove category-only model outputs before retailer verification."""
