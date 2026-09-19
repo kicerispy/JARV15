@@ -151,7 +151,7 @@ def _extract_item_and_budget(raw: str) -> tuple[str, float | None]:
     budget = None
     budget_patterns = (
         r"(?:under|below|less\s+than|up\s+to|maximum(?:\s+budget)?(?:\s+of)?)"
-        r"\s*\$?\s*([0-9][0-9,]*(?:\.\d+)?)",
+        r"\s*\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.\d+)?)\b",
         r"\$\s*([0-9][0-9,]*(?:\.\d+)?)"
         r"\s*(?:or\s+less|max(?:imum)?)?",
     )
@@ -165,7 +165,9 @@ def _extract_item_and_budget(raw: str) -> tuple[str, float | None]:
             break
 
     item = re.sub(
-        r"\s+(?:under|below|less\s+than|up\s+to)\s*\$?[0-9][0-9,]*(?:\.\d+)?\b.*$",
+        r"\s+(?:under|below|less\s+than|up\s+to)"
+        r"\s*\$?[0-9]+(?:,[0-9]{3})*(?:\.\d+)?"
+        r"(?=\s*(?:[,.;:!?]|$)).*$",
         "",
         item,
         flags=re.IGNORECASE,
@@ -266,6 +268,13 @@ def _queries(subject, budget):
     """
 
     subject = str(subject or "").strip()
+
+    # Defensive normalization keeps malformed planner/task text out of search queries.
+    normalized_subject, normalized_budget = _extract_item_and_budget(subject)
+    if normalized_subject:
+        subject = normalized_subject
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
 
     try:
         budget_text = f"${float(budget):g}"
@@ -2169,21 +2178,58 @@ def _research_enough_sources(
     return False
 
 
+def _research_requested_domain(query):
+    """Return the normalized site: domain requested by a query, if any."""
+    match = re.search(
+        r"\bsite:\s*([a-z0-9.-]+)",
+        str(query or "").lower(),
+    )
+    if not match:
+        return ""
+    return match.group(1).strip().lstrip("www.")
+
+
 def _research_add_results(
     discovered,
     results,
     seen_urls,
+    *,
+    engine="",
+    query="",
 ):
-    for result in results:
-        url = str(
-            result.get("url") or ""
-        ).strip()
+    requested_domain = _research_requested_domain(query)
 
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+
+        url = str(result.get("url") or "").strip()
         if not url or url in seen_urls:
             continue
 
+        normalized = dict(result)
+        normalized["engine"] = str(
+            normalized.get("engine") or engine or ""
+        ).strip().lower()
+        normalized["query"] = str(
+            normalized.get("query") or query or ""
+        ).strip()
+        normalized["requested_domain"] = requested_domain
+
+        result_domain = str(
+            normalized.get("domain") or _research_domain(url) or ""
+        ).strip().lower().lstrip("www.")
+        normalized["domain"] = result_domain
+        normalized["requested_domain_match"] = bool(
+            requested_domain
+            and (
+                result_domain == requested_domain
+                or result_domain.endswith("." + requested_domain)
+            )
+        )
+
         seen_urls.add(url)
-        discovered.append(result)
+        discovered.append(normalized)
 
         if len(discovered) >= _RESEARCH_MAX_DISCOVERY:
             break
@@ -2546,6 +2592,8 @@ def _discover(queries):
             discovered,
             candidates,
             seen_urls,
+            engine="google",
+            query=query,
         )
 
         print(
@@ -2592,6 +2640,8 @@ def _discover(queries):
                 discovered,
                 candidates,
                 seen_urls,
+                engine="bing",
+                query=query,
             )
 
             print(
@@ -3196,6 +3246,10 @@ def _collect_evidence(sources):
         evidence.append(
             {
                 "id": index,
+                "engine": str(source.get("engine") or "").strip(),
+                "query": str(source.get("query") or "").strip(),
+                "requested_domain": str(source.get("requested_domain") or "").strip(),
+                "requested_domain_match": bool(source.get("requested_domain_match")),
                 "source_type": source_type,
                 "domain": domain,
                 "title": title,
@@ -3358,11 +3412,11 @@ Separate these outcomes:
 These may be the same product or different products.
 
 Return ONLY JSON:
-{{
+{{{{
   "summary": "2-5 sentence conclusion",
   "confidence": "high|medium|low",
   "products": [
-    {{
+    {{{{
       "name": "product",
       "model_number": null,
       "price": null,
@@ -3372,23 +3426,23 @@ Return ONLY JSON:
       "pros": [],
       "cons": [],
       "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
-    }}
+    }}}}
   ],
-  "best_match": {{"name": null, "reason": "", "source_ids": []}},
-  "best_value": {{"name": null, "reason": "", "source_ids": []}},
-  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
-  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "best_match": {{{{"name": null, "reason": "", "source_ids": []}}}},
+  "best_value": {{{{"name": null, "reason": "", "source_ids": []}}}},
+  "cheapest_credible_option": {{{{"name": null, "reason": "", "source_ids": []}}}},
+  "better_reviewed_alternative": {{{{"name": null, "reason": "", "source_ids": []}}}},
   "comparisons": [
-    {
+    {{
       "product_a": "",
       "product_b": "",
       "comparison": "",
       "source_ids": []
-    }
+    }}
   ],
   "tradeoffs": [],
   "warnings": []
-}}
+}}}}
 """
 
     try:
@@ -3735,6 +3789,18 @@ def research_product(
         "budget"
     )
 
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
     if not item:
         return {
             "success": False,
@@ -3809,8 +3875,8 @@ def research_product(
                 "source_type": source["source_type"],
                 "title": source["title"],
                 "url": source["url"],
-                "engine": source["engine"],
-                "query": source["query"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
             }
             for source in evidence
         ],
