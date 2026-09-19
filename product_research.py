@@ -13,13 +13,6 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from browser_controller import (
-    browser_goto,
-    browser_page_info,
-    browser_page_snapshot,
-    browser_search_bing,
-    browser_search_google,
-)
 from logger import logger
 from model_manager import ModelManager
 from product_price_checker import compare_products_prices
@@ -1529,572 +1522,172 @@ class _ResearchLinkParser(HTMLParser):
 
 
 
-def _research_http_search(
-    engine,
-    query,
-):
-    """
-    Search discovery using a hidden Playwright browser.
 
-    Google is the primary provider.
-    Bing is the fallback.
-
-    Important:
-    We extract actual search-result elements instead of treating every
-    page anchor as a candidate. This avoids navigation/UI links
-    overwhelming the relevance filter.
-    """
-
-    engine = str(
-        engine or ""
-    ).lower().strip()
-
-    query = str(
-        query or ""
-    ).strip()
-
-    if engine not in {
-        "google",
-        "bing",
-    }:
-        raise ValueError(
-            f"Unsupported research search engine: {engine!r}"
-        )
+def _research_http_search(engine, query):
+    """HTTP-only search discovery; browser use is reserved for final verification."""
+    engine = str(engine or "").lower().strip()
+    query = str(query or "").strip()
+    if engine not in {"google", "bing"}:
+        raise ValueError(f"Unsupported research search engine: {engine!r}")
 
     endpoint = (
         "https://www.google.com/search"
         if engine == "google"
         else "https://www.bing.com/search"
     )
-
-    encoded_query = requests.utils.quote(
-        query,
-        safe="",
-    )
-
-    search_url = (
-        f"{endpoint}?q={encoded_query}"
-        f"&hl=en&num=10"
-    )
+    encoded_query = requests.utils.quote(query, safe="")
+    search_url = f"{endpoint}?q={encoded_query}&hl=en&num=10"
 
     print(
         "[JARVIS] JARVIS PRODUCT RESEARCH: "
-        f"headless {engine} search: {query}"
+        f"HTTP-only {engine} search: {query}"
     )
 
     try:
-        from playwright.sync_api import (
-            sync_playwright,
+        response = requests.get(
+            search_url,
+            headers=_RESEARCH_HEADERS,
+            timeout=_RESEARCH_HTTP_TIMEOUT,
+            allow_redirects=True,
         )
-
-        with sync_playwright() as playwright:
-
-            browser = playwright.chromium.launch(
-                headless=True,
-            )
-
-            try:
-                context = browser.new_context(
-                    viewport={
-                        "width": 1440,
-                        "height": 1000,
-                    },
-                    user_agent=_RESEARCH_HEADERS[
-                        "User-Agent"
-                    ],
-                    locale="en-US",
-                )
-
-                page = context.new_page()
-
-                page.goto(
-                    search_url,
-                    wait_until="domcontentloaded",
-                    timeout=(
-                        _RESEARCH_HEADLESS_TIMEOUT
-                        * 1000
-                    ),
-                )
-
-                page.wait_for_timeout(
-                    1800
-                )
-
-                current_url = (
-                    page.url or ""
-                )
-
-                page_title = (
-                    page.title() or ""
-                )
-
-                try:
-                    body_text = (
-                        page.locator(
-                            "body"
-                        ).inner_text(
-                            timeout=5000
-                        )
-                        or ""
-                    )
-                except Exception:
-                    body_text = ""
-
-                combined = (
-                    current_url
-                    + "\n"
-                    + page_title
-                    + "\n"
-                    + body_text
-                ).lower()
-
-                blocked_markers = (
-                    "google.com/sorry",
-                    "unusual traffic",
-                    "captcha",
-                    "recaptcha",
-                    "not a robot",
-                    "verify you are human",
-                    "prove your humanity",
-                    "access denied",
-                    "checking your browser",
-                    "before you continue",
-                )
-
-                if any(
-                    marker in combined
-                    for marker in blocked_markers
-                ):
-                    print(
-                        "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                        f"headless {engine} search blocked."
-                    )
-
-                    return {
-                        "blocked": True,
-                        "results": [],
-                    }
-
-                # =================================================
-                # Provider-specific result selectors
-                # =================================================
-
-                selectors = (
-                    [
-                        # Google current/legacy result links.
-                        "div#search a:has(h3)",
-                        "div#search h3",
-                    ]
-                    if engine == "google"
-                    else [
-                        # Bing standard organic results.
-                        "li.b_algo h2 a",
-                        "#b_results li.b_algo h2 a",
-                        "#b_results h2 a",
-                        "li.b_algo a[href]",
-                    ]
-                )
-
-                result_elements = []
-
-                for selector in selectors:
-                    try:
-                        locator = page.locator(
-                            selector
-                        )
-
-                        count = locator.count()
-
-                        if count:
-                            print(
-                                "[JARVIS] "
-                                "JARVIS PRODUCT RESEARCH: "
-                                f"{engine} selector "
-                                f"{selector!r} found {count}"
-                            )
-
-                            for index in range(
-                                min(
-                                    count,
-                                    20,
-                                )
-                            ):
-                                result_elements.append(
-                                    locator.nth(
-                                        index
-                                    )
-                                )
-
-                            if len(
-                                result_elements
-                            ) >= 10:
-                                break
-
-                    except Exception:
-                        continue
-
-                # =================================================
-                # Generic fallback if provider selector changed.
-                # =================================================
-
-                if not result_elements:
-                    try:
-                        all_links = page.locator(
-                            "a[href]"
-                        )
-
-                        count = all_links.count()
-
-                        print(
-                            "[JARVIS] "
-                            "JARVIS PRODUCT RESEARCH: "
-                            f"{engine} generic fallback "
-                            f"found {count} links"
-                        )
-
-                        for index in range(
-                            min(
-                                count,
-                                100,
-                            )
-                        ):
-                            link = all_links.nth(
-                                index
-                            )
-
-                            try:
-                                href = (
-                                    link.get_attribute(
-                                        "href"
-                                    )
-                                    or ""
-                                )
-
-                                anchor_text = (
-                                    link.inner_text()
-                                    or ""
-                                ).strip()
-
-                            except Exception:
-                                continue
-
-                            if not href:
-                                continue
-
-                            if len(
-                                anchor_text
-                            ) < 5:
-                                continue
-
-                            # Only keep links that look like real
-                            # search results.
-                            if (
-                                engine == "bing"
-                                and not (
-                                    _research_domain(
-                                        href
-                                    )
-                                    or href.startswith(
-                                        "/"
-                                    )
-                                )
-                            ):
-                                continue
-
-                            class_text = ""
-
-                            try:
-                                class_text = (
-                                    link.get_attribute(
-                                        "class"
-                                    )
-                                    or ""
-                                ).lower()
-                            except Exception:
-                                pass
-
-                            if (
-                                "nav" in class_text
-                                or "header" in class_text
-                                or "footer" in class_text
-                            ):
-                                continue
-
-                            result_elements.append(
-                                link
-                            )
-
-                            if len(
-                                result_elements
-                            ) >= 20:
-                                break
-
-                    except Exception:
-                        pass
-
-                print(
-                    "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                    f"{engine} candidate result "
-                    f"elements={len(result_elements)}"
-                )
-
-                results = []
-                seen = set()
-
-                from urllib.parse import (
-                    urljoin,
-                )
-                from html import unescape
-
-                for element in result_elements:
-
-                    try:
-                        href = (
-                            element.get_attribute(
-                                "href"
-                            )
-                            or ""
-                        ).strip()
-
-                        title = (
-                            element.inner_text()
-                            or ""
-                        ).strip()
-
-                    except Exception:
-                        continue
-
-                    if not href:
-                        continue
-
-                    href = unescape(
-                        href
-                    )
-
-                    title = unescape(
-                        " ".join(
-                            title.split()
-                        )
-                    )
-
-                    if href.startswith(
-                        "/"
-                    ):
-                        href = urljoin(
-                            search_url,
-                            href,
-                        )
-
-                    elif href.startswith(
-                        "//"
-                    ):
-                        href = (
-                            "https:"
-                            + href
-                        )
-
-                    canonical = (
-                        _research_canonical_url(
-                            href
-                        )
-                    )
-
-                    if not canonical:
-                        canonical = href
-
-                    domain = _research_domain(
-                        canonical
-                    )
-
-                    if not domain:
-                        continue
-
-                    # Bing can ignore site: operators. Enforce the
-                    # requested domain ourselves so unrelated results never
-                    # masquerade as site-constrained evidence.
-                    requested_domain = _research_requested_domain(query)
-                    if requested_domain and not (
-                        domain == requested_domain
-                        or domain.endswith("." + requested_domain)
-                    ):
-                        continue
-
-                    if (
-                        domain == "google.com"
-                        or domain.endswith(
-                            ".google.com"
-                        )
-                        or domain == "bing.com"
-                        or domain.endswith(
-                            ".bing.com"
-                        )
-                    ):
-                        continue
-
-                    # Telecom providers are context-dependent.
-                    # They are valid for phone/internet/networking
-                    # research, but not unrelated product topics.
-                    if _research_domain_matches(
-                        domain,
-                        _RESEARCH_TELECOM_DOMAINS,
-                    ):
-                        if not _research_query_is_telecom(
-                            query
-                        ):
-                            continue
-
-                    if len(title) < 4:
-                        title = domain
-
-                    key = (
-                        canonical
-                        .lower()
-                        .rstrip("/")
-                    )
-
-                    if key in seen:
-                        continue
-
-                    source_type = (
-                        _research_source_type(
-                            canonical,
-                            title,
-                        )
-                    )
-
-                    relevance = (
-                        _research_query_relevance(
-                            title,
-                            "",
-                            canonical,
-                            query,
-                        )
-                    )
-
-                    recognized_domain = (
-                        _research_domain_matches(
-                            domain,
-                            _RESEARCH_VIDEO_DOMAINS,
-                        )
-                        or _research_domain_matches(
-                            domain,
-                            _RESEARCH_COMMUNITY_DOMAINS,
-                        )
-                        or _research_domain_matches(
-                            domain,
-                            _RESEARCH_RETAILER_DOMAINS,
-                        )
-                        or _research_domain_matches(
-                            domain,
-                            _RESEARCH_MANUFACTURER_DOMAINS,
-                        )
-                        or _research_domain_matches(
-                            domain,
-                            _RESEARCH_REVIEW_DOMAINS,
-                        )
-                    )
-
-                    # Result-specific selectors are useful evidence,
-                    # but the result still needs to match the query.
-                    #
-                    # Known retailers/community/video/manufacturer/review
-                    # domains receive a small allowance, but arbitrary
-                    # irrelevant pages do not.
-                    if relevance < 3:
-                        if not recognized_domain:
-                            continue
-
-                        if not any(
-                            term in (
-                                " ".join(
-                                    (
-                                        title,
-                                        canonical,
-                                    )
-                                ).lower()
-                            )
-                            for term in _research_query_focus_terms(
-                                query
-                            )
-                        ):
-                            continue
-
-                    seen.add(
-                        key
-                    )
-
-                    results.append(
-                        {
-                            "title": title[:500],
-                            "url": canonical,
-                            "domain": domain,
-                            "source_type": source_type,
-                            "snippet": "",
-                            "query": query,
-                        }
-                    )
-
-                    if len(
-                        results
-                    ) >= 20:
-                        break
-
-                print(
-                    "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                    f"{engine} produced "
-                    f"{len(results)} candidate(s)"
-                )
-
-                if not results:
-                    print(
-                        "[JARVIS] "
-                        "JARVIS PRODUCT RESEARCH: "
-                        f"{engine} result extraction "
-                        "returned no accepted links."
-                    )
-
-                    # Diagnostics: expose the first few actual
-                    # result element href/title pairs.
-                    for element in (
-                        result_elements[:8]
-                    ):
-                        try:
-                            print(
-                                "[JARVIS] SEARCH RESULT DEBUG:",
-                                (
-                                    element.get_attribute(
-                                        "href"
-                                    )
-                                    or ""
-                                )[:300],
-                                "|",
-                                (
-                                    element.inner_text()
-                                    or ""
-                                ).strip()[:200],
-                            )
-                        except Exception:
-                            pass
-
-                return {
-                    "blocked": False,
-                    "results": results,
-                }
-
-            finally:
-                context.close()
-                browser.close()
-
     except Exception as exc:
         print(
             "[JARVIS] JARVIS PRODUCT RESEARCH: "
-            f"headless {engine} search failed: {exc}"
+            f"{engine} HTTP search failed: {exc}"
+        )
+        return {"blocked": False, "results": []}
+
+    body = response.text or ""
+    title, readable = _research_html_text(body)
+    combined = (
+        str(response.url or search_url)
+        + "\\n"
+        + title
+        + "\\n"
+        + readable
+    ).lower()
+
+    blocked_markers = (
+        "google.com/sorry",
+        "unusual traffic",
+        "captcha",
+        "recaptcha",
+        "not a robot",
+        "verify you are human",
+        "prove your humanity",
+        "access denied",
+        "checking your browser",
+        "before you continue",
+    )
+
+    if response.status_code >= 400 or any(
+        marker in combined
+        for marker in blocked_markers
+    ):
+        print(
+            "[JARVIS] JARVIS PRODUCT RESEARCH: "
+            f"{engine} HTTP search blocked/challenged "
+            f"(status={response.status_code})."
+        )
+        return {"blocked": True, "results": []}
+
+    parser = _ResearchLinkParser()
+    try:
+        parser.feed(body)
+        parser.close()
+    except Exception:
+        pass
+
+    results = []
+    seen = set()
+    requested_domain = _research_requested_domain(query)
+    focus_terms = _research_query_focus_terms(query)
+
+    for item in parser.results:
+        href = str(item.get("href") or "").strip()
+        title_text = " ".join(
+            str(item.get("text") or "").split()
+        ).strip()
+        if not href:
+            continue
+
+        canonical = _research_canonical_url(href) or href
+        domain = _research_domain(canonical)
+        if not domain:
+            continue
+
+        if requested_domain and not (
+            domain == requested_domain
+            or domain.endswith("." + requested_domain)
+        ):
+            continue
+
+        if (
+            domain == "google.com"
+            or domain.endswith(".google.com")
+            or domain == "bing.com"
+            or domain.endswith(".bing.com")
+        ):
+            continue
+
+        if _research_domain_matches(domain, _RESEARCH_TELECOM_DOMAINS):
+            if not _research_query_is_telecom(query):
+                continue
+
+        if len(title_text) < 4:
+            title_text = domain
+
+        key = canonical.lower().rstrip("/")
+        if key in seen:
+            continue
+
+        source_type = _research_source_type(canonical, title_text)
+        relevance = _research_query_relevance(
+            title_text,
+            "",
+            canonical,
+            query,
         )
 
-        return {
-            "blocked": False,
-            "results": [],
-        }
+        recognized_domain = (
+            _research_domain_matches(domain, _RESEARCH_VIDEO_DOMAINS)
+            or _research_domain_matches(domain, _RESEARCH_COMMUNITY_DOMAINS)
+            or _research_domain_matches(domain, _RESEARCH_RETAILER_DOMAINS)
+            or _research_domain_matches(domain, _RESEARCH_MANUFACTURER_DOMAINS)
+            or _research_domain_matches(domain, _RESEARCH_REVIEW_DOMAINS)
+        )
+
+        if relevance < 3:
+            if not recognized_domain:
+                continue
+
+            haystack = " ".join((title_text, canonical)).lower()
+            if not any(
+                re.search(rf"\\b{re.escape(term)}\\b", haystack)
+                for term in focus_terms
+            ):
+                continue
+
+        seen.add(key)
+        results.append(
+            {
+                "title": title_text[:500],
+                "url": canonical,
+                "domain": domain,
+                "source_type": source_type,
+                "snippet": "",
+                "query": query,
+            }
+        )
+
+        if len(results) >= 20:
+            break
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"{engine} produced {len(results)} candidate(s) via HTTP"
+    )
+    return {"blocked": False, "results": results}
 
 def _research_enough_sources(
     sources,
@@ -2406,12 +1999,10 @@ def _research_headless_fetch(url):
         }
 
 
-def _research_fetch_source(
-    source,
-):
-    original_url = str(
-        source.get("url") or ""
-    ).strip()
+
+def _research_fetch_source(source):
+    """Fetch research pages over HTTP only; no browser fallback before synthesis."""
+    original_url = str(source.get("url") or "").strip()
 
     if not original_url:
         return {
@@ -2426,86 +2017,32 @@ def _research_fetch_source(
         }
 
     candidates = [original_url]
-
-    # Preserve the Reddit fallback logic already added to this file.
-    fallback_builder = globals().get(
-        "_source_visit_urls"
-    )
-
-    if callable(
-        fallback_builder
-    ):
+    fallback_builder = globals().get("_source_visit_urls")
+    if callable(fallback_builder):
         try:
             candidates = list(
-                fallback_builder(
-                    source
-                )
+                fallback_builder(source)
                 or candidates
             )
         except Exception:
             pass
 
-    attempted = []
-
     for candidate_url in candidates:
-        attempted.append(
-            candidate_url
-        )
-
         print(
             "[JARVIS] JARVIS PRODUCT RESEARCH: "
             f"HTTP fetch {candidate_url}"
         )
 
-        fetched = _research_http_fetch(
-            candidate_url
-        )
+        fetched = _research_http_fetch(candidate_url)
 
         if fetched.get("success"):
-            fetched[
-                "original_url"
-            ] = original_url
+            fetched["original_url"] = original_url
             return fetched
 
         if fetched.get("blocked"):
             print(
                 "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                f"HTTP blocked/challenged: "
-                f"{candidate_url}"
-            )
-            continue
-
-        # HTTP returned a legitimate but tiny page.
-        # Try headless before declaring failure.
-        if (
-            fetched.get("status") is not None
-            and fetched.get("status") < 400
-            and not fetched.get("text")
-        ):
-            continue
-
-    # JavaScript/browser fallback, still completely hidden.
-    for candidate_url in attempted:
-        print(
-            "[JARVIS] JARVIS PRODUCT RESEARCH: "
-            f"headless fallback {candidate_url}"
-        )
-
-        fetched = _research_headless_fetch(
-            candidate_url
-        )
-
-        if fetched.get("success"):
-            fetched[
-                "original_url"
-            ] = original_url
-            return fetched
-
-        if fetched.get("blocked"):
-            print(
-                "[JARVIS] JARVIS PRODUCT RESEARCH: "
-                f"headless page blocked/challenged: "
-                f"{candidate_url}"
+                f"HTTP blocked/challenged: {candidate_url}"
             )
 
     return {
@@ -2515,11 +2052,10 @@ def _research_fetch_source(
         "url": original_url,
         "title": source.get("title") or "",
         "text": "",
-        "method": "none",
-        "error": "No usable research content",
+        "method": "http",
+        "error": "No usable HTTP research content",
         "original_url": original_url,
     }
-
 
 def _discover(queries):
     """
@@ -3290,71 +2826,6 @@ def _source_visit_urls(source):
 
 
 
-def _wait_for_research_page(
-    timeout=12.0,
-    poll_interval=0.75,
-):
-    """
-    Wait for the currently loaded browser page to produce meaningful
-    readable content.
-
-    Some sites return control from browser_goto() before the page's
-    useful DOM/text has finished rendering. Polling the snapshot avoids
-    capturing an almost-empty page too early.
-    """
-
-    started = time.monotonic()
-
-    best_snapshot = {}
-
-    previous_text = ""
-    stable_count = 0
-
-    while (time.monotonic() - started) < timeout:
-        try:
-            snapshot = browser_page_snapshot() or {}
-        except Exception:
-            snapshot = {}
-
-        if snapshot:
-            best_snapshot = snapshot
-
-        readable = str(
-            snapshot.get("readable_text") or ""
-        ).strip()
-
-        title = str(
-            snapshot.get("title") or ""
-        ).strip()
-
-        # Stop immediately for known anti-bot / CAPTCHA pages.
-        if _source_visit_blocked(snapshot):
-            return snapshot
-
-        # Meaningful page content.
-        if len(readable) >= 800:
-            if readable == previous_text:
-                stable_count += 1
-            else:
-                stable_count = 0
-
-            previous_text = readable
-
-            # Two consecutive identical snapshots means the page has
-            # probably finished changing.
-            if stable_count >= 1:
-                return snapshot
-
-        # A page may have a meaningful title but need more time to
-        # populate the readable DOM.
-        elif title and len(readable) >= 250:
-            previous_text = readable
-
-        time.sleep(poll_interval)
-
-    return best_snapshot
-
-
 def _research_evidence_has_core_coverage(evidence):
     types = {}
     for source in evidence:
@@ -4069,9 +3540,188 @@ def _find_analysis_product(
     return None
 
 
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": [],
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
 def _enrich_product_price_comparisons(
     analysis: dict[str, Any],
     budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Add best-effort cross-store price evidence to synthesized products.
@@ -4251,6 +3901,48 @@ def _enrich_product_price_comparisons(
                 isinstance(listed_price, (int, float))
                 and float(listed_price) <= budget_value
             )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
 
         # A maximum budget is a hard constraint. Never expose a named
         # recommendation whose known/listed price exceeds the limit.
@@ -4570,21 +4262,42 @@ def research_product(
 
     analysis = _inject_candidate_products(analysis, evidence, budget)
     analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
     analysis = _enrich_product_price_comparisons(
         analysis,
         budget=budget,
+        evidence=evidence,
     )
 
     best_match = analysis.get("best_match") or {}
     best_value = analysis.get("best_value") or {}
 
-    verified = bool(
-        analysis
-        and (
-            str(best_match.get("name") or "").strip()
-            or str(best_value.get("name") or "").strip()
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
         )
-    )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
 
     summary = _summary(
         analysis,
@@ -4615,32 +4328,10 @@ def research_product(
         ],
         "evidence": evidence,
         "analysis": analysis,
-        "purchase_links": [
-            {
-                "product": str(product.get("name") or product.get("product") or "").strip(),
-                "seller": (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("label"))
-                    if budget is not None
-                    else (((product.get("price_comparison") or {}).get("cheapest") or {}).get("label")),
-                "price": (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("price"))
-                    if budget is not None
-                    else (((product.get("price_comparison") or {}).get("cheapest") or {}).get("price")),
-                "url": (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("url"))
-                    if budget is not None
-                    else (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url")),
-            }
-            for product in (analysis.get("products") or [])[:4]
-            if isinstance(product, dict)
-            and (
-                (
-                    budget is None
-                    and (((product.get("price_comparison") or {}).get("cheapest") or {}).get("url"))
-                )
-                or (
-                    budget is not None
-                    and (((product.get("price_comparison") or {}).get("budget_cheapest") or {}).get("url"))
-                )
-            )
-        ],
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
         "summary": summary,
         "confidence": str(
             analysis.get(
