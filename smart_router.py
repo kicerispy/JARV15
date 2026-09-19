@@ -192,14 +192,14 @@ def _looks_direct_browser_navigation(text: str) -> bool:
     """Recognize direct URL navigation without involving the planner."""
     return bool(
         re.match(
-            r"^(?:go to|navigate to|open|visit)\\s+"
-            r"(?:https?://|www\\.)[^\\s]+$",
+            r"^(?:go to|navigate to|open|visit)\s+"
+            r"(?:https?://|www\.)[^\s]+$",
             text,
             re.IGNORECASE,
         )
         or re.match(
-            r"^(?:go to|navigate to|open|visit)\\s+"
-            r"[a-z0-9.-]+\\.[a-z]{2,}(?:/[^\\s]*)?$",
+            r"^(?:go to|navigate to|open|visit)\s+"
+            r"[a-z0-9.-]+\.[a-z]{2,}(?:/[^\s]*)?$",
             text,
             re.IGNORECASE,
         )
