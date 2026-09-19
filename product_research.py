@@ -2184,6 +2184,10 @@ def _research_enough_sources(
             "retailer",
             0,
         ) >= 2
+        and types.get(
+            "manufacturer",
+            0,
+        ) >= 1
         and (
             types.get(
                 "community",
@@ -2577,12 +2581,25 @@ def _discover(queries):
 
     seed_item = ""
     if queries:
-        seed_item = str(
-            _extract_item_and_budget(
-                queries[0]
-            )[0]
-            or ""
-        ).strip()
+        # The first query may contain research instructions such as
+        # "reviews under $150". Prefer the quoted subject when present so
+        # direct store/community/video seeds search for the actual item.
+        quoted_subjects = re.findall(
+            r'"([^"]+)"',
+            str(queries[0] or ""),
+        )
+        if quoted_subjects:
+            seed_item = str(
+                quoted_subjects[0]
+                or ""
+            ).strip()
+        else:
+            seed_item = str(
+                _extract_item_and_budget(
+                    queries[0]
+                )[0]
+                or ""
+            ).strip()
 
     # --------------------------------------------------------
     # Coverage seeds
