@@ -29,6 +29,53 @@ MAX_SOURCES = 16
 MAX_PAGE_CHARS = 8000
 MIN_CONFIDENT_SOURCES = 4
 
+
+_PRODUCT_BRANDS = {
+    "apple", "sony", "bose", "sennheiser", "anker", "soundcore", "jbl",
+    "marshall", "shokz", "beats", "google", "samsung", "jabra",
+    "audio technica", "audio-technica", "bowers wilkins", "bowers & wilkins",
+    "steelseries", "audeze", "nothing", "skullcandy", "technics",
+    "beyerdynamic", "bang & olufsen", "master & dynamic", "master dynamic",
+}
+
+_GENERIC_PRODUCT_WORDS = {
+    "wireless", "wired", "bluetooth", "headphone", "headphones", "earbud",
+    "earbuds", "earphone", "earphones", "headset", "audio", "noise",
+    "cancelling", "canceling", "cancellation", "active", "hybrid", "over",
+    "on", "in", "ear", "premium", "budget", "best", "wireless", "anc",
+}
+
+def _is_specific_product_name(value: Any) -> bool:
+    name = " ".join(str(value or "").split()).strip()
+    if len(name) < 5 or len(name) > 140:
+        return False
+
+    normalized = _normalized_name(name) if "_normalized_name" in globals() else " ".join(name.lower().split())
+    words = normalized.split()
+    distinctive = [word for word in words if word not in _GENERIC_PRODUCT_WORDS]
+    has_brand = any(
+        brand in normalized
+        for brand in _PRODUCT_BRANDS
+    )
+    has_model_token = any(
+        re.search(r"\d", word) and len(word) >= 2
+        for word in words
+    )
+    has_model_pattern = bool(
+        re.search(r"\b[a-z]{1,8}[- ]?\d{1,5}[a-z0-9-]*\b", normalized, re.IGNORECASE)
+        or re.search(r"\b[ivx]{2,4}\b", normalized, re.IGNORECASE)
+    )
+
+    # Category-only labels are not products, even when they contain useful
+    # audio terminology. Concrete model/brand evidence is required.
+    if not distinctive:
+        return False
+    if not has_brand and not has_model_token and not has_model_pattern:
+        return False
+    if len(distinctive) == 1 and not (has_brand and has_model_token):
+        return False
+    return True
+
 RETAILERS = {
     "amazon.com",
     "bestbuy.com",
@@ -3761,7 +3808,11 @@ SOURCE EVIDENCE:
 Use only the supplied evidence.
 Never invent product names, prices, ratings, review counts,
 specifications, or capabilities.
-
+- A product must be a concrete identifiable model, not a category label.
+- Never output generic names such as "Active Noise Cancelling Headphones",
+  "Bluetooth Headphones", or "Wireless Headphones".
+- Product names should normally include a brand plus model/family identifier
+  (for example Sony WH-1000XM6 or Soundcore Space Q45).
 Evidence rules:
 - Manufacturer sources are strongest for specifications.
 - Retailers are strongest for observed price and customer ratings.
@@ -3938,6 +3989,49 @@ Keep every reason to one short sentence.
         )
 
     return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Remove category-only model outputs before retailer verification."""
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+
+    valid_names = {
+        " ".join(str(product.get("name") or "").lower().split())
+        for product in (analysis.get("products") or [])
+        if isinstance(product, dict)
+    }
+
+    for field in (
+        "best_match",
+        "best_value",
+        "cheapest_credible_option",
+        "better_reviewed_alternative",
+    ):
+        choice = analysis.get(field)
+        if not isinstance(choice, dict):
+            continue
+        name = " ".join(str(choice.get("name") or "").lower().split())
+        if name not in valid_names:
+            choice["name"] = None
+            choice["reason"] = "No concrete evidence-backed product identity survived validation."
+            choice["source_ids"] = []
+
+    return analysis
 
 def _normalized_name(value: Any) -> str:
     return " ".join(
@@ -4479,6 +4573,8 @@ def research_product(
         budget,
         evidence,
     )
+
+    analysis = _sanitize_analysis_product_identity(analysis)
 
     analysis = _enrich_product_price_comparisons(
         analysis,
