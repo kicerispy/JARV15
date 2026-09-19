@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+import inspect
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Optional
 
@@ -304,6 +305,23 @@ class BackgroundTaskController:
             self._task_spoken_messages.add(text)
             self._last_pending_message = text
             self._pending_speech_count += 1
+
+            if text.lower().startswith("found '") and "on the page." in text.lower():
+                try:
+                    stack = inspect.stack()[1:5]
+                    callers = [
+                        f"{frame_info.frame.f_code.co_filename.split(chr(92))[-1]}:"
+                        f"{frame_info.lineno}::{frame_info.frame.f_code.co_name}"
+                        for frame_info in stack
+                    ]
+                    logger.info(
+                        "JARVIS TASK CONTROLLER: Queueing browser-find speech "
+                        f"count={len(self._task_spoken_messages)} "
+                        f"callers={' <- '.join(callers)}"
+                    )
+                except Exception:
+                    pass
+
             self._speech_queue.put(text)
 
         return False
