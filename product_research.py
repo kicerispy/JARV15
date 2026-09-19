@@ -228,15 +228,27 @@ def _parse_argument(argument: str) -> dict[str, Any]:
 
         explicit_item = str(
             payload.get("item")
-            or payload.get("query")
             or ""
         ).strip()
 
         if explicit_item:
-            item = explicit_item
-            _, parsed_budget = _extract_item_and_budget(request or explicit_item)
+            item, item_budget = _extract_item_and_budget(
+                explicit_item
+            )
+            _, request_budget = _extract_item_and_budget(
+                request or explicit_item
+            )
+            parsed_budget = (
+                request_budget
+                if request_budget is not None
+                else item_budget
+            )
         else:
-            item, parsed_budget = _extract_item_and_budget(request)
+            # "query" is a natural-language request field, not necessarily
+            # a clean product name. Always run it through the extractor.
+            item, parsed_budget = _extract_item_and_budget(
+                request
+            )
 
         budget = payload.get("budget")
         try:
