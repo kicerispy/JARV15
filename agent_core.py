@@ -2199,6 +2199,50 @@ class JarvisAgent:
 
                 task.evidence.append(evidence)
 
+    @staticmethod
+    def _failure_is_retryable() -> tuple[bool, str]:
+        """Inspect the execution trace for an explicit retryability contract."""
+        try:
+            from tool_executor import get_last_execution_trace
+
+            trace = get_last_execution_trace()
+        except Exception:
+            return True, ""
+
+        for entry in reversed(trace or []):
+            if not isinstance(entry, dict):
+                continue
+
+            if entry.get("success") is not False:
+                continue
+
+            raw_result = entry.get("result")
+            data = getattr(raw_result, "data", None)
+
+            if data is None:
+                data = raw_result
+
+            if isinstance(data, dict) and "retryable" in data:
+                retryable = bool(data.get("retryable"))
+                message = str(
+                    data.get("message")
+                    or data.get("error")
+                    or entry.get("message")
+                    or ""
+                ).strip()
+                return retryable, message
+
+            if "retryable" in entry:
+                retryable = bool(entry.get("retryable"))
+                message = str(
+                    entry.get("message")
+                    or ""
+                ).strip()
+                return retryable, message
+
+        return True, ""
+
+
     def _apply_step_status(
         self,
         task: AgentTask,
@@ -2448,6 +2492,35 @@ class JarvisAgent:
                 task.error = str(
                     result
                 )
+
+                retryable, retry_message = self._failure_is_retryable()
+
+                if not retryable:
+                    if retry_message:
+                        task.error = retry_message
+
+                    task.status = "failed"
+                    task.completed_at = time.time()
+
+                    self.state["last_result"] = (
+                        task.execution_result
+                    )
+                    self.state["last_status"] = task.status
+                    self.state["last_error"] = task.error
+                    self.state["replans"] = task.replan_count
+
+                    logger.warning(
+                        "JARVIS AGENT: Execution failed with "
+                        "retryable=False; stopping recovery loop."
+                    )
+
+                    self._announce(
+                        task.error or "I wasn't able to complete the task.",
+                        speak_callback,
+                    )
+
+                    task_state.set_progress_callback(None)
+                    return "failed"
 
                 return "failed"
 
