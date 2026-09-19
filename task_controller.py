@@ -347,6 +347,12 @@ class BackgroundTaskController:
             self._last_pending_message = text
             self._pending_speech_count += 1
 
+            logger.info(
+                "JARVIS TASK CONTROLLER: SPEECH ENQUEUE "
+                f"raw={text!r} key={speech_key!r} "
+                f"pending={self._pending_speech_count}"
+            )
+
             self._speech_queue.put(text)
 
         return False
@@ -386,6 +392,11 @@ class BackgroundTaskController:
 
             speech_key = self._speech_key(message)
             now = time.monotonic()
+
+            logger.info(
+                "JARVIS TASK CONTROLLER: SPEECH DEQUEUE "
+                f"raw={message!r} key={speech_key!r}"
+            )
 
             with self._lock:
                 duplicate = (
