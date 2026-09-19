@@ -144,6 +144,14 @@ def test_background_planning_can_be_cancelled_before_execution():
     assert controller.cancel_current() is True
     assert task_state.is_cancelled() is True
 
+    # Cancellation also removes the initial acknowledgement so stale
+    # "On it." speech cannot play after the user says stop.
+    spoken = []
+    assert controller.drain_speech(
+        lambda message: spoken.append(message) or False
+    ) == 0
+    assert spoken == []
+
     agent.release_planning.set()
     assert controller.wait_for_current(timeout=1) is True
 
