@@ -120,5 +120,74 @@ class AgentCoreBrowserObservationTests(unittest.TestCase):
         )
 
 
+    def test_replan_request_highlights_browser_recovery_history(self):
+        from agent_core import AgentTask, JarvisAgent
+
+        task = AgentTask(
+            task_id="replan-task",
+            request="click the Submit button",
+            goal="submit the form",
+            execution_result="failed",
+            error="Browser click failed.",
+        )
+
+        task.active_context["browser_state"] = {
+            "success": True,
+            "url": "https://example.com/form",
+            "title": "Example Form",
+        }
+
+        task.evidence.append(
+            {
+                "attempt": 1,
+                "tool": "browser_click_element",
+                "target": '{"text":"Submit"}',
+                "success": False,
+                "verified": False,
+                "detail": "Browser click failed.",
+                "browser_recovery": {
+                    "recovered_by": "reobserve_retry",
+                    "observed_before": {
+                        "url": "https://example.com/form",
+                        "title": "Example Form",
+                    },
+                    "observed_after": {
+                        "url": "https://example.com/form",
+                        "title": "Example Form",
+                    },
+                    "attempts": 2,
+                    "recovery_count": 1,
+                },
+            }
+        )
+
+        request = JarvisAgent()._build_replan_request(task)
+
+        self.assertIn(
+            "Browser recovery history:",
+            request,
+        )
+        self.assertIn(
+            "method=reobserve_retry",
+            request,
+        )
+        self.assertIn(
+            "attempts=2",
+            request,
+        )
+        self.assertIn(
+            "retries=1",
+            request,
+        )
+        self.assertIn(
+            "Do not blindly repeat a browser strategy",
+            request,
+        )
+        self.assertIn(
+            "URL: https://example.com/form",
+            request,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
