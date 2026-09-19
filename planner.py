@@ -1213,6 +1213,35 @@ def create_plan(
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
 
+    # Use the canonical command router as the first safety boundary.
+    # Agent Core may call this planner directly, bypassing main.py's
+    # fast-command lookup, so simple actions must still stay model-free.
+    try:
+        from commands import deterministic_route
+
+        deterministic_plan = deterministic_route(
+            user_command
+        )
+
+        if deterministic_plan:
+            deterministic_result = validate_plan(
+                {
+                    "goal": user_command,
+                    "steps": deterministic_plan.get("steps", []),
+                    "resolved_command": user_command,
+                }
+            )
+
+            if deterministic_result.get("steps"):
+                logger.info(
+                    "JARVIS planner: deterministic command route selected."
+                )
+                return deterministic_result
+    except Exception as exc:
+        logger.debug(
+            f"JARVIS planner: deterministic route unavailable: {exc}"
+        )
+
     # ========================================================
     # DETERMINISTIC FIRST-RESULT ROUTER
     # ========================================================
