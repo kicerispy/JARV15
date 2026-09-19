@@ -1098,6 +1098,7 @@ def browser_wait_for_element(
     selector: str = "",
     text: str = "",
     role: str = "",
+    name: str = "",
     timeout: int = 10_000,
 ):
     async def _wait():
@@ -1151,6 +1152,7 @@ def browser_extract_text(
         selector_value = str(selector or "").strip()
         text_value = str(text or "").strip()
         role_value = str(role or "").strip()
+        name_value = str(name or "").strip()
 
         if not selector_value and not text_value and not role_value:
             selector_value = "body"
@@ -1188,6 +1190,7 @@ def browser_extract_text(
             selector_value,
             text_value,
             role_value,
+            name_value,
         )
         info = await _dom_target_info(locator)
 
@@ -1203,6 +1206,7 @@ def browser_extract_text(
                     selector_value,
                     text_value,
                     role_value,
+                    name_value,
                 ),
             }
 
