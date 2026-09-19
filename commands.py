@@ -857,7 +857,7 @@ def build_browser_dom_plan(user_request):
 
     # Find/inspect an element.
     match = re.match(
-        r"^(?:find|locate|inspect|looks+for)s+(?:thes+)?(.+?)$",
+        r"^(?:find|locate|inspect|look\s+for)\s+(?:the\s+)?(.+?)$",
         normalized,
         re.IGNORECASE,
     )
@@ -873,8 +873,8 @@ def build_browser_dom_plan(user_request):
 
     # Fill an element with text.
     match = re.match(
-        r"^(?:fill|enter|put|type)s+"
-        r"(?:thes+)?(.+?)s+"
+        r"^(?:fill|enter|put|type)\s+"
+        r"(?:the\s+)?(.+?)\s+"
         r"(?:with|using)s+(.+)$",
         normalized,
         re.IGNORECASE,
@@ -895,7 +895,7 @@ def build_browser_dom_plan(user_request):
 
     # Press a key on a named browser element.
     match = re.match(
-        r"^(?:press|hit)s+(?:thes+)?(.+?)s+"
+        r"^(?:press|hit)\s+(?:the\s+)?(.+?)\s+"
         r"(?:in|on|inside)s+(?:thes+)?(.+)$",
         normalized,
         re.IGNORECASE,
@@ -917,7 +917,7 @@ def build_browser_dom_plan(user_request):
     # Explicit browser click language. Contextual result phrases remain
     # handled by the context resolver and generic result routers.
     match = re.match(
-        r"^(?:click|open|select|choose)s+"
+        r"^(?:click|open|select|choose)\s+"
         r"(?:thes+)?(.+?)$",
         normalized,
         re.IGNORECASE,
@@ -950,7 +950,7 @@ def build_browser_dom_plan(user_request):
 
     # Wait for visible page content.
     match = re.match(
-        r"^(?:waits+for|waits+until)s+"
+        r"^(?:wait\s+for|wait\s+until)\s+"
         r"(?:thes+)?(.+?)$",
         normalized,
         re.IGNORECASE,
