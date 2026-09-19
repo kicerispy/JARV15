@@ -68,6 +68,42 @@ jarvis_agent = JarvisAgent()
 # PERFORMANCE TIMING
 # ============================================================
 
+class _AnyEvent:
+    """Event-like adapter that wakes when any supplied event is set."""
+
+    def __init__(self, *events):
+        self._events = tuple(
+            event
+            for event in events
+            if event is not None
+        )
+
+    def is_set(self) -> bool:
+        return any(
+            event.is_set()
+            for event in self._events
+        )
+
+    def wait(self, timeout=None) -> bool:
+        if self.is_set():
+            return True
+
+        if timeout is None:
+            while not self.is_set():
+                time.sleep(0.02)
+            return True
+
+        deadline = time.monotonic() + max(float(timeout), 0.0)
+
+        while not self.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(0.02, remaining))
+
+        return True
+
+
 def perf_now() -> float:
     """
     Return a high-resolution performance timestamp.
@@ -2052,10 +2088,21 @@ def main():
                 set_barehands_state("listening")
 
                 try:
+                    completion_event = (
+                        state.task_controller.completion_event
+                        if active_task_for_wake
+                        and state.task_controller is not None
+                        else None
+                    )
+                    wake_interrupt_event = _AnyEvent(
+                        typed_input.interrupt_event,
+                        completion_event,
+                    )
+
                     with state.io_lock:
                         triggered = (
                             wait_for_wake_word(
-                                interrupt_event=typed_input.interrupt_event,
+                                interrupt_event=wake_interrupt_event,
                                 active_task=active_task_for_wake,
                             )
                         )
