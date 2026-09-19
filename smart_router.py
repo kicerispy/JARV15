@@ -90,6 +90,12 @@ _CONTEXTUAL_EXACT = {
     "read page",
     "read the page text",
     "show this page",
+    "what are the search results",
+    "what're the search results",
+    "tell me the search results",
+    "show me the search results",
+    "what did the search find",
+    "what did you find",
 }
 
 _ACTION_WORDS = {
