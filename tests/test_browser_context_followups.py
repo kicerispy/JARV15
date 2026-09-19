@@ -125,7 +125,7 @@ def test_click_it_is_not_claimed_by_fast_click_handler():
     assert get_fast_command("Click it") is None
 
 
-def test_click_it_after_selected_result_routes_to_dom_element():
+def test_click_it_after_selected_result_without_url_uses_dom_element():
     context = make_context("google", "Wi-Fi skeleton")
     context["last_result_title"] = "WiFi Skeleton"
 
