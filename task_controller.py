@@ -76,6 +76,11 @@ class BackgroundTaskController:
         self._speech_queue: Queue[str] = Queue()
         self._pending_speech_count = 0
         self._last_pending_message = ""
+        # Track messages already delivered for the current task. The queue
+        # de-duplication above only covers messages that are waiting; this set
+        # also prevents the same completion from being spoken again after the
+        # first copy has already been drained.
+        self._task_spoken_messages: set[str] = set()
         self._completion_event = threading.Event()
 
     def _is_running_locked(self) -> bool:
@@ -106,6 +111,7 @@ class BackgroundTaskController:
 
             self._task = task
             self._task_state = task_state
+            self._task_spoken_messages.clear()
             self._completion_event.clear()
 
             thread = threading.Thread(
@@ -286,12 +292,16 @@ class BackgroundTaskController:
                 except Exception:
                     pass
 
+            if text in self._task_spoken_messages:
+                return False
+
             if (
                 self._pending_speech_count > 0
                 and text == self._last_pending_message
             ):
                 return False
 
+            self._task_spoken_messages.add(text)
             self._last_pending_message = text
             self._pending_speech_count += 1
             self._speech_queue.put(text)
