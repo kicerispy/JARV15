@@ -3412,11 +3412,11 @@ Separate these outcomes:
 These may be the same product or different products.
 
 Return ONLY JSON:
-{{{{
+{{
   "summary": "2-5 sentence conclusion",
   "confidence": "high|medium|low",
   "products": [
-    {{{{
+    {{
       "name": "product",
       "model_number": null,
       "price": null,
@@ -3426,12 +3426,12 @@ Return ONLY JSON:
       "pros": [],
       "cons": [],
       "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
-    }}}}
+    }}
   ],
-  "best_match": {{{{"name": null, "reason": "", "source_ids": []}}}},
-  "best_value": {{{{"name": null, "reason": "", "source_ids": []}}}},
-  "cheapest_credible_option": {{{{"name": null, "reason": "", "source_ids": []}}}},
-  "better_reviewed_alternative": {{{{"name": null, "reason": "", "source_ids": []}}}},
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
   "comparisons": [
     {{
       "product_a": "",
@@ -3442,7 +3442,7 @@ Return ONLY JSON:
   ],
   "tradeoffs": [],
   "warnings": []
-}}}}
+}}
 """
 
     try:
