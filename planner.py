@@ -33,6 +33,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_press_key": "Press a keyboard key on a browser element by CSS selector, visible text, or ARIA role with optional accessible name. Argument is JSON.",
     "browser_wait_for_element": "Wait for a browser DOM element to become visible using selector, text, role, or accessible name. Argument is JSON.",
     "browser_extract_text": "Extract text from a browser DOM element selected by selector, text, role, or accessible name. Argument is JSON.",
+    "browser_find_text": "Search the readable text of the current browser page for a phrase and return nearby context. Argument is JSON.",
     "browser_click_first_result": "Click the first organic Google or YouTube result through the controlled browser DOM. Argument is JSON.",
     "weather": "Get current weather. argument = location, or empty for default.",
     "current_time": "Get current time. argument = timezone/city, or empty for local.",
