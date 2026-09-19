@@ -148,6 +148,23 @@ def _parse_argument(argument: str) -> dict[str, Any]:
         flags=re.IGNORECASE,
     ).strip()
 
+    # Keep search discovery focused on the item. Preserve constraints in
+    # the full request and parse the budget separately.
+    item = re.sub(
+        r"\s+(?:under|below|less\s+than|up\s+to)\s*\$?[0-9][0-9,]*(?:\.\d+)?\b.*$",
+        "",
+        item,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    item = re.sub(
+        r"\s+(?:and\s+)?(?:compare|review|reviews|look\s+at\s+the\s+reviews|"
+        r"read\s+the\s+reviews|find\s+alternatives|find\s+similar\s+options)\b.*$",
+        "",
+        item,
+        flags=re.IGNORECASE,
+    ).strip()
+
     budget = None
     patterns = (
         r"(?:under|below|less\s+than|up\s+to|maximum(?:\s+budget)?(?:\s+of)?)"
@@ -171,16 +188,30 @@ def _parse_argument(argument: str) -> dict[str, Any]:
     }
 
 
-def _queries(item: str) -> list[str]:
-    subject = " ".join(str(item or "").split()).strip()
+def _queries(
+    item: str,
+    budget: float | None = None,
+) -> list[str]:
+    subject = " ".join(
+        str(item or "").split()
+    ).strip()
+
     if not subject:
         return []
+
+    budget_suffix = (
+        " under $"
+        + format(budget, ",.2f")
+        if budget is not None
+        else ""
+    )
+
     return [
-        f"{subject} reviews price",
-        f"{subject} best reviews",
+        f"{subject} reviews price{budget_suffix}",
+        f"{subject} best reviews{budget_suffix}",
         f"{subject} alternatives",
         f"{subject} cheaper alternatives",
-        f"{subject} comparison review",
+        f"{subject} comparison review{budget_suffix}",
     ]
 
 
@@ -733,7 +764,10 @@ def research_product(
             ),
         }
 
-    queries = _queries(item)
+    queries = _queries(
+        item,
+        budget=budget,
+    )
     discovered = _discover(queries)
     sources = _choose_sources(discovered)
     evidence = _collect_evidence(sources)
