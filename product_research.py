@@ -2316,6 +2316,10 @@ def _research_http_fetch(url):
         "unusual traffic",
         "access denied",
         "checking your browser",
+        "checking you are a real head-fi'er",
+        "help us keep head-fi secure",
+        "looks like something is not right, please wait",
+        "security check",
         "just a moment",
     )
 
@@ -2436,6 +2440,10 @@ def _research_headless_fetch(url):
                         "unusual traffic",
                         "access denied",
                         "checking your browser",
+                        "checking you are a real head-fi'er",
+                        "help us keep head-fi secure",
+                        "looks like something is not right, please wait",
+                        "security check",
                         "just a moment",
                     )
                 )
@@ -3499,6 +3507,36 @@ def _collect_evidence(sources):
         success = bool(
             fetched.get("success")
         ) and len(readable) >= 200
+
+        # Community search/navigation pages are not discussion evidence.
+        # Require some indication of actual threads/posts/replies/reviews for
+        # community sources so site chrome does not inflate coverage.
+        if success and source_type == "community":
+            lower_text = readable.lower()
+            discussion_markers = (
+                "reply",
+                "replies",
+                "comments",
+                "posted",
+                "thread",
+                "threads",
+                "user review",
+                "owner review",
+                "discussion",
+                "members",
+            )
+            product_markers = _RESEARCH_PRODUCT_TERMS
+            has_discussion = any(
+                marker in lower_text
+                for marker in discussion_markers
+            )
+            has_product_context = any(
+                marker in lower_text
+                for marker in product_markers
+            )
+
+            if not (has_discussion and has_product_context):
+                success = False
 
         if success:
             print(
