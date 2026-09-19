@@ -193,6 +193,64 @@ def test_background_task_can_be_cancelled():
     assert controller.snapshot()["task_status"] == "cancelled"
 
 
+def test_task_progress_suppresses_duplicate_milestones():
+    task_state = TaskState()
+    task_state.prepare("long task", 6)
+
+    spoken = []
+    task_state.set_progress_callback(
+        lambda message: spoken.append(message)
+    )
+
+    task_state.report_progress(
+        "I'm locating the relevant code.",
+        key="code_discovery",
+    )
+    task_state.report_progress(
+        "I'm locating the relevant file.",
+        key="code_discovery",
+    )
+    task_state.report_progress(
+        "I'm inspecting the relevant source.",
+        key="source_inspection",
+    )
+
+    assert spoken == [
+        "I'm locating the relevant code.",
+        "I'm inspecting the relevant source.",
+    ]
+
+
+def test_status_message_reports_current_activity():
+    agent = FakeAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+
+    task_state.prepare("inspect and validate", 5)
+    task_state.start("inspect and validate", 5)
+    task_state.update_step(3, "code_test")
+
+    task = type("Task", (), {
+        "task_id": "status-activity-task",
+        "request": "inspect and validate",
+        "goal": "inspect and validate",
+        "status": "executing",
+        "steps": [object(), object(), object(), object(), object()],
+        "current_step": 2,
+        "replan_count": 0,
+        "error": None,
+        "started_at": time.time(),
+        "completed_at": None,
+    })()
+
+    controller._task = task
+    controller._task_state = task_state
+
+    assert controller.status_message() == (
+        "I'm validating the result. I'm on step 3 of 5."
+    )
+
+
 def test_status_requests_are_deterministic():
     assert is_task_status_request("what are you doing") is True
     assert is_task_status_request("what's the status") is True
