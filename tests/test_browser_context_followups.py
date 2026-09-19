@@ -151,7 +151,8 @@ def test_click_it_after_navigation_reopens_selected_result_url():
     context = make_context("google", "Wi-Fi skeleton")
     context["last_result_title"] = "Wifiskeleton"
     context["last_result_url"] = "https://en.wikipedia.org/wiki/Wifiskeleton"
-    context["page_url"] = "https://www.google.com/search?q=Wi-Fi+skeleton"
+    # This fixture represents the browser after the result was opened.
+    context["page_url"] = "https://en.wikipedia.org/wiki/Wifiskeleton"
 
     resolved = _deterministic_followup(
         "Click it",
