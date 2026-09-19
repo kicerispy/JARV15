@@ -1307,7 +1307,7 @@ def browser_extract_text(
 
                 markup = await page.content()
                 stripped = regex_module.sub(
-                    r"<script\\b[^>]*>[\\s\\S]*?</script>|<style\\b[^>]*>[\\s\\S]*?</style>",
+                    r"<script\b[^>]*>[\s\S]*?</script>|<style\b[^>]*>[\s\S]*?</style>",
                     " ",
                     markup,
                     flags=regex_module.IGNORECASE,
@@ -1319,7 +1319,7 @@ def browser_extract_text(
                 )
                 stripped = html_module.unescape(stripped)
                 stripped = regex_module.sub(
-                    r"\\s+",
+                    r"\s+",
                     " ",
                     stripped,
                 ).strip()
