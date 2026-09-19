@@ -875,7 +875,7 @@ def build_browser_dom_plan(user_request):
     match = re.match(
         r"^(?:fill|enter|put|type)\s+"
         r"(?:the\s+)?(.+?)\s+"
-        r"(?:with|using)s+(.+)$",
+        r"(?:with|using)\s+(.+)$",
         normalized,
         re.IGNORECASE,
     )
@@ -896,7 +896,7 @@ def build_browser_dom_plan(user_request):
     # Press a key on a named browser element.
     match = re.match(
         r"^(?:press|hit)\s+(?:the\s+)?(.+?)\s+"
-        r"(?:in|on|inside)s+(?:thes+)?(.+)$",
+        r"(?:in|on|inside)\s+(?:the\s+)?(.+)$",
         normalized,
         re.IGNORECASE,
     )
@@ -918,7 +918,7 @@ def build_browser_dom_plan(user_request):
     # handled by the context resolver and generic result routers.
     match = re.match(
         r"^(?:click|open|select|choose)\s+"
-        r"(?:thes+)?(.+?)$",
+        r"(?:the\s+)?(.+?)$",
         normalized,
         re.IGNORECASE,
     )
@@ -951,7 +951,7 @@ def build_browser_dom_plan(user_request):
     # Wait for visible page content.
     match = re.match(
         r"^(?:wait\s+for|wait\s+until)\s+"
-        r"(?:thes+)?(.+?)$",
+        r"(?:the\s+)?(.+?)$",
         normalized,
         re.IGNORECASE,
     )
