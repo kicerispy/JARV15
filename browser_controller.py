@@ -634,6 +634,45 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
     return candidates
 
 
+def _snapshot_spoken_preview(
+    readable_text: str,
+    results: list[dict[str, str]],
+) -> str:
+    """Build a compact spoken summary while preserving full structured results."""
+    spoken_preview = str(readable_text or "")[:900]
+
+    result_titles = []
+    for item in results[:3]:
+        if not isinstance(item, dict):
+            continue
+
+        title_text = " ".join(
+            str(item.get("title", "") or "").split()
+        ).strip()
+
+        if title_text and title_text not in result_titles:
+            result_titles.append(title_text)
+
+    if result_titles:
+        ordinal_names = ("First", "Second", "Third")
+        spoken_parts = [
+            f"I found {len(results)} result{'s' if len(results) != 1 else ''}."
+        ]
+
+        for ordinal, title_text in zip(
+            ordinal_names,
+            result_titles,
+        ):
+            compact_title = title_text[:90].rstrip()
+            spoken_parts.append(
+                f"{ordinal}: {compact_title}."
+            )
+
+        spoken_preview = " ".join(spoken_parts)[:600]
+
+    return spoken_preview
+
+
 def browser_page_snapshot() -> dict[str, Any]:
     """Return a bounded, structured observation of the current browser page."""
     async def _snapshot():
@@ -739,37 +778,10 @@ def browser_page_snapshot() -> dict[str, Any]:
 
         results = await _snapshot_search_results(page)
 
-        spoken_preview = readable_text[:900]
-        if results:
-            result_titles = []
-            for item in results[:3]:
-                if not isinstance(item, dict):
-                    continue
-
-                title_text = " ".join(
-                    str(item.get("title", "") or "").split()
-                ).strip()
-
-                if title_text and title_text not in result_titles:
-                    result_titles.append(title_text)
-
-            if result_titles:
-                ordinal_names = ("First", "Second", "Third")
-                spoken_parts = [
-                    f"I found {len(results)} result{'s' if len(results) != 1 else ''}."
-                ]
-
-                for ordinal, title_text in zip(
-                    ordinal_names,
-                    result_titles,
-                ):
-                    compact_title = title_text[:90].rstrip()
-                    spoken_parts.append(
-                        f"{ordinal}: {compact_title}."
-                    )
-
-                spoken_preview = " ".join(spoken_parts)[:600]
-
+        spoken_preview = _snapshot_spoken_preview(
+            readable_text,
+            results,
+        )
         return {
             "success": True,
             "verified": True,
