@@ -1520,8 +1520,8 @@ def create_plan(
     # ========================================================
 
     visible_text_match = re.match(
-        r"^(?:click|open|play|select|choose|pick)\\s+"
-        r"the\\s+browser\\s+element\\s+with\\s+visible\\s+text\\s+"
+        r"^(?:click|open|play|select|choose|pick)\s+"
+        r"the\s+browser\s+element\s+with\s+visible\s+text\s+"
         r"(?P<quoted>['\"].+['\"])$",
         user_command.strip(),
         re.IGNORECASE,
