@@ -3643,12 +3643,178 @@ def _parse_json(text: str) -> dict[str, Any]:
 
 
 
+def _research_relevant_excerpt(
+    source: dict[str, Any],
+    max_chars: int,
+) -> str:
+    """
+    Keep the product-bearing parts of a page instead of blindly taking the
+    first N characters. Many modern sites put thousands of navigation words
+    before the actual product list.
+    """
+    text = " ".join(
+        str(source.get("text") or "").split()
+    ).strip()
+
+    if not text:
+        return ""
+
+    if len(text) <= max_chars:
+        return text
+
+    source_type = str(
+        source.get("source_type") or ""
+    ).lower()
+
+    anchors = (
+        "best overall",
+        "best budget",
+        "best mid-range",
+        "best cheap",
+        "top pick",
+        "top picks",
+        "our picks",
+        "recommended",
+        "quick answer",
+        "in-depth answer",
+        "price",
+        "msrp",
+        "see price",
+        "save",
+        "battery life",
+        "noise cancellation",
+        "active noise cancellation",
+        "anc",
+        "tested",
+        "rating",
+        "reviews",
+        "$",
+    )
+
+    lowered = text.lower()
+    windows: list[tuple[int, int, int]] = []
+
+    for anchor in anchors:
+        start = 0
+        while True:
+            index = lowered.find(anchor, start)
+            if index < 0:
+                break
+
+            left = max(0, index - 380)
+            right = min(
+                len(text),
+                index + max(520, len(anchor) + 260),
+            )
+
+            # Slightly favor source-category-specific evidence.
+            score = 1
+            if source_type == "retailer" and anchor in {
+                "price",
+                "msrp",
+                "rating",
+                "reviews",
+                "$",
+            }:
+                score += 4
+            elif source_type == "manufacturer" and anchor in {
+                "battery life",
+                "noise cancellation",
+                "active noise cancellation",
+                "anc",
+                "price",
+                "msrp",
+            }:
+                score += 4
+            elif source_type == "independent_review" and anchor in {
+                "best overall",
+                "best budget",
+                "best mid-range",
+                "top picks",
+                "tested",
+                "recommended",
+            }:
+                score += 4
+            elif source_type == "video" and anchor in {
+                "review",
+                "tested",
+                "battery life",
+                "anc",
+            }:
+                score += 3
+            elif source_type == "community" and anchor in {
+                "reviews",
+                "rating",
+                "battery life",
+                "anc",
+            }:
+                score += 3
+
+            windows.append((left, right, score))
+            start = index + max(1, len(anchor))
+
+    # Merge overlaps so one source does not waste its entire budget repeating
+    # the same sentence from many nearby anchors.
+    windows.sort(key=lambda item: (item[0], -item[2]))
+
+    merged: list[list[int]] = []
+    for left, right, score in windows:
+        if not merged or left > merged[-1][1] + 80:
+            merged.append([left, right, score])
+        else:
+            merged[-1][1] = max(merged[-1][1], right)
+            merged[-1][2] += score
+
+    # Start with the highest-value windows, then restore document order.
+    merged.sort(key=lambda item: item[2], reverse=True)
+
+    selected: list[list[int]] = []
+    used_chars = 0
+
+    for left, right, _score in merged:
+        span = right - left
+        if selected and used_chars + span > max_chars:
+            continue
+        if not selected and span > max_chars:
+            right = left + max_chars
+            span = max_chars
+
+        selected.append([left, right, 0])
+        used_chars += span
+
+        if used_chars >= max_chars:
+            break
+
+    # Always retain a little page context when possible.
+    if not selected:
+        return text[:max_chars]
+
+    selected.sort(key=lambda item: item[0])
+
+    parts = []
+    for left, right, _ in selected:
+        chunk = text[left:right].strip(" -:;,.")
+        if chunk:
+            parts.append(chunk)
+
+    excerpt = " ... ".join(parts)
+
+    # Fill unused budget from the start only when the relevant excerpts are
+    # still short. This keeps source identity/context without restoring all
+    # of the navigation boilerplate.
+    if len(excerpt) < min(700, max_chars):
+        prefix = text[:max_chars]
+        excerpt = prefix + " ... " + excerpt
+
+    return excerpt[:max_chars]
+
+
 def _compact_evidence_for_synthesis(
     evidence: list[dict[str, Any]],
     per_source_chars: int = 2800,
 ) -> list[dict[str, Any]]:
     """
-    Reduce navigation boilerplate before sending evidence to the local LLM.
+    Reduce navigation boilerplate while preserving product-bearing excerpts.
     """
     compact = []
 
@@ -3674,9 +3840,10 @@ def _compact_evidence_for_synthesis(
                 "numeric_hints": source.get(
                     "numeric_hints"
                 ) or {},
-                "text": " ".join(
-                    str(source.get("text") or "").split()
-                )[:per_source_chars],
+                "text": _research_relevant_excerpt(
+                    source,
+                    per_source_chars,
+                ),
             }
         )
 
@@ -3811,8 +3978,8 @@ JSON shape:
 
         retry_evidence = _compact_evidence_for_synthesis(
             evidence,
-            per_source_chars=1200,
-        )[:10]
+            per_source_chars=1600,
+        )
 
         retry_prompt = f"""
 Synthesize this product research using ONLY the evidence below.
@@ -4257,11 +4424,14 @@ def research_product(
         analysis
     )
 
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
     verified = bool(
         analysis
         and (
-            analysis.get("best_match")
-            or analysis.get("best_value")
+            str(best_match.get("name") or "").strip()
+            or str(best_value.get("name") or "").strip()
         )
     )
 
