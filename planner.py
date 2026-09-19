@@ -220,7 +220,22 @@ def _planner_tool_scope(
     # Product/review/price research has its own orchestration tool. Keep the
     # planner from expanding one research request into dozens of fragile DOM steps.
     if any(signal in text for signal in research_signals) and (
-        any(word in text for word in ("find", "research", "review", "compare", "recommend", "buy", "price", "alternative"))
+        any(
+            word in text
+            for word in (
+                "find",
+                "research",
+                "review",
+                "compare",
+                "recommend",
+                "buy",
+                "price",
+                "alternative",
+            )
+        )
+        or "under" in text
+        or "below" in text
+        or "$" in text
     ):
         return _RESEARCH_PLANNER_TOOLS
 
