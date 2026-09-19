@@ -356,7 +356,12 @@ class BrowserPriceChecker:
             return search_url
 
         try:
-            snapshot = self.browser_page_snapshot() or {}
+            try:
+                snapshot = self.browser_page_snapshot(max_links=120) or {}
+            except TypeError:
+                # Compatibility with older snapshot wrappers that do not
+                # accept the optional link limit.
+                snapshot = self.browser_page_snapshot() or {}
         except Exception:
             return search_url
 
@@ -376,7 +381,7 @@ class BrowserPriceChecker:
 
             href = str(link.get("href") or "").strip()
             text = " ".join(str(link.get("text") or "").split()).strip()
-            if not href or len(text) < 4:
+            if not href:
                 continue
 
             try:
@@ -408,6 +413,11 @@ class BrowserPriceChecker:
             score = (
                 100.0 if model_hit else 0.0
             ) + (product_score * 10.0) + (token_overlap * 5.0)
+
+            # Empty-anchor product URLs are still useful when the URL itself
+            # contains the requested product/model terms.
+            if len(text) < 4 and score < 5.0:
+                continue
 
             lowered = absolute.lower()
             if any(
