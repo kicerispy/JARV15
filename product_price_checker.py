@@ -151,6 +151,10 @@ _PRICE_NEGATIVE_CONTEXT = (
     "list price",
     "list:",
     "coupon",
+    "clip coupon",
+    "with coupon",
+    "after coupon",
+    "extra savings",
     "discount",
     "off",
     "msrp",
@@ -287,6 +291,25 @@ def extract_prices(text: str) -> List[float]:
             continue
     return prices
 
+
+def _price_is_near_product(text, price, product_name, model_number='', window=1400):
+    value = str(text or '')
+    if not value:
+        return False
+    lower = value.lower()
+    positions = []
+    for needle in (str(model_number or '').strip(), str(product_name or '').strip()):
+        needle = needle.lower()
+        if needle:
+            pos = lower.find(needle)
+            if pos >= 0:
+                positions.append(pos)
+    for pos in positions:
+        neighborhood = value[max(0, pos - window):min(len(value), pos + window)]
+        for candidate, _start, _end, score in _price_candidates(neighborhood):
+            if abs(float(candidate) - float(price)) < 0.001 and score >= -1.0:
+                return True
+    return False
 
 def best_nearby_price(
     text: str,
@@ -829,6 +852,14 @@ class BrowserPriceChecker:
                             direct_price = candidate_price
                             break
 
+                    if direct_price is not None and not _price_is_near_product(
+                        direct_body,
+                        direct_price,
+                        product_name,
+                        model_number,
+                    ):
+                        direct_price = None
+
                     if direct_price is None:
                         lower_direct = direct_body.lower()
                         anchor_index = -1
@@ -839,7 +870,7 @@ class BrowserPriceChecker:
                                 if anchor_index >= 0:
                                     break
                         if anchor_index >= 0:
-                            nearby = direct_body[anchor_index:anchor_index + 900]
+                            nearby = direct_body[anchor_index:anchor_index + 1400]
                             direct_price = _select_best_price(nearby)
 
                     if direct_score >= score:
@@ -1011,6 +1042,26 @@ class BrowserPriceChecker:
             offer for offer in offers
             if offer.price is not None and offer.exact_match
         ]
+
+        if len(verified) >= 2:
+            sorted_prices = sorted(
+                float(offer.price)
+                for offer in verified
+                if isinstance(offer.price, (int, float))
+            )
+            median_price = sorted_prices[len(sorted_prices) // 2]
+            kept = []
+            for offer in verified:
+                price = float(offer.price)
+                if price < 0.25 * median_price and price < 25.0:
+                    offer.notes = (
+                        (offer.notes + " " if offer.notes else "")
+                        + "Price rejected as an extreme outlier versus "
+                        "other exact product-page prices."
+                    )
+                    continue
+                kept.append(offer)
+            verified = kept
         verified.sort(key=lambda offer: offer.price or float("inf"))
 
         cheapest = verified[0] if verified else None
