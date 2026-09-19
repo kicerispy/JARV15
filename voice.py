@@ -197,10 +197,14 @@ _speak_lock = threading.Lock()
 # Suppress accidental back-to-back duplicate utterances caused by concurrent
 # task/completion delivery paths. Legitimate repeated speech after this short
 # window is still allowed.
-_DUPLICATE_SPEECH_WINDOW = 2.0
+_DUPLICATE_SPEECH_WINDOW = 5.0
 _duplicate_speech_lock = threading.Lock()
-_last_spoken_text = ""
+_last_spoken_key = ""
 _last_spoken_at = 0.0
+
+def _speech_dedup_key(text):
+    """Normalize speech so formatting-only differences cannot duplicate audio."""
+    return " ".join(str(text or "").strip().split()).casefold()
 
 
 # ============================================================
@@ -866,10 +870,11 @@ def speak(text):
     # message through two completion paths during a race. Suppress only an
     # identical utterance arriving immediately after the previous one.
     now = time.monotonic()
-    global _last_spoken_text, _last_spoken_at
+    speech_key = _speech_dedup_key(text)
+    global _last_spoken_key, _last_spoken_at
     with _duplicate_speech_lock:
         if (
-            text == _last_spoken_text
+            speech_key == _last_spoken_key
             and now - _last_spoken_at < _DUPLICATE_SPEECH_WINDOW
         ):
             print(
@@ -877,7 +882,7 @@ def speak(text):
             )
             return False
 
-        _last_spoken_text = text
+        _last_spoken_key = speech_key
         _last_spoken_at = now
 
     print(
