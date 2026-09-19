@@ -560,17 +560,20 @@ class BackgroundTaskController:
             task.status = "cancellation_requested"
             task.error = "Cancellation requested by the user."
 
+            try:
+                # Mark the task cancelled before releasing the controller
+                # lock so no worker speech can slip into the queue after the
+                # cancellation decision has been made.
+                task_state.cancel()
+            except Exception as exc:
+                logger.warning(
+                    f"JARVIS TASK CONTROLLER: Cancellation error: {exc}"
+                )
+
             # Remove worker announcements already waiting in the queue.
             # The main loop will provide the single explicit cancellation
             # response instead of replaying stale progress afterward.
             self._clear_pending_speech_locked()
-
-        try:
-            task_state.cancel()
-        except Exception as exc:
-            logger.warning(
-                f"JARVIS TASK CONTROLLER: Cancellation error: {exc}"
-            )
 
         logger.info(
             "JARVIS TASK CONTROLLER: "
