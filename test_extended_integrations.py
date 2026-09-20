@@ -14,6 +14,8 @@ class ExtendedIntegrationTests(unittest.TestCase):
             "art_search", "nasa_eonet", "spacex_lookup", "sunrise_sunset",
             "topo_elevation", "public_ip", "reverse_geocode", "news_search",
             "cat_fact", "dog_image", "osm_search",
+            "pokemon_lookup", "food_product", "cocktail_search",
+            "openverse_search", "iss_location",
         }
         self.assertTrue(expected.issubset(API_TOOLS))
         self.assertTrue(callable(run_extended_api_tool))
