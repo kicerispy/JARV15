@@ -142,7 +142,7 @@ def summarize(
 
 def score_heed_audio(
     audio: np.ndarray,
-) -> tuple[float, float, int, int]:
+) -> tuple[float, float, int, float]:
     """
     Run the actual Heed model over 1-second windows of a captured recording.
 
@@ -155,7 +155,6 @@ def score_heed_audio(
     from wakeword import (
         INPUT_NAME,
         OUTPUT_NAME,
-        WAKE_THRESHOLD,
         session,
     )
 
@@ -204,7 +203,25 @@ def score_heed_audio(
         )
 
         if peak <= 1e-6:
-            scores.append(0.0)
+            continue
+
+        # Match the level floor used by live activation before applying
+        # peak normalization. Otherwise very quiet room noise can be
+        # amplified into a misleadingly strong model input.
+        rms = float(
+            np.sqrt(
+                np.mean(
+                    np.square(window)
+                )
+            )
+        )
+
+        if rms <= 1e-12:
+            continue
+
+        window_dbfs = 20.0 * math.log10(rms)
+
+        if window_dbfs < -55.0:
             continue
 
         # Match the -3 dBFS peak normalization specified by wake.json.
@@ -274,10 +291,12 @@ def score_heed_audio(
 def print_heed_scores(
     label: str,
     audio: np.ndarray,
-) -> tuple[float, float, int, int]:
+) -> tuple[float, float, int, float]:
+    from wakeword import WAKE_THRESHOLD
+
     print()
     print(f"===== {label} HEED MODEL =====")
-    print("Running the actual wake model over the recording...")
+    print("Running the actual wake model over the recording (live -55 dBFS energy floor applied)...")
 
     result = score_heed_audio(audio)
 
