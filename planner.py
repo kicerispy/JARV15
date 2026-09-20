@@ -24,6 +24,8 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
+    "browser_agent_run": "Run an autonomous browser task in the controlled Chrome session. Argument = task text or JSON with task and optional max_steps.",
+    "browser_agent_status": "Check whether the optional autonomous browser-agent stack is installed and connected.",
     "holiday_lookup": "Look up public holidays. Argument = ISO country code and optional year, e.g. US 2026.",
     "knowledge_lookup": "Look up a concise Wikipedia knowledge summary. Argument = topic.",
     "book_search": "Search Open Library for books or authors. Argument = title, author, or subject.",

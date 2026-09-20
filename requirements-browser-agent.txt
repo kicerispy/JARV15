@@ -1,0 +1,3 @@
+# Optional autonomous browser-agent integration
+# Requires Python 3.11+ in the JARVIS runtime.
+browser-use==0.13.10

@@ -15,6 +15,11 @@ logging.basicConfig(level=logging.INFO, format="[JARVIS] %(message)s")
 
 CHROME_AUTOMATION_DIR = Path(os.path.abspath("./playwright_profile"))
 
+try:
+    JARVIS_CDP_PORT = int(os.getenv("JARVIS_CDP_PORT", "9222"))
+except ValueError:
+    JARVIS_CDP_PORT = 9222
+
 _playwright = None
 _context = None
 _page = None
@@ -127,7 +132,10 @@ async def _init_browser():
         user_data_dir=user_data_dir,
         headless=False,
         viewport={"width": 1920, "height": 1080},
-        args=["--disable-blink-features=AutomationControlled"],
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            f"--remote-debugging-port={JARVIS_CDP_PORT}",
+        ],
     )
 
     pages = _context.pages

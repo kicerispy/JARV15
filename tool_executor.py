@@ -39,6 +39,8 @@ BROWSER_TOOLS = {
     "browser_page_snapshot",
     "browser_click_result",
     "browser_back",
+    "browser_agent_run",
+    "browser_agent_status",
 }
 
 

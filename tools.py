@@ -2657,6 +2657,8 @@ BROWSER_TOOLS = {
     "browser_page_snapshot",
     "browser_click_result",
     "browser_back",
+    "browser_agent_run",
+    "browser_agent_status",
 }
 
 
@@ -2913,6 +2915,14 @@ def run_browser_tool(
 
     def normalize(result):
         return normalize_tool_result(tool_name, result)
+
+    if tool_name == "browser_agent_status":
+        from browser_agent import browser_agent_status
+        return normalize(browser_agent_status())
+
+    if tool_name == "browser_agent_run":
+        from browser_agent import browser_agent_run
+        return normalize(browser_agent_run(argument))
 
     if tool_name == "browser_connect":
         return normalize(browser_connect())
