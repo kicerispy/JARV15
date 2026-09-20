@@ -342,6 +342,7 @@ def check_live_apis() -> list[str]:
 
 def check_speech_summaries() -> list[str]:
     from tool_executor import _api_spoken_summary
+    from tool_result import ToolResult
 
     failures = []
 
@@ -428,7 +429,11 @@ def check_speech_summaries() -> list[str]:
         try:
             summary = _api_spoken_summary(
                 tool,
-                data,
+                ToolResult(
+                    success=True,
+                    tool=tool,
+                    data=data,
+                ),
             )
 
             if not summary:
