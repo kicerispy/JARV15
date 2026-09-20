@@ -549,6 +549,7 @@ def _variant_conflict(product_name: str, observed_text: str) -> bool:
 
 
 def _condition_from_text(observed_text: str) -> str:
+    """Infer condition only from explicit product-condition language."""
     text = normalize_product_text(observed_text)
     if any(marker in text for marker in ('renewed', 'refurbished', 'remanufactured')):
         return 'refurbished'
@@ -556,9 +557,90 @@ def _condition_from_text(observed_text: str) -> str:
         return 'open_box'
     if any(marker in text for marker in ('pre owned', 'preowned', 'used')):
         return 'used'
-    if 'new' in text:
+
+    explicit_new_markers = (
+        'condition new',
+        'new condition',
+        'brand new',
+        'new in box',
+        'new item',
+        'condition: new',
+    )
+    if any(marker in text for marker in explicit_new_markers):
         return 'new'
+
     return 'unknown'
+
+
+def _requested_variant(product_name: str) -> bool:
+    wanted = normalize_product_text(product_name)
+    return any(
+        marker in wanted
+        for marker in (
+            'bundle',
+            'kit',
+            'stand kit',
+            'charger bundle',
+            'case bundle',
+            'renewed',
+            'refurbished',
+            'used',
+            'open box',
+            'pre owned',
+            'preowned',
+        )
+    )
+
+
+def _variant_context(
+    product_name: str,
+    observed_text: str,
+    snapshot: Optional[dict[str, Any]] = None,
+    model_number: str = '',
+    window: int = 900,
+) -> str:
+    """Keep variant detection tied to the product rather than page-wide noise."""
+    parts = []
+
+    snapshot = snapshot or {}
+    title = ' '.join(str(snapshot.get('title') or '').split()).strip()
+    if title:
+        parts.append(title)
+
+    headings = snapshot.get('headings') or []
+    if isinstance(headings, list):
+        parts.extend(
+            ' '.join(str(value or '').split()).strip()
+            for value in headings
+            if str(value or '').strip()
+        )
+
+    text = normalize_product_text(observed_text)
+    if text:
+        anchors = [
+            normalize_product_text(model_number),
+            normalize_product_text(product_name),
+        ]
+        for anchor in anchors:
+            if not anchor:
+                continue
+            index = text.find(anchor)
+            if index >= 0:
+                parts.append(text[max(0, index - window): index + window])
+                break
+
+    return ' '.join(part for part in parts if part)
+
+
+def _offer_condition_allowed(
+    product_name: str,
+    offer: PriceOffer,
+) -> bool:
+    """Normal product requests exclude used/refurbished/open-box offers."""
+    condition = str(offer.condition or 'unknown').lower().strip()
+    if _requested_variant(product_name):
+        return True
+    return condition not in {'used', 'refurbished', 'open_box'}
 
 
 def _product_type_conflict(product_name: str, observed_text: str) -> bool:
@@ -842,6 +924,7 @@ class BrowserPriceChecker:
         # verified offer.
         price = None
         direct_product_page_seen = False
+        direct_snapshot = {}
 
         direct_url = self._direct_product_url(
             store_key,
@@ -1036,6 +1119,30 @@ class BrowserPriceChecker:
                 pass
 
         notes = ""
+
+        # Identity can be correct while the specific listing is still a used,
+        # refurbished, open-box, or bundle variant. Apply a final variant gate
+        # after the direct page has been inspected, using title/headings plus a
+        # product-neighborhood from the page body.
+        if (
+            direct_product_page_seen
+            and _variant_conflict(
+                product_name,
+                _variant_context(
+                    product_name,
+                    direct_body,
+                    direct_snapshot,
+                    model_number,
+                ),
+            )
+        ):
+            direct_product_page_seen = False
+            price = None
+            notes = (
+                "Direct page matched a non-requested used/refurbished/"
+                "open-box/bundle variant; offer rejected."
+            )
+
         if not direct_product_page_seen:
             # Search-page prices can belong to a different SKU, variant,
             # marketplace seller, coupon, or nearby result. Do not promote
@@ -1102,8 +1209,13 @@ class BrowserPriceChecker:
             )
 
         verified = [
-            offer for offer in offers
-            if offer.price is not None and offer.exact_match
+            offer
+            for offer in offers
+            if (
+                offer.price is not None
+                and offer.exact_match
+                and _offer_condition_allowed(product_name, offer)
+            )
         ]
 
         if len(verified) >= 2:
