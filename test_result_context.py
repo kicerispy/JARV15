@@ -191,6 +191,41 @@ class StructuredResultContextTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("2 results", result["reply"])
 
+    def test_field_followups(self):
+        currency = {
+            "last_tool": "currency_convert",
+            "last_result_data": {
+                "from": "USD",
+                "to": "EUR",
+                "rate": 0.87,
+                "converted": 87.0,
+            },
+        }
+
+        result = resolve_result_followup(
+            "What was the exchange rate?",
+            currency,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("0.87", result["reply"])
+
+        alerts = {
+            "last_tool": "weather_alerts",
+            "last_result_data": {
+                "count": 3,
+                "alerts": [],
+            },
+        }
+
+        result = resolve_result_followup(
+            "How many weather alerts were there?",
+            alerts,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("3", result["reply"])
+
     def test_no_context_does_not_intercept(self):
         result = resolve_result_followup(
             "What was the second one?",
