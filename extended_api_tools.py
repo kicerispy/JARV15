@@ -43,6 +43,11 @@ API_TOOLS = {
     "cat_fact",
     "dog_image",
     "osm_search",
+    "pokemon_lookup",
+    "food_product",
+    "cocktail_search",
+    "openverse_search",
+    "iss_location",
 }
 
 
@@ -929,6 +934,132 @@ def dog_image(argument: str = "") -> dict[str, Any]:
         return _error(tool, f"Dog image lookup failed: {exc}")
 
 
+
+def pokemon_lookup(argument: str = "") -> dict[str, Any]:
+    tool = "pokemon_lookup"
+    query = str(argument or "").strip().split()[0] if str(argument or "").strip() else ""
+    if not query:
+        return _error(tool, "Provide a Pokémon name or number.", retryable=False)
+    try:
+        payload = _get_json(f"https://pokeapi.co/api/v2/pokemon/{requests.utils.quote(query.lower(), safe='')}")
+        stats = {}
+        for item in payload.get("stats") or []:
+            stat = item.get("stat") or {}
+            if stat.get("name"): stats[stat["name"]] = item.get("base_stat")
+        item = {
+            "name": payload.get("name"),
+            "id": payload.get("id"),
+            "types": [x.get("type", {}).get("name") for x in payload.get("types") or []],
+            "abilities": [x.get("ability", {}).get("name") for x in payload.get("abilities") or []],
+            "height": payload.get("height"),
+            "weight": payload.get("weight"),
+            "stats": stats,
+            "image": ((payload.get("sprites") or {}).get("front_default")),
+            "url": f"https://pokeapi.co/api/v2/pokemon/{payload.get('id')}" if payload.get("id") else None,
+        }
+        return _success(tool, {"results": [item]}, f"Pokémon data retrieved for {item['name'] or query}.")
+    except Exception as exc:
+        return _error(tool, f"Pokémon lookup failed: {exc}")
+
+def food_product(argument: str = "") -> dict[str, Any]:
+    tool = "food_product"
+    barcode = "".join(ch for ch in str(argument or "").strip() if ch.isdigit())
+    if not barcode:
+        return _error(tool, "Provide a product barcode.", retryable=False)
+    try:
+        payload = _get_json(
+            f"https://world.openfoodfacts.org/api/v3/product/{barcode}.json",
+            params={"fields": "product_name,brands,nutriscore_data,nutriments,image_front_url,ingredients_text"},
+            headers={"User-Agent": "JARVIS/1.0 (local assistant)"},
+        )
+        product = payload.get("product") or {}
+        if int(payload.get("status", 0) or 0) != 1 and not product:
+            return _error(tool, f"No food product found for barcode {barcode}.", retryable=False)
+        nutriments = product.get("nutriments") or {}
+        item = {
+            "name": product.get("product_name") or barcode,
+            "brand": product.get("brands"),
+            "nutriscore": (product.get("nutriscore_data") or {}).get("grade"),
+            "energy_kcal_100g": nutriments.get("energy-kcal_100g"),
+            "sugars_100g": nutriments.get("sugars_100g"),
+            "fat_100g": nutriments.get("fat_100g"),
+            "salt_100g": nutriments.get("salt_100g"),
+            "ingredients": _clean(product.get("ingredients_text"), 500),
+            "image": product.get("image_front_url"),
+            "url": f"https://world.openfoodfacts.org/product/{barcode}",
+        }
+        return _success(tool, {"results": [item]}, f"Food product data retrieved for {item['name']}.")
+    except Exception as exc:
+        return _error(tool, f"Food product lookup failed: {exc}")
+
+def cocktail_search(argument: str = "") -> dict[str, Any]:
+    tool = "cocktail_search"
+    query = str(argument or "").strip()
+    endpoint = "https://www.thecocktaildb.com/api/json/v1/1/random.php" if not query else "https://www.thecocktaildb.com/api/json/v1/1/search.php"
+    try:
+        payload = _get_json(endpoint, params={"s": query} if query else None)
+        cocktails = []
+        for item in (payload.get("drinks") or [])[:5]:
+            ingredients = []
+            for idx in range(1, 16):
+                ingredient = _clean(item.get(f"strIngredient{idx}"), 60)
+                measure = _clean(item.get(f"strMeasure{idx}"), 60)
+                if ingredient: ingredients.append(f"{measure} {ingredient}".strip())
+            cocktails.append({
+                "name": item.get("strDrink"),
+                "category": item.get("strCategory"),
+                "glass": item.get("strGlass"),
+                "instructions": _clean(item.get("strInstructions"), 450),
+                "ingredients": ingredients,
+                "image": item.get("strDrinkThumb"),
+            })
+        if not cocktails:
+            return _error(tool, f"No cocktails found for '{query}'.", retryable=False)
+        return _success(tool, {"items": cocktails}, f"Found {len(cocktails)} cocktail result(s).")
+    except Exception as exc:
+        return _error(tool, f"Cocktail lookup failed: {exc}")
+
+def openverse_search(argument: str = "") -> dict[str, Any]:
+    tool = "openverse_search"
+    query = str(argument or "").strip()
+    if not query:
+        return _error(tool, "Provide an image search phrase.", retryable=False)
+    try:
+        payload = _get_json(
+            "https://api.openverse.org/v1/images/",
+            params={"q": query, "page_size": 5},
+        )
+        results = []
+        for item in payload.get("results") or []:
+            results.append({
+                "title": item.get("title"),
+                "creator": item.get("creator"),
+                "license": item.get("license"),
+                "source": item.get("source"),
+                "url": item.get("foreign_landing_url"),
+                "image": item.get("url"),
+                "thumbnail": item.get("thumbnail"),
+            })
+        return _success(tool, {"results": results}, f"Found {len(results)} Openverse image result(s).")
+    except Exception as exc:
+        return _error(tool, f"Openverse image search failed: {exc}")
+
+def iss_location(argument: str = "") -> dict[str, Any]:
+    tool = "iss_location"
+    try:
+        payload = _get_json("https://api.open-notify.org/iss-now.json")
+        pos = payload.get("iss_position") or {}
+        item = {
+            "name": "International Space Station",
+            "latitude": pos.get("latitude"),
+            "longitude": pos.get("longitude"),
+            "timestamp": payload.get("timestamp"),
+            "message": payload.get("message"),
+            "url": "https://api.open-notify.org/",
+        }
+        return _success(tool, {"results": [item]}, "Current ISS position retrieved.")
+    except Exception as exc:
+        return _error(tool, f"ISS location lookup failed: {exc}")
 DISPATCH = {
     name: globals()[name]
     for name in API_TOOLS
