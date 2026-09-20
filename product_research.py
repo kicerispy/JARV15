@@ -3186,14 +3186,44 @@ def _normalize_product_text(value: Any) -> str:
 
 def _candidate_form_factor(name):
     value = _normalize_product_text(name)
-    if any(term in value for term in ('earbud', 'earbuds', 'true wireless', 'tws', 'in ear')):
+
+    if any(
+        term in value
+        for term in (
+            'earbud', 'earbuds', 'true wireless', 'tws', 'in ear',
+            'airpods', 'jbuds', 'liberty', 'wf-', 'wf ',
+            'ea az', 'az100', 'galaxy buds',
+        )
+    ):
         return 'earbuds'
-    if any(term in value for term in ('over ear', 'over-ear', 'headphone', 'headphones')):
-        return 'over_ear'
-    if any(term in value for term in ('on ear', 'on-ear')):
-        return 'on_ear'
-    if any(term in value for term in ('open ear', 'open-ear', 'bone conduction')):
+
+    if any(
+        term in value
+        for term in (
+            'open ear', 'open-ear', 'bone conduction', 'openrun',
+        )
+    ):
         return 'open_ear'
+
+    if any(
+        term in value
+        for term in (
+            'on ear', 'on-ear',
+        )
+    ):
+        return 'on_ear'
+
+    if any(
+        term in value
+        for term in (
+            'over ear', 'over-ear', 'headphone', 'headphones',
+            'wh-', 'wh ', 'ch720n', 'hdb', 'quietcomfort',
+            'space one', 'accentum', 'momentum', 'monitor',
+            'live 770', 'tune 770', 'w820nb',
+        )
+    ):
+        return 'over_ear'
+
     if 'headset' in value:
         return 'headset'
     return 'other'
