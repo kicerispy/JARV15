@@ -94,6 +94,32 @@ class StructuredResultContextTests(unittest.TestCase):
         self.assertIn("Quantum computing", result["reply"])
         self.assertIn("superposition", result["reply"])
 
+    def test_ordinal_result_expansion(self):
+        context = {
+            "last_tool": "research_arxiv",
+            "last_result_data": {
+                "papers": [
+                    {
+                        "title": "Paper One",
+                        "summary": "First paper summary.",
+                    },
+                    {
+                        "title": "Paper Two",
+                        "summary": "Second paper summary.",
+                    },
+                ]
+            },
+        }
+
+        result = resolve_result_followup(
+            "Tell me more about the second one",
+            context,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["index"], 1)
+        self.assertIn("Paper Two", result["reply"])
+
     def test_selected_result_expansion(self):
         context = {
             "last_tool": "research_arxiv",
