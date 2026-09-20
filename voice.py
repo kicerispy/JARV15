@@ -55,6 +55,8 @@ from scipy import signal
 
 from piper import PiperVoice, SynthesisConfig
 
+from echo_canceller import create_echo_canceller
+
 
 # ============================================================
 # DEVICE / AUDIO SETTINGS
@@ -201,6 +203,8 @@ _DUPLICATE_SPEECH_WINDOW = 5.0
 _duplicate_speech_lock = threading.Lock()
 _last_spoken_key = ""
 _last_spoken_at = 0.0
+
+_echo_canceller = create_echo_canceller()
 
 # Playback reference for speaker-echo detection. The exact processed TTS waveform
 # is retained so the microphone monitor can distinguish room/speaker echo from
@@ -687,6 +691,57 @@ def _get_volume(
 
 
 # ============================================================
+# PLAYBACK REFERENCE CHUNK
+# ============================================================
+def _get_playback_reference_chunk(length):
+    with _playback_reference_lock:
+        reference = _playback_reference
+        started_at = _playback_reference_started_at
+
+    if reference is None or started_at <= 0:
+        return np.zeros(length, dtype=np.int16)
+
+    elapsed = max(
+        0.0,
+        time.monotonic() - started_at,
+    )
+
+    start = int(elapsed * SAMPLE_RATE)
+    end = start + length
+
+    if start >= len(reference):
+        return np.zeros(length, dtype=np.int16)
+
+    chunk = reference[
+        start : min(end, len(reference))
+    ]
+
+    if len(chunk) < length:
+        chunk = np.pad(
+            chunk,
+            (0, length - len(chunk)),
+        )
+
+    peak = (
+        float(np.max(np.abs(chunk)))
+        if len(chunk)
+        else 0.0
+    )
+
+    if peak <= 1.5:
+        chunk = (
+            chunk.astype(np.float32)
+            * 32767.0
+        )
+
+    return np.clip(
+        chunk,
+        -32768,
+        32767,
+    ).astype(np.int16)
+
+
+# ============================================================
 # SPEAKER ECHO MATCHING
 # ============================================================
 def _prepare_playback_reference(audio, sample_rate):
@@ -880,12 +935,34 @@ def _monitor_microphone():
                     continue
 
 
+                raw_microphone_audio = audio.copy()
+
+                # Feed the exact processed TTS render to WebRTC AEC3 so the
+                # monitor works from a cleaned microphone signal. The existing
+                # waveform matcher remains available as a fallback signal.
+                if _echo_canceller is not None:
+                    speaker_reference = _get_playback_reference_chunk(
+                        len(audio)
+                    )
+
+                    try:
+                        audio = _echo_canceller.process(
+                            audio,
+                            speaker_reference,
+                        )
+                    except Exception as exc:
+                        print(
+                            "JARVIS AEC: processing warning:",
+                            exc,
+                        )
+                        audio = raw_microphone_audio
+
                 volume = _get_volume(
                     audio
                 )
 
                 echo_correlation, echo_residual_ratio = (
-                    _echo_match(audio)
+                    _echo_match(raw_microphone_audio)
                 )
 
                 # Speaker echo is compared against the exact processed TTS
@@ -1116,6 +1193,15 @@ def speak(text):
 
         _interrupted_event.clear()
         _monitor_stop_event.clear()
+
+        if _echo_canceller is not None:
+            try:
+                _echo_canceller.reset()
+            except Exception as exc:
+                print(
+                    "JARVIS AEC: reset warning:",
+                    exc,
+                )
 
 
         with _interrupt_lock:
@@ -1396,6 +1482,12 @@ def speak(text):
             with _playback_reference_lock:
                 _playback_reference = None
                 _playback_reference_started_at = 0.0
+
+            if _echo_canceller is not None:
+                try:
+                    _echo_canceller.reset()
+                except Exception:
+                    pass
 
 
             # ------------------------------------------------

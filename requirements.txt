@@ -3,3 +3,4 @@ python-dotenv
 requests
 faster-whisper>=1.1.0,<2
 silero-vad>=6.2.2,<7
+pywebrtc-audio>=0.2.0,<0.3
