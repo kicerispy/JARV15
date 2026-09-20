@@ -85,6 +85,13 @@ def test_browser_registry_is_shared_by_planner_dispatcher_and_executor():
     assert planner.BROWSER_TOOLS == BROWSER_TOOLS
 
 
+def test_tool_executor_imports_browser_dispatcher():
+    import tools
+    import tool_executor
+
+    assert tool_executor.run_browser_tool is tools.run_browser_tool
+
+
 def test_pyproject_uses_flat_module_metadata():
     import tomllib
 
