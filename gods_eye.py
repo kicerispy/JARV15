@@ -261,7 +261,22 @@ def gods_eye_stop(argument: str = "") -> dict[str, Any]:
 def _gev_list(endpoint: str, key: str, label: str) -> dict[str, Any]:
     try:
         payload = _http_json(endpoint, timeout=10)
-        rows = payload.get(key) if isinstance(payload, dict) else None
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get(key)
+            if not isinstance(rows, list):
+                rows = payload.get("results")
+            if not isinstance(rows, list):
+                rows = payload.get("items")
+            if not isinstance(rows, list):
+                rows = payload.get("sources")
+            if not isinstance(rows, list):
+                rows = payload.get("stations")
+            if not isinstance(rows, list):
+                rows = payload.get("feeds")
+        else:
+            rows = []
         rows = rows if isinstance(rows, list) else []
         return {
             "success": True,
