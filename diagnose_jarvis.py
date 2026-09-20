@@ -6,6 +6,7 @@ Run with:
 
 from __future__ import annotations
 
+import argparse
 import py_compile
 import sys
 from pathlib import Path
@@ -238,6 +239,107 @@ def check_structured_context() -> list[str]:
     return failures
 
 
+def check_live_apis() -> list[str]:
+    """Exercise the real no-key API integrations and result storage."""
+    from state import ActiveContext
+    from tool_executor import update_active_context
+    from tools import run_tool
+    from result_context import resolve_result_followup
+
+    failures = []
+
+    cases = [
+        ("currency_convert", "100 USD to EUR"),
+        ("location_lookup", "Chicago, Illinois"),
+        ("air_quality", "Chicago, Illinois"),
+        ("weather_alerts", "Illinois"),
+        ("elevation_lookup", "Denver, Colorado"),
+        ("knowledge_lookup", "quantum computing"),
+        ("book_search", "Frank Herbert"),
+        ("research_arxiv", "large language models"),
+        ("research_crossref", "quantum computing"),
+        ("holiday_lookup", "US 2026"),
+    ]
+
+    print()
+    print("=" * 80)
+    print("LIVE API SMOKE TESTS")
+    print("=" * 80)
+
+    for tool, argument in cases:
+        try:
+            result = run_tool(tool, argument)
+            success = (
+                bool(result.success)
+                if hasattr(result, "success")
+                else bool(
+                    result.get("success", False)
+                    if isinstance(result, dict)
+                    else False
+                )
+            )
+
+            if not success:
+                error = getattr(result, "error", None)
+                if not error and isinstance(result, dict):
+                    error = result.get("error")
+                failures.append(
+                    f"live API {tool}: {error or 'unsuccessful result'}"
+                )
+                print(
+                    f"[FAIL] live API: {tool} -> "
+                    f"{error or 'unsuccessful result'}"
+                )
+            else:
+                print(
+                    f"[PASS] live API: {tool}"
+                )
+
+                if tool == "book_search":
+                    context = ActiveContext()
+                    update_active_context(
+                        plan={
+                            "steps": [
+                                {
+                                    "tool": tool,
+                                    "argument": argument,
+                                }
+                            ]
+                        },
+                        active_context=context,
+                        result_message="I found live book results.",
+                        raw_result=result,
+                    )
+
+                    stored = context.to_dict()
+                    followup = resolve_result_followup(
+                        "What was the second one?",
+                        stored,
+                    )
+
+                    if (
+                        stored.get("last_result_data") is None
+                        or not followup
+                    ):
+                        raise AssertionError(
+                            "live structured result was not retained"
+                        )
+
+                    print(
+                        "[PASS] live structured result + ordinal follow-up"
+                    )
+
+        except Exception as exc:
+            failures.append(
+                f"live API {tool}: {exc}"
+            )
+            print(
+                f"[FAIL] live API: {tool} -> {exc}"
+            )
+
+    return failures
+
+
 def check_speech_summaries() -> list[str]:
     from tool_executor import _api_spoken_summary
 
@@ -348,6 +450,16 @@ def check_speech_summaries() -> list[str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run JARVIS regression diagnostics."
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="also exercise the real no-key API endpoints",
+    )
+    args = parser.parse_args()
+
     print("=" * 80)
     print("JARVIS REGRESSION DIAGNOSTIC")
     print("=" * 80)
@@ -359,6 +471,9 @@ def main() -> int:
         failures.extend(check_routing())
         failures.extend(check_structured_context())
         failures.extend(check_speech_summaries())
+
+        if args.live:
+            failures.extend(check_live_apis())
 
     print()
     print("=" * 80)
