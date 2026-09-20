@@ -367,7 +367,9 @@ def _field_followup(
 
     if tool == "currency_convert":
         if re.search(
-            r"\b(?:what(?:'s| is)\s+)?(?:the\s+)?(?:exchange\s+)?rate\b",
+            r"^(?:what(?:'s| is| was)\s+)?(?:the\s+)?"
+            r"(?:exchange\s+)?rate(?:\s+(?:for|of)\s+"
+            r"(?:it|that|this))?$",
             text,
             re.IGNORECASE,
         ):
@@ -379,7 +381,8 @@ def _field_followup(
 
     if tool == "weather_alerts":
         if re.search(
-            r"\b(?:how many|number of|how much)\s+(?:weather\s+)?alerts\b",
+            r"^(?:how many|what(?:'s| is)\s+the number of)\s+"
+            r"(?:weather\s+)?alerts(?:\s+(?:are|were)\s+(?:there|active))?$",
             text,
             re.IGNORECASE,
         ):
@@ -388,7 +391,7 @@ def _field_followup(
                 return f"There were {count} active weather alerts."
 
         if re.search(
-            r"\b(?:what are|list)\s+(?:the\s+)?(?:weather\s+)?alerts\b",
+            r"^(?:what are|list)\s+(?:the\s+)?(?:weather\s+)?alerts$",
             text,
             re.IGNORECASE,
         ):
@@ -403,7 +406,12 @@ def _field_followup(
                 return "The alerts were " + ", ".join(names) + "."
 
     if tool == "location_lookup":
-        if "timezone" in text or "time zone" in text:
+        if re.search(
+            r"^(?:what(?:'s| is)\s+(?:the\s+)?)?"
+            r"time ?zone(?:\s+(?:is|of)\s+(?:it|that|this))?$",
+            text,
+            re.IGNORECASE,
+        ):
             timezone = (
                 data.get("timezone")
                 or data.get("time_zone")
@@ -424,11 +432,21 @@ def _field_followup(
     if tool == "air_quality":
         current = data.get("current") or data
         if isinstance(current, dict):
-            if "pm2_5" in text or "pm2.5" in text:
+            if re.search(
+                r"^(?:what(?:'s| is| was)\s+)?(?:the\s+)?pm2(?:\.5|_5)"
+                r"(?:\s+(?:value|reading|level))?(?:\s+(?:here|now|it))?$",
+                text,
+                re.IGNORECASE,
+            ):
                 value = current.get("pm2_5")
                 if value is not None:
                     return f"PM2.5 was {value} micrograms per cubic meter."
-            if re.search(r"\bpm10\b", text, re.IGNORECASE):
+            if re.search(
+                r"^(?:what(?:'s| is| was)\s+)?(?:the\s+)?pm10"
+                r"(?:\s+(?:value|reading|level))?(?:\s+(?:here|now|it))?$",
+                text,
+                re.IGNORECASE,
+            ):
                 value = current.get("pm10")
                 if value is not None:
                     return f"PM10 was {value} micrograms per cubic meter."
