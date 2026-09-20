@@ -47,6 +47,19 @@ _LIST_KEYS = (
     "items",
     "apis",
     "candidates",
+    "meals",
+    "shows",
+    "tracks",
+    "recordings",
+    "anime",
+    "films",
+    "works",
+    "artworks",
+    "events",
+    "launches",
+    "articles",
+    "countries",
+    "contacts",
 )
 
 _REFERENCE_WORDS = (
@@ -243,18 +256,36 @@ def _compact_item_details(item: Any, tool: str) -> str:
     for key, label in (
         ("price", "price"),
         ("rating", "rating"),
+        ("score", "score"),
+        ("percent_change_24h", "24h change"),
+        ("market_cap_usd", "market cap USD"),
+        ("symbol", "symbol"),
+        ("artist", "artist"),
+        ("artists", "artists"),
+        ("category", "category"),
+        ("difficulty", "difficulty"),
+        ("date", "date"),
+        ("release_date", "released"),
+        ("premiered", "premiered"),
         ("source", "source"),
+        ("source_country", "source country"),
+        ("domain", "domain"),
         ("retailer", "retailer"),
     ):
         value = item.get(key)
         if value is not None and value != "":
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value[:4])
             parts.append(f"{label}: {value}")
 
     summary = (
         item.get("summary")
+        or item.get("synopsis")
         or item.get("description")
         or item.get("details")
         or item.get("reason")
+        or item.get("text")
+        or item.get("fact")
         or ""
     )
     if summary:
