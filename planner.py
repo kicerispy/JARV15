@@ -47,6 +47,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "music_search": "Search songs, artists, and albums with the iTunes Search API. Argument = song, artist, or album.",
     "musicbrainz_search": "Search MusicBrainz recording metadata. Argument = song, recording, or artist.",
     "anime_search": "Search anime using Jikan/MyAnimeList data. Argument = anime title.",
+    "anime_episodes": "Find an anime and return its episodes using AniAPI, with Jikan fallback. Argument = anime title or JSON with anime/title and optional page.",
     "ghibli_search": "Search Studio Ghibli films. Argument = title, director, or empty.",
     "openalex_search": "Search scholarly works using OpenAlex. Argument = research topic.",
     "pubchem_lookup": "Look up chemical compound information from PubChem. Argument = compound name.",
@@ -2731,5 +2732,4 @@ def create_plan(command, *args, **kwargs):
         *args,
         **kwargs,
     )
-
 
