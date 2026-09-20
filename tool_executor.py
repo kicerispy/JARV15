@@ -426,10 +426,12 @@ def _execute_browser_with_fallback(
       1. primary browser action
       2. re-observe current page
       3. wait/re-check the DOM target when applicable
-      4. retry the primary action once
-      5. try one safer alternate strategy
-      6. use existing desktop-vision click fallback where appropriate
-      7. capture final browser state for Agent Core
+      4. retry the primary action once when explicitly retryable
+      5. try one safer DOM alternate strategy
+      6. capture final browser state for Agent Core
+
+    Browser actions never fall back to screen vision. Desktop vision remains
+    reserved for explicit desktop/screen tools.
     """
     result = run_browser_tool(
         tool_name,
