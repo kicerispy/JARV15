@@ -33,6 +33,26 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertFalse(result["browser_use_installed"])
 
+    def test_planner_routes_explicit_autonomous_browser_request(self):
+        import planner
+
+        plan = planner.create_plan(
+            "Use autonomous browser to find the page title on example.com",
+        )
+
+        self.assertEqual(
+            plan["steps"][0]["tool"],
+            "browser_agent_run",
+        )
+
+        import json
+
+        argument = json.loads(plan["steps"][0]["argument"])
+        self.assertEqual(
+            argument["task"],
+            "find the page title on example.com",
+        )
+
     def test_worker_keeps_shared_browser_alive(self):
         from pathlib import Path
 

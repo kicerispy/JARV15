@@ -161,6 +161,7 @@ BROWSER_STATE_TOOLS = {
     "browser_extract_text",
     "browser_click_result",
     "browser_back",
+    "browser_agent_run",
 }
 
 

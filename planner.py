@@ -1874,6 +1874,46 @@ def create_plan(
                 }
 
     # ========================================================
+    # DETERMINISTIC AUTONOMOUS BROWSER ROUTER
+    # ========================================================
+    #
+    # Explicit autonomous-browser requests should stay model-free at the
+    # outer planner layer. The Browser Use worker still performs its own
+    # multi-step reasoning inside the isolated environment.
+    # ========================================================
+
+    autonomous_browser_task = None
+
+    for prefix in (
+        "use autonomous browser to ",
+        "use the autonomous browser to ",
+        "use browser agent to ",
+        "use the browser agent to ",
+        "have the autonomous browser ",
+        "let the autonomous browser ",
+        "have the browser agent ",
+        "let the browser agent ",
+    ):
+        if normalized_command.startswith(prefix):
+            autonomous_browser_task = user_command.strip()[len(prefix):].strip()
+            break
+
+    if autonomous_browser_task:
+        return {
+            "goal": "run autonomous browser task",
+            "steps": [
+                {
+                    "tool": "browser_agent_run",
+                    "argument": json.dumps({
+                        "task": autonomous_browser_task,
+                        "max_steps": 12,
+                    }),
+                }
+            ],
+            "resolved_command": user_command.strip(),
+        }
+
+    # ========================================================
     # DETERMINISTIC BROWSER READ ROUTER
     # ========================================================
     if normalized_command in {
