@@ -511,6 +511,60 @@ def check_extended_integrations() -> list[str]:
     return failures
 
 
+def check_extended_live_apis() -> list[str]:
+    """Exercise a broad sample of the new low-friction APIs."""
+    from tools import run_tool
+
+    cases = [
+        ("country_info", "US"),
+        ("crypto_price", "bitcoin"),
+        ("trivia_question", ""),
+        ("joke", ""),
+        ("meal_search", "chicken"),
+        ("tv_search", "The Office"),
+        ("music_search", "Daft Punk"),
+        ("musicbrainz_search", "Around the World Daft Punk"),
+        ("anime_search", "Cowboy Bebop"),
+        ("ghibli_search", "Totoro"),
+        ("openalex_search", "quantum computing"),
+        ("pubchem_lookup", "caffeine"),
+        ("art_search", "Vincent van Gogh"),
+        ("nasa_eonet", "wildfires"),
+        ("spacex_lookup", "latest"),
+        ("sunrise_sunset", "Chicago"),
+        ("topo_elevation", "Denver"),
+        ("public_ip", ""),
+        ("reverse_geocode", "41.8781,-87.6298"),
+        ("news_search", "NASA"),
+        ("cat_fact", ""),
+        ("dog_image", ""),
+        ("osm_search", "Willis Tower Chicago"),
+    ]
+    failures = []
+
+    print()
+    print("=" * 80)
+    print("EXTENDED API LIVE SMOKE TESTS")
+    print("=" * 80)
+
+    for tool, argument in cases:
+        try:
+            result = run_tool(tool, argument)
+            success = bool(result.success) if hasattr(result, "success") else bool(
+                result.get("success", False) if isinstance(result, dict) else False
+            )
+            if success:
+                print(f"[PASS] extended API: {tool}")
+            else:
+                error = getattr(result, "error", None) or (result.get("error") if isinstance(result, dict) else None)
+                failures.append(f"extended API {tool}: {error or 'unsuccessful result'}")
+                print(f"[FAIL] extended API: {tool} -> {error or "unsuccessful result"}")
+        except Exception as exc:
+            failures.append(f"extended API {tool}: {exc}")
+            print(f"[FAIL] extended API: {tool} -> {exc}")
+
+    return failures
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run JARVIS regression diagnostics."
@@ -537,6 +591,7 @@ def main() -> int:
 
         if args.live:
             failures.extend(check_live_apis())
+            failures.extend(check_extended_live_apis())
 
     print()
     print("=" * 80)
