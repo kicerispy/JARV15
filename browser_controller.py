@@ -132,10 +132,8 @@ async def _init_browser():
         user_data_dir=user_data_dir,
         headless=False,
         viewport={"width": 1920, "height": 1080},
-        # Playwright normally uses --remote-debugging-pipe internally.
-        # Filter that transport so Chromium exposes the TCP CDP endpoint used
-        # by Browser Use and other external CDP clients.
-        ignore_default_args=["--remote-debugging-pipe"],
+        # Keep Playwright's native remote-debugging-pipe.
+        # Browser Use and other external clients use the TCP CDP endpoint below.
         args=[
             "--disable-blink-features=AutomationControlled",
             f"--remote-debugging-port={JARVIS_CDP_PORT}",
@@ -1018,6 +1016,269 @@ def browser_back() -> dict[str, Any]:
         return get_event_loop().run_until_complete(_back())
     except Exception as exc:
         return {"success": False, "verified": False, "error": str(exc)}
+
+
+def browser_refresh() -> dict[str, Any]:
+    """Refresh the active browser tab and return its resulting state."""
+    async def _refresh():
+        page = await _init_browser()
+        before_url = page.url
+        before_title = await page.title()
+        await page.reload(wait_until="domcontentloaded", timeout=30_000)
+        await _auto_skip_ads(page)
+        after_url = page.url
+        after_title = await page.title()
+        return {
+            "success": True, "verified": True, "action": "browser_refresh",
+            "before_url": before_url, "after_url": after_url,
+            "before_title": before_title, "after_title": after_title,
+            "url": after_url, "title": after_title,
+        }
+    try:
+        return get_event_loop().run_until_complete(_refresh())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_refresh", "error": str(exc)}
+
+
+def browser_forward() -> dict[str, Any]:
+    """Navigate forward in the active browser tab."""
+    async def _forward():
+        page = await _init_browser()
+        before_url = page.url
+        before_title = await page.title()
+        response = await page.go_forward(wait_until="domcontentloaded", timeout=15_000)
+        await page.wait_for_timeout(300)
+        after_url = page.url
+        after_title = await page.title()
+        changed = after_url != before_url
+        return {
+            "success": bool(response is not None or changed),
+            "verified": bool(changed), "action": "browser_forward",
+            "before_url": before_url, "after_url": after_url,
+            "before_title": before_title, "after_title": after_title,
+            "url": after_url, "title": after_title,
+        }
+    try:
+        return get_event_loop().run_until_complete(_forward())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_forward", "error": str(exc)}
+
+
+def browser_new_tab(url: str = "") -> dict[str, Any]:
+    """Open a new controlled browser tab and optionally navigate to a URL."""
+    global _page
+    requested_url = str(url or "").strip()
+    async def _new_tab():
+        global _page
+        await _init_browser()
+        page = await _context.new_page()
+        _page = page
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+        if requested_url:
+            await page.goto(requested_url, wait_until="domcontentloaded", timeout=30_000)
+            await _auto_skip_ads(page)
+        info = await browser_page_info_async(page)
+        info.update({"action": "browser_new_tab", "tab_index": len(_context.pages)})
+        return info
+    try:
+        return get_event_loop().run_until_complete(_new_tab())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_new_tab", "error": str(exc), "url": requested_url}
+
+
+def _resolve_tab_index(
+    index: Any,
+    count: int,
+    current_index: int = 0,
+) -> int:
+    if count <= 0:
+        raise ValueError("No browser tabs are open.")
+    raw = str(index if index is not None else "current").strip().lower()
+    if raw in {"current", "active"}:
+        return max(0, min(int(current_index), count - 1))
+    if raw in {"last", "final"}:
+        return count - 1
+    try:
+        numeric = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Tab index must be a number, 'current', or 'last'.") from exc
+    if numeric < 1 or numeric > count:
+        raise ValueError(f"Tab {numeric} is out of range; {count} tab(s) are open.")
+    return numeric - 1
+
+
+def browser_switch_tab(index: Any = "current") -> dict[str, Any]:
+    """Focus a browser tab by 1-based index."""
+    global _page
+    async def _switch():
+        global _page
+        await _init_browser()
+        pages = list(_context.pages)
+        try:
+            current_index = pages.index(_page)
+        except ValueError:
+            current_index = 0
+        target_index = _resolve_tab_index(index, len(pages), current_index)
+        _page = pages[target_index]
+        try:
+            await _page.bring_to_front()
+        except Exception:
+            pass
+        info = await browser_page_info_async(_page)
+        info.update({"action": "browser_switch_tab", "tab_index": target_index + 1})
+        return info
+    try:
+        return get_event_loop().run_until_complete(_switch())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_switch_tab", "error": str(exc)}
+
+
+def browser_current_tab() -> dict[str, Any]:
+    """Return the active browser tab and its index."""
+    global _page
+    async def _current():
+        global _page
+        page = await _init_browser()
+        pages = list(_context.pages)
+        try:
+            tab_index = pages.index(page) + 1
+        except ValueError:
+            tab_index = 1
+        info = await browser_page_info_async(page)
+        info.update({"action": "browser_current_tab", "tab_index": tab_index})
+        return info
+    try:
+        return get_event_loop().run_until_complete(_current())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_current_tab", "error": str(exc)}
+
+
+def browser_close_tab(index: Any = "current") -> dict[str, Any]:
+    """Close a browser tab while preserving JARVIS's final page."""
+    global _page
+    async def _close():
+        global _page
+        await _init_browser()
+        pages = list(_context.pages)
+        if len(pages) <= 1:
+            return {
+                "success": False, "verified": False, "action": "browser_close_tab",
+                "error": "The final JARVIS browser tab cannot be closed.",
+            }
+        try:
+            current_index = pages.index(_page)
+        except ValueError:
+            current_index = 0
+        target_index = _resolve_tab_index(index, len(pages), current_index)
+        target = pages[target_index]
+        closed_url = target.url
+        closed_title = await target.title()
+        await target.close()
+        remaining = list(_context.pages)
+        new_index = min(target_index, len(remaining) - 1)
+        _page = remaining[new_index]
+        try:
+            await _page.bring_to_front()
+        except Exception:
+            pass
+        info = await browser_page_info_async(_page)
+        info.update({
+            "success": True, "verified": True, "action": "browser_close_tab",
+            "closed_url": closed_url, "closed_title": closed_title,
+            "tab_index": new_index + 1,
+        })
+        return info
+    try:
+        return get_event_loop().run_until_complete(_close())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_close_tab", "error": str(exc)}
+
+
+def browser_get_links(limit: int = 30) -> dict[str, Any]:
+    """Return visible links from the current page."""
+    async def _links():
+        page = await _init_browser()
+        try:
+            bounded = max(1, min(int(limit), 100))
+        except Exception:
+            bounded = 30
+        links = await _snapshot_links(page, "a", limit=bounded)
+        return {
+            "success": True, "verified": True, "action": "browser_get_links",
+            "url": page.url, "title": (await page.title()).strip(),
+            "links": links, "count": len(links),
+        }
+    try:
+        return get_event_loop().run_until_complete(_links())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_get_links", "error": str(exc)}
+
+
+def _resolve_list_index(index: Any, count: int, label: str = "Item") -> int:
+    if count <= 0:
+        raise ValueError(f"No {label.lower()}s are available.")
+    raw = str(index if index is not None else "1").strip().lower()
+    if raw in {"last", "final"}:
+        return count - 1
+    try:
+        numeric = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} index must be a number or 'last'.") from exc
+    if numeric < 1 or numeric > count:
+        raise ValueError(f"{label} {numeric} is out of range; {count} item(s) are available.")
+    return numeric - 1
+
+
+def browser_open_link(index: Any = 1, text: str = "", href: str = "") -> dict[str, Any]:
+    """Open a link by visible text, href, or 1-based visible-link index."""
+    async def _open():
+        page = await _init_browser()
+        before_url = page.url
+        before_title = await page.title()
+        target_href = str(href or "").strip()
+        target_text = str(text or "").strip()
+        if target_href:
+            await page.goto(target_href, wait_until="domcontentloaded", timeout=30_000)
+        else:
+            if target_text:
+                locator = page.get_by_role("link", name=target_text, exact=False).first
+            else:
+                links = page.locator("a:visible")
+                count = await links.count()
+                link_index = _resolve_list_index(index, count, "Link")
+                locator = links.nth(link_index)
+            await locator.wait_for(state="visible", timeout=10_000)
+            await locator.scroll_into_view_if_needed(timeout=5_000)
+            link_href = (await locator.get_attribute("href") or "").strip()
+            try:
+                await locator.click(timeout=5_000)
+            except Exception:
+                if link_href.startswith(("http://", "https://")):
+                    await page.goto(link_href, wait_until="domcontentloaded", timeout=30_000)
+                else:
+                    raise
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=5_000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(300)
+        after_url = page.url
+        after_title = await page.title()
+        navigated = after_url != before_url
+        return {
+            "success": True, "verified": bool(navigated),
+            "action": "browser_open_link",
+            "before_url": before_url, "after_url": after_url,
+            "before_title": before_title, "after_title": after_title,
+            "url": after_url, "title": after_title, "navigated": navigated,
+        }
+    try:
+        return get_event_loop().run_until_complete(_open())
+    except Exception as exc:
+        return {"success": False, "verified": False, "action": "browser_open_link", "error": str(exc)}
 
 
 def browser_click_result(

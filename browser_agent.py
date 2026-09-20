@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,43 @@ def _parse_argument(argument: str) -> tuple[str, dict]:
             pass
 
     return raw, {}
+
+
+def _extract_explicit_url(task: str) -> str | None:
+    """Extract an obvious URL or bare domain from a browser task."""
+    pattern = re.compile(
+        r"https?://[^\s<>\"']+|"
+        r"www\.[^\s<>\"']+|"
+        r"\b[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:/[^\s<>\"']*)?"
+    )
+    match = pattern.search(str(task or ""))
+    if not match:
+        return None
+    candidate = match.group(0).strip().rstrip(".,;:!?)]}\"'")
+    if not candidate:
+        return None
+    if "://" not in candidate:
+        candidate = "https://" + candidate
+    if not re.match(r"^https?://[^/\s]+", candidate, re.IGNORECASE):
+        return None
+    return candidate
+
+
+def _is_page_title_request(task: str) -> bool:
+    """Return True for simple requests whose answer is the browser title."""
+    normalized = " ".join(str(task or "").strip().lower().split())
+    return any(
+        phrase in normalized
+        for phrase in (
+            "page title",
+            "title of the page",
+            "title of that page",
+            "what is the title",
+            "what's the title",
+            "tell me the title",
+            "tell me the page title",
+        )
+    )
 
 
 def _worker_import_ok(python_exe: Path) -> bool:
@@ -188,6 +226,48 @@ def browser_agent_run(argument: str = "") -> dict:
                 "message": "JARVIS browser is running but CDP is unavailable.",
             }
 
+        # Simple title queries are deterministic browser reads.
+        # JARVIS already owns the Playwright session, so do not spend an
+        # autonomous Browser Use/Ollama call on a question Playwright can
+        # answer directly.
+        if _is_page_title_request(task):
+            task_url = _extract_explicit_url(task)
+            try:
+                if task_url:
+                    navigation = browser_controller.browser_goto(task_url)
+                    if not navigation.get("success"):
+                        raise RuntimeError(
+                            navigation.get(
+                                "message",
+                                navigation.get("error", "Browser navigation failed."),
+                            )
+                        )
+
+                page_info = browser_controller.browser_page_info()
+                if isinstance(page_info, dict) and page_info.get("success"):
+                    title = str(page_info.get("title") or "").strip()
+                    current_url = str(page_info.get("url") or "").strip()
+                    if title:
+                        final_message = f'The page title is "{title}".'
+                        return {
+                            "success": True,
+                            "verified": True,
+                            "message": final_message,
+                            "result": final_message,
+                            "title": title,
+                            "url": current_url,
+                            "model": None,
+                            "cdp_url": DEFAULT_CDP_URL,
+                            "max_steps": max_steps,
+                            "mode": "deterministic_browser_fast_path",
+                        }
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "Deterministic browser fast path skipped: %s",
+                    exc,
+                )
+
         worker_payload = json.dumps(
             {"task": task, "max_steps": max_steps},
             ensure_ascii=False,
@@ -223,6 +303,16 @@ def browser_agent_run(argument: str = "") -> dict:
             parsed.setdefault("worker_returncode", process.returncode)
             if stderr:
                 parsed.setdefault("worker_stderr", stderr[-4000:])
+
+            # Prefer the worker's concrete result over wrapper diagnostics.
+            # Keep both message and result aligned so downstream speech and
+            # task history cannot accidentally select unrelated metadata.
+            worker_result = str(
+                parsed.get("result") or parsed.get("message") or ""
+            ).strip()
+            if worker_result:
+                parsed["message"] = worker_result
+
             return parsed
 
         error_text = stderr or stdout or "Browser agent worker returned no output."

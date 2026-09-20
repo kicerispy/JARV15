@@ -17,7 +17,6 @@ import time
 from typing import Any
 
 import httpx
-import pyautogui
 from PIL import Image
 
 from config import OLLAMA_HOST, SCREENSHOT_PATH, VISION_MODEL
@@ -25,8 +24,19 @@ from config import OLLAMA_HOST, SCREENSHOT_PATH, VISION_MODEL
 logger = logging.getLogger("jarvis.screen_vision")
 
 
+def _get_pyautogui():
+    """Load PyAutoGUI only when a desktop operation actually needs it."""
+    try:
+        import pyautogui
+        return pyautogui
+    except Exception as exc:
+        raise RuntimeError(
+            f"Desktop automation is unavailable: {exc}"
+        ) from exc
+
+
 def _capture_image() -> Image.Image:
-    return pyautogui.screenshot()
+    return _get_pyautogui().screenshot()
 
 
 def _capture_bytes(image: Image.Image | None = None) -> bytes:
@@ -89,7 +99,7 @@ def capture_screen() -> dict[str, Any]:
 
 def get_screen_size() -> dict[str, Any]:
     try:
-        width, height = pyautogui.size()
+        width, height = _get_pyautogui().size()
         return {
             "success": True,
             "width": int(width),
@@ -213,7 +223,7 @@ def _desktop_click(target: str, clicks: int = 1, button: str = "left") -> dict[s
 
     x = int(detection["x"])
     y = int(detection["y"])
-    pyautogui.click(x=x, y=y, clicks=clicks, interval=0.1, button=button)
+    _get_pyautogui().click(x=x, y=y, clicks=clicks, interval=0.1, button=button)
 
     return {
         **detection,
@@ -264,7 +274,7 @@ def move_mouse_to_target(target: str) -> dict[str, Any]:
     if not detection.get("success"):
         return detection
 
-    pyautogui.moveTo(
+    _get_pyautogui().moveTo(
         int(detection["x"]),
         int(detection["y"]),
         duration=0.15,
@@ -297,7 +307,7 @@ def scroll_screen(argument: str = "") -> dict[str, Any]:
         direction = "down"
 
     elif "top" in text:
-        pyautogui.hotkey("ctrl", "home")
+        _get_pyautogui().hotkey("ctrl", "home")
         return {
             "success": True,
             "verified": True,
@@ -306,7 +316,7 @@ def scroll_screen(argument: str = "") -> dict[str, Any]:
         }
 
     elif "bottom" in text:
-        pyautogui.hotkey("ctrl", "end")
+        _get_pyautogui().hotkey("ctrl", "end")
         return {
             "success": True,
             "verified": True,
@@ -314,7 +324,7 @@ def scroll_screen(argument: str = "") -> dict[str, Any]:
             "message": "Scrolled to the bottom.",
         }
 
-    pyautogui.scroll(-amount if direction == "down" else amount)
+    _get_pyautogui().scroll(-amount if direction == "down" else amount)
 
     return {
         "success": True,
@@ -328,7 +338,7 @@ def scroll_screen(argument: str = "") -> dict[str, Any]:
 
 def type_text(argument: str = "") -> dict[str, Any]:
     text = str(argument or "")
-    pyautogui.write(text, interval=0.01)
+    _get_pyautogui().write(text, interval=0.01)
     return {
         "success": True,
         "verified": True,
@@ -343,7 +353,7 @@ def press_key(argument: str = "") -> dict[str, Any]:
     if not keys:
         return {"success": False, "error": "Key cannot be empty."}
 
-    pyautogui.hotkey(*keys) if len(keys) > 1 else pyautogui.press(keys[0])
+    _get_pyautogui().hotkey(*keys) if len(keys) > 1 else _get_pyautogui().press(keys[0])
 
     return {
         "success": True,

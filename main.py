@@ -29,6 +29,7 @@ from commands import (
 from config import (
     PROFILE_PATH,
     TYPED_INPUT_ENABLED,
+    CODING_MODEL_WARMUP_DELAY_SECONDS,
 )
 from typed_input import TypedInputChannel
 from context_aware import JarvisContext
@@ -1997,6 +1998,14 @@ def main():
     # --------------------------------------------------
     def warm_coding_model_background():
         try:
+            delay = max(0.0, float(CODING_MODEL_WARMUP_DELAY_SECONDS))
+            if delay:
+                logger.info(
+                    "JARVIS: Coding model warm-up deferred "
+                    f"for {delay:.1f}s."
+                )
+                time.sleep(delay)
+
             warmup_start = perf_now()
             ModelManager().warmup_coding_model()
             logger.info(

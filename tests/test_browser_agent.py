@@ -53,6 +53,38 @@ class BrowserAgentTests(unittest.TestCase):
             "find the page title on example.com",
         )
 
+    def test_worker_prefers_explicit_url_target_for_direct_cdp_navigation(self):
+        module = importlib.import_module("browser_agent_worker")
+
+        self.assertEqual(
+            module._extract_task_url(
+                "Open https://example.com/docs and inspect the page"
+            ),
+            "https://example.com/docs",
+        )
+
+        targets = [
+            {"type": "page", "id": "blank", "url": "about:blank"},
+            {"type": "page", "id": "real", "url": "https://example.com/"},
+        ]
+
+        self.assertEqual(
+            module._choose_page_target(
+                targets,
+                "https://example.com/",
+            ),
+            "real",
+        )
+
+        self.assertEqual(
+            module._choose_page_target(
+                [{"type": "page", "id": "only", "url": "about:blank"}],
+                "https://example.com/",
+            ),
+            "only",
+        )
+
+
     def test_worker_keeps_shared_browser_alive(self):
         from pathlib import Path
 
@@ -69,8 +101,59 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertIn("use_thinking=False", source)
         self.assertIn("use_judge=False", source)
         self.assertIn("enable_planning=False", source)
-        self.assertIn("max_history_items=3", source)
+        self.assertIn("max_history_items=8", source)
+        self.assertNotIn("max_history_items=3", source)
         self.assertIn("step_timeout=DEFAULT_STEP_TIMEOUT", source)
+
+    def test_page_title_uses_deterministic_fast_path_without_worker(self):
+        import browser_controller
+        module = importlib.import_module("browser_agent")
+        fake_python = Path(module.BASE_DIR) / "fake-browser-python.exe"
+
+        with (
+            patch.object(module, "_browser_agent_python", return_value=fake_python),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(module, "_probe_url", return_value=True),
+            patch(
+                "browser_controller.ensure_browser",
+                return_value={"success": True},
+            ),
+            patch(
+                "browser_controller.browser_goto",
+                return_value={
+                    "success": True,
+                    "verified": True,
+                    "url": "https://example.com/",
+                    "title": "Example Domain",
+                },
+            ),
+            patch(
+                "browser_controller.browser_page_info",
+                return_value={
+                    "success": True,
+                    "verified": True,
+                    "url": "https://example.com/",
+                    "title": "Example Domain",
+                },
+            ),
+            patch("subprocess.run") as run_mock,
+        ):
+            result = module.browser_agent_run(
+                '{"task":"Open example.com and tell me the page title.","max_steps":12}'
+            )
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertEqual(
+            result["message"],
+            'The page title is "Example Domain".',
+        )
+        self.assertEqual(
+            result["mode"],
+            "deterministic_browser_fast_path",
+        )
+        run_mock.assert_not_called()
+
 
     def test_run_launches_isolated_worker(self):
         module = importlib.import_module("browser_agent")

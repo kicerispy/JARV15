@@ -1,6 +1,25 @@
 from pathlib import Path
 
 
+def test_screen_vision_module_import_does_not_require_display():
+    import importlib
+    import sys
+
+    sys.modules.pop("screen_vision", None)
+    module = importlib.import_module("screen_vision")
+
+    assert hasattr(module, "_get_pyautogui")
+
+
+def test_runtime_health_reports_configured_planner_model():
+    import config
+    import runtime_health
+
+    status = runtime_health.collect_health()
+    assert status["models"]["chat"] == config.CHAT_MODEL
+    assert status["models"]["planner"] == config.PLANNER_MODEL
+
+
 def test_active_context_preserves_rich_browser_state():
     from state import ActiveContext
 

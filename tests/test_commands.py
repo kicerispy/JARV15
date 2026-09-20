@@ -141,3 +141,47 @@ class TestDeterministicBrowserSummaryRoute:
             plan = get_fast_command(command)
             assert plan is not None
             assert plan["steps"][0]["tool"] == "browser_page_snapshot"
+
+
+
+class TestBrowserQolFastRoutes:
+    def test_page_title_route_does_not_require_llm(self):
+        from commands import get_fast_command
+
+        plan = get_fast_command(
+            "What's the page title of example.com?"
+        )
+        assert plan is not None
+        assert [step["tool"] for step in plan["steps"]] == [
+            "browser_goto",
+            "browser_page_info",
+        ]
+
+    def test_refresh_route(self):
+        from commands import get_fast_command
+
+        plan = get_fast_command("refresh the page")
+        assert plan["steps"][0]["tool"] == "browser_refresh"
+
+    def test_new_tab_and_switch_tab_routes(self):
+        from commands import get_fast_command
+        import json
+
+        new_tab = get_fast_command("open a new tab")
+        assert new_tab["steps"][0]["tool"] == "browser_new_tab"
+
+        switch = get_fast_command("switch to tab 2")
+        assert switch["steps"][0]["tool"] == "browser_switch_tab"
+        assert json.loads(switch["steps"][0]["argument"])["index"] == 2
+
+    def test_link_and_scroll_routes(self):
+        from commands import get_fast_command
+        import json
+
+        link = get_fast_command("open the third link")
+        assert link["steps"][0]["tool"] == "browser_open_link"
+        assert json.loads(link["steps"][0]["argument"])["index"] == 3
+
+        scroll = get_fast_command("scroll down")
+        assert scroll["steps"][0]["tool"] == "browser_scroll"
+        assert json.loads(scroll["steps"][0]["argument"])["direction"] == "down"

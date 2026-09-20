@@ -63,6 +63,30 @@ def is_task_acknowledgement(text: str) -> bool:
     return normalized in _TASK_ACKNOWLEDGEMENT_PHRASES
 
 
+def _should_send_initial_acknowledgement(request: str) -> bool:
+    """Skip "On it." for tiny deterministic requests that should finish immediately."""
+    normalized = " ".join(str(request or "").strip().lower().split())
+    if not normalized:
+        return False
+
+    quick_phrases = (
+        "page title",
+        "title of the page",
+        "current url",
+        "what is the current url",
+        "what's the current url",
+        "refresh the page",
+        "refresh the browser",
+        "reload the page",
+        "go back",
+        "go forward",
+        "current browser tab",
+        "which tab is active",
+    )
+
+    return not any(phrase in normalized for phrase in quick_phrases)
+
+
 class BackgroundTaskController:
     """Owns at most one active Agent Core task at a time."""
 
@@ -251,7 +275,11 @@ class BackgroundTaskController:
                 task_state,
                 history_text,
             ),
-            initial_message="On it.",
+            initial_message=(
+                "On it."
+                if _should_send_initial_acknowledgement(description)
+                else ""
+            ),
         )
 
     @property

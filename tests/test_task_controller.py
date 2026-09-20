@@ -286,6 +286,18 @@ class PlanningFakeAgent:
         return task
 
 
+def test_tiny_browser_task_skips_initial_acknowledgement():
+    from task_controller import _should_send_initial_acknowledgement
+
+    assert _should_send_initial_acknowledgement(
+        "open example.com and tell me the page title"
+    ) is False
+
+    assert _should_send_initial_acknowledgement(
+        "inspect the browser and repair the search workflow"
+    ) is True
+
+
 def test_background_planning_does_not_block_caller():
     agent = PlanningFakeAgent()
     controller = BackgroundTaskController(agent)

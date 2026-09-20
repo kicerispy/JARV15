@@ -15,53 +15,15 @@ from logger import logger
 from state import ActiveContext, TaskState
 from tools import run_tool
 from tool_result import ToolResult
+from tool_registry import BROWSER_TOOLS as CANONICAL_BROWSER_TOOLS
 
 
 # ============================================================
 # PLAYWRIGHT BROWSER TOOLS
 # ============================================================
 
-BROWSER_TOOLS = {
-    "browser_find_element",
-    "browser_click_element",
-    "browser_fill_element",
-    "browser_press_key",
-    "browser_wait_for_element",
-    "browser_extract_text",
-    "browser_find_text",
-    "browser_click_first_result",
-    "browser_connect",
-    "browser_search_google",
-    "browser_search_bing",
-    "browser_click_first_bing_result",
-    "browser_goto",
-    "browser_page_info",
-    "browser_page_snapshot",
-    "browser_click_result",
-    "browser_back",
-    "browser_agent_run",
-    "browser_agent_status",
-}
+BROWSER_TOOLS = CANONICAL_BROWSER_TOOLS
 
-
-def run_browser_tool(
-    tool_name: str,
-    argument: str = "",
-):
-    """
-    Dispatch browser tools through the canonical tools.py dispatcher.
-
-    tools.run_browser_tool() is responsible for browser dispatch and
-    ToolResult normalization. Keeping one dispatcher prevents the
-    executor and tools layer from drifting apart.
-    """
-
-    from tools import run_browser_tool as dispatch_browser_tool
-
-    return dispatch_browser_tool(
-        tool_name,
-        argument,
-    )
 
 
 # ============================================================
@@ -2871,6 +2833,15 @@ def _spoken_execution_summary(
         "browser_click_first_result": "I opened the first result.",
         "browser_click_first_bing_result": "I opened the first Bing result.",
         "browser_back": "I went back in the browser.",
+        "browser_refresh": "I refreshed the browser page.",
+        "browser_forward": "I went forward in the browser.",
+        "browser_new_tab": "I opened a new browser tab.",
+        "browser_switch_tab": "I switched browser tabs.",
+        "browser_current_tab": "I checked the active browser tab.",
+        "browser_close_tab": "I closed the browser tab.",
+        "browser_get_links": "I checked the page links.",
+        "browser_open_link": "I opened the browser link.",
+        "browser_scroll": "I scrolled the browser page.",
         "barehands_state": "The JARVIS display state is updated.",
         "barehands_present": "I put that on the JARVIS display.",
         "barehands_add_card": "I added that to the JARVIS display.",
@@ -2903,6 +2874,11 @@ def _spoken_execution_summary(
         "browser_extract_text",
         "browser_find_text",
         "browser_click_result",
+        "browser_switch_tab",
+        "browser_close_tab",
+        "browser_get_links",
+        "browser_open_link",
+        "browser_scroll",
     }:
         return text or "Browser action complete."
 
