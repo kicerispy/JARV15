@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -17,8 +18,24 @@ from heed.audio import StreamingHighpass, log_mel
 
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_PATH = BASE_DIR / "Jarvis" / "export" / "wake.onnx"
-METADATA_PATH = BASE_DIR / "Jarvis" / "export" / "wake.json"
+DEFAULT_MODEL_PATH = BASE_DIR / "Jarvis" / "export" / "wake.onnx"
+DEFAULT_METADATA_PATH = BASE_DIR / "Jarvis" / "export" / "wake.json"
+
+# Allow isolated A/B testing of alternate exported Heed models without
+# overwriting the production wake.onnx or wake.json.
+MODEL_PATH = Path(
+    os.environ.get(
+        "JARVIS_WAKE_MODEL_PATH",
+        str(DEFAULT_MODEL_PATH),
+    )
+).expanduser().resolve()
+
+METADATA_PATH = Path(
+    os.environ.get(
+        "JARVIS_WAKE_METADATA_PATH",
+        str(MODEL_PATH.with_name("wake.json")),
+    )
+).expanduser().resolve()
 
 
 # ==================================================
