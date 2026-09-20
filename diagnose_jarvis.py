@@ -558,7 +558,8 @@ def check_extended_live_apis() -> list[str]:
             else:
                 error = getattr(result, "error", None) or (result.get("error") if isinstance(result, dict) else None)
                 failures.append(f"extended API {tool}: {error or 'unsuccessful result'}")
-                print(f"[FAIL] extended API: {tool} -> {error or "unsuccessful result"}")
+                error_text = error or "unsuccessful result"
+                print(f"[FAIL] extended API: {tool} -> {error_text}")
         except Exception as exc:
             failures.append(f"extended API {tool}: {exc}")
             print(f"[FAIL] extended API: {tool} -> {exc}")
