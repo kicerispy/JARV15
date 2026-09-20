@@ -13,6 +13,11 @@ import os
 import sys
 from typing import Any
 
+# Browser Use telemetry is not needed for local JARVIS operation.
+# Disable it before Browser Use is imported.
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
+os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "warning")
+
 logging.basicConfig(
     level=logging.INFO,
     stream=sys.stderr,
@@ -25,6 +30,9 @@ DEFAULT_OLLAMA_HOST = os.getenv(
     "http://127.0.0.1:11434",
 )
 DEFAULT_BROWSER_MODEL = os.getenv("JARVIS_BROWSER_MODEL", "qwen3.5:9b")
+DEFAULT_NUM_CTX = 8192
+DEFAULT_LLM_TIMEOUT = 45
+DEFAULT_STEP_TIMEOUT = 60
 
 
 def _read_request() -> dict[str, Any]:
@@ -67,9 +75,9 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Browser agent task cannot be empty.")
 
     try:
-        max_steps = int(payload.get("max_steps", 12))
+        max_steps = int(payload.get("max_steps", 6))
     except (TypeError, ValueError):
-        max_steps = 12
+        max_steps = 6
     max_steps = max(1, min(max_steps, 30))
 
     profile = BrowserProfile(
@@ -87,8 +95,10 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
         host=DEFAULT_OLLAMA_HOST,
         ollama_options={
             "num_ctx": int(
-                os.getenv("JARVIS_BROWSER_NUM_CTX", "32768")
+                os.getenv("JARVIS_BROWSER_NUM_CTX", str(DEFAULT_NUM_CTX))
             ),
+            "think": False,
+            "keep_alive": "5m",
         },
     )
 
@@ -98,6 +108,16 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
             llm=llm,
             browser_session=browser_session,
             use_vision=False,
+            use_thinking=False,
+            use_judge=False,
+            enable_planning=False,
+            max_actions_per_step=1,
+            max_failures=2,
+            final_response_after_failure=False,
+            max_history_items=3,
+            llm_timeout=DEFAULT_LLM_TIMEOUT,
+            step_timeout=DEFAULT_STEP_TIMEOUT,
+            message_compaction=False,
             enable_signal_handler=False,
         )
 

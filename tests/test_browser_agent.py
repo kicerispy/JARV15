@@ -59,6 +59,19 @@ class BrowserAgentTests(unittest.TestCase):
         source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
         self.assertIn("keep_alive=True", source)
 
+    def test_worker_uses_fast_local_ollama_settings(self):
+        from pathlib import Path
+
+        source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
+        self.assertIn('"think": False', source)
+        self.assertIn('"num_ctx": int(', source)
+        self.assertIn('"keep_alive": "5m"', source)
+        self.assertIn("use_thinking=False", source)
+        self.assertIn("use_judge=False", source)
+        self.assertIn("enable_planning=False", source)
+        self.assertIn("max_history_items=3", source)
+        self.assertIn("step_timeout=DEFAULT_STEP_TIMEOUT", source)
+
     def test_run_launches_isolated_worker(self):
         module = importlib.import_module("browser_agent")
         fake_python = Path(module.BASE_DIR) / "fake-browser-python.exe"
