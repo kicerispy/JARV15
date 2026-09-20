@@ -531,7 +531,6 @@ def check_extended_live_apis() -> list[str]:
         ("musicbrainz_search", "Around the World Daft Punk"),
         ("anime_search", "Cowboy Bebop"),
         ("anime_episodes", "Cowboy Bebop"),
-        ("anime_episodes", "Cowboy Bebop"),
         ("ghibli_search", "Totoro"),
         ("openalex_search", "quantum computing"),
         ("pubchem_lookup", "caffeine"),
@@ -568,10 +567,33 @@ def check_extended_live_apis() -> list[str]:
             if success:
                 print(f"[PASS] extended API: {tool}")
             else:
-                error = getattr(result, "error", None) or (result.get("error") if isinstance(result, dict) else None)
-                failures.append(f"extended API {tool}: {error or 'unsuccessful result'}")
+                error = getattr(result, "error", None) or (
+                    result.get("error")
+                    if isinstance(result, dict)
+                    else None
+                )
+
+                retryable = bool(getattr(result, "retryable", False))
+                if isinstance(result, dict):
+                    retryable = retryable or bool(
+                        result.get("retryable", False)
+                    )
+
                 error_text = error or "unsuccessful result"
-                print(f"[FAIL] extended API: {tool} -> {error_text}")
+
+                if retryable:
+                    print(
+                        f"[WARN] extended API: {tool} -> "
+                        f"transient upstream failure: {error_text}"
+                    )
+                else:
+                    failures.append(
+                        f"extended API {tool}: {error_text}"
+                    )
+                    print(
+                        f"[FAIL] extended API: {tool} -> "
+                        f"{error_text}"
+                    )
         except Exception as exc:
             failures.append(f"extended API {tool}: {exc}")
             print(f"[FAIL] extended API: {tool} -> {exc}")

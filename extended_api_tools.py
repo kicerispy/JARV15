@@ -728,10 +728,8 @@ def anime_episodes(argument: str = "") -> dict[str, Any]:
         if kitsu_id:
             offset = (page - 1) * per_page
             episode_kitsu_response = requests.get(
-                "https://kitsu.io/api/edge/episodes",
+                "https://kitsu.io/api/edge/anime/" + str(kitsu_id) + "/episodes",
                 params={
-                    "filter[mediaType]": "Anime",
-                    "filter[media_id]": kitsu_id,
                     "page[limit]": per_page,
                     "page[offset]": offset,
                     "sort": "number",
@@ -797,7 +795,106 @@ def anime_episodes(argument: str = "") -> dict[str, Any]:
     except Exception:
         pass
 
-    # Jikan is the live no-key fallback and exposes paginated episode lists.
+    # AniList is another independent no-key fallback. It can provide
+    # episode count and legal streaming episode metadata even when Jikan
+    # is temporarily unavailable.
+    try:
+        graphql = {
+            "query": """
+                query ($search: String) {
+                    Media(search: $search, type: ANIME) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        episodes
+                        siteUrl
+                        streamingEpisodes {
+                            title
+                            thumbnail
+                            url
+                            site
+                        }
+                    }
+                }
+            """,
+            "variables": {"search": query},
+        }
+
+        anilist_response = requests.post(
+            "https://graphql.anilist.co",
+            json=graphql,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=12.0,
+        )
+        anilist_response.raise_for_status()
+
+        anilist_payload = anilist_response.json()
+        selected = (
+            (anilist_payload.get("data") or {}).get("Media")
+            if isinstance(anilist_payload, dict)
+            else None
+        )
+
+        if isinstance(selected, dict):
+            title_data = selected.get("title") or {}
+            title = (
+                title_data.get("english")
+                or title_data.get("romaji")
+                or title_data.get("native")
+                or query
+            )
+
+            streaming = selected.get("streamingEpisodes") or []
+            episodes = []
+
+            for index, item in enumerate(streaming, start=1):
+                if not isinstance(item, dict):
+                    continue
+
+                episodes.append({
+                    "number": index,
+                    "title": item.get("title"),
+                    "thumbnail": item.get("thumbnail"),
+                    "url": item.get("url"),
+                    "site": item.get("site"),
+                })
+
+            if episodes:
+                total = selected.get("episodes")
+                if total is None:
+                    total = len(episodes)
+
+                return _success(
+                    tool,
+                    {
+                        "anime": {
+                            "id": selected.get("id"),
+                            "title": title,
+                            "anilist_id": selected.get("id"),
+                            "mal_id": selected.get("idMal"),
+                        },
+                        "source": "anilist",
+                        "page": page,
+                        "per_page": len(episodes),
+                        "total_episodes": total,
+                        "last_page": 1,
+                        "episodes": episodes,
+                    },
+                    "Found " + str(len(episodes)) +
+                    " streaming episode(s) for " + str(title) + ".",
+                )
+    except Exception:
+        pass
+
+    # Jikan is the final live no-key fallback and exposes paginated episode lists.
     try:
         search_response = requests.get(
             "https://api.jikan.moe/v4/anime",
@@ -870,7 +967,8 @@ def anime_episodes(argument: str = "") -> dict[str, Any]:
     except Exception as exc:
         return _error(
             tool,
-            "Anime episode lookup failed on AniAPI and Jikan: " + str(exc),
+            "Anime episode lookup failed on AniAPI, Kitsu, AniList, and Jikan: "
+            + str(exc),
         )
 
 
