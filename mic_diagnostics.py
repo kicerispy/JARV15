@@ -20,6 +20,12 @@ from adaptive_speech_gate import AdaptiveSpeechGate
 from config import CHUNK_SIZE, MIC_DEVICE, SAMPLE_RATE, SILENCE_THRESHOLD
 
 
+WAKE_WINDOW_SAMPLES = 16000
+WAKE_WINDOW_STEP_SAMPLES = 1600
+WAKE_PEAK_TARGET_AMPLITUDE = float(
+    10.0 ** (-3.0 / 20.0)
+)
+
 @dataclass(frozen=True)
 class SignalStats:
     duration: float
@@ -133,6 +139,165 @@ def summarize(
     return stats
 
 
+
+def score_heed_audio(
+    audio: np.ndarray,
+) -> tuple[float, float, int, int]:
+    """
+    Run the actual Heed model over 1-second windows of a captured recording.
+
+    Returns:
+        max score, median score, number of windows at/above the trained
+        threshold, and best-window offset in seconds.
+    """
+    import torch
+    from heed.audio import StreamingHighpass, log_mel
+    from wakeword import (
+        INPUT_NAME,
+        OUTPUT_NAME,
+        WAKE_THRESHOLD,
+        session,
+    )
+
+    values = np.asarray(
+        audio,
+        dtype=np.float32,
+    ).reshape(-1)
+
+    if len(values) < WAKE_WINDOW_SAMPLES:
+        return 0.0, 0.0, 0, -1
+
+    # Match wakeword.py's streaming high-pass/notch preprocessing.
+    preprocessor = StreamingHighpass(
+        cutoff_hz=100.0,
+        sample_rate=SAMPLE_RATE,
+        order=8,
+        apply_mains_notch=True,
+    )
+
+    filtered = np.asarray(
+        preprocessor(values),
+        dtype=np.float32,
+    )
+
+    scores: list[float] = []
+    best_score = -1.0
+    best_offset = -1
+
+    max_start = (
+        len(filtered) - WAKE_WINDOW_SAMPLES
+    )
+
+    for start in range(
+        0,
+        max_start + 1,
+        WAKE_WINDOW_STEP_SAMPLES,
+    ):
+        window = filtered[
+            start : start + WAKE_WINDOW_SAMPLES
+        ].copy()
+
+        peak = float(
+            np.max(
+                np.abs(window)
+            )
+        )
+
+        if peak <= 1e-6:
+            scores.append(0.0)
+            continue
+
+        # Match the -3 dBFS peak normalization specified by wake.json.
+        window = np.clip(
+            window
+            * (WAKE_PEAK_TARGET_AMPLITUDE / peak),
+            -WAKE_PEAK_TARGET_AMPLITUDE,
+            WAKE_PEAK_TARGET_AMPLITUDE,
+        ).astype(
+            np.float32,
+            copy=False,
+        )
+
+        waveform = torch.from_numpy(window)
+
+        mel = log_mel(
+            waveform,
+            apply_cmn=True,
+        )
+
+        mel_np = (
+            mel.detach()
+            .cpu()
+            .numpy()
+            .astype(np.float32)
+        )
+
+        outputs = session.run(
+            [OUTPUT_NAME],
+            {
+                INPUT_NAME: mel_np,
+            },
+        )
+
+        logit = float(
+            np.asarray(
+                outputs[0]
+            ).reshape(-1)[0]
+        )
+
+        score = 1.0 / (
+            1.0 + np.exp(-logit)
+        )
+
+        scores.append(float(score))
+
+        if score > best_score:
+            best_score = float(score)
+            best_offset = start
+
+    if not scores:
+        return 0.0, 0.0, 0, -1
+
+    return (
+        max(scores),
+        float(np.median(scores)),
+        sum(
+            score >= WAKE_THRESHOLD
+            for score in scores
+        ),
+        float(
+            best_offset / SAMPLE_RATE
+        ),
+    )
+
+
+def print_heed_scores(
+    label: str,
+    audio: np.ndarray,
+) -> tuple[float, float, int, int]:
+    print()
+    print(f"===== {label} HEED MODEL =====")
+    print("Running the actual wake model over the recording...")
+
+    result = score_heed_audio(audio)
+
+    max_score, median_score, threshold_hits, best_offset = result
+
+    print(f"Max Heed score:       {max_score:.3f}")
+    print(f"Median Heed score:    {median_score:.3f}")
+    print(
+        "Windows >= trained "
+        f"threshold ({WAKE_THRESHOLD:.3f}): {threshold_hits}"
+    )
+
+    if best_offset >= 0:
+        print(
+            f"Best 1-second window: {best_offset}s"
+        )
+
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Measure the JARVIS microphone signal path."
@@ -205,6 +370,10 @@ def main() -> int:
     normal = summarize("NORMAL DISTANCE SPEECH", normal_audio)
     far = summarize("FARTHER DISTANCE SPEECH", far_audio)
 
+    noise_heed = print_heed_scores("ROOM NOISE", noise_audio)
+    normal_heed = print_heed_scores("NORMAL DISTANCE SPEECH", normal_audio)
+    far_heed = print_heed_scores("FARTHER DISTANCE SPEECH", far_audio)
+
     gate = AdaptiveSpeechGate(
         legacy_threshold=float(SILENCE_THRESHOLD)
     )
@@ -265,6 +434,27 @@ def main() -> int:
         print(
             "That points back toward wake-word model sensitivity or temporal "
             "fusion rather than basic microphone level."
+        )
+
+    print()
+    if far_heed[0] >= 0.72:
+        print(
+            "HEED RESULT: the wake model still reaches activation-level "
+            "confidence at farther distance."
+        )
+        print(
+            "This points toward live VAD/timing/temporal fusion if activation "
+            "still feels slow."
+        )
+    else:
+        print(
+            "HEED RESULT: farther speech remains below activation-level "
+            "confidence."
+        )
+        print(
+            "This points toward the wake model needing personalization or "
+            "better wake-word training for your natural Jarvis/Jervis "
+            "pronunciation."
         )
 
     print()
