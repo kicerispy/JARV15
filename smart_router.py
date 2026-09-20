@@ -412,6 +412,10 @@ def route_command(command: str) -> RouteDecision:
         "tv show",
         "television",
         "anime",
+        "episode",
+        "episodes",
+        "anime episode",
+        "anime episodes",
         "studio ghibli",
         "song",
         "songs",
@@ -498,28 +502,3 @@ def route_command(command: str) -> RouteDecision:
     )
 
     if (
-        any(
-            text.startswith(prefix)
-            for prefix in knowledge_query_starts
-        )
-        and not any(
-            text.startswith(prefix)
-            for prefix in knowledge_identity_exclusions
-        )
-    ):
-        return RouteDecision(
-            "agent",
-            "knowledge-backed informational query",
-            0.93,
-        )
-
-    if (
-        any(text.startswith(prefix) for prefix in _CONVERSATION_STARTS)
-        and not _contains_action_word(text)
-    ):
-        return RouteDecision("conversation", "natural conversation/question", 0.95)
-
-    if not _contains_action_word(text):
-        return RouteDecision("conversation", "no actionable intent detected", 0.85)
-
-    return RouteDecision("agent", "action-oriented request needs execution", 0.80)
