@@ -702,27 +702,25 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
     candidates = []
 
     if "google." in url:
-        locator = page.locator("div#search a:has(h3)")
-        try:
-            await locator.first.wait_for(state="visible", timeout=5_000)
-        except Exception:
-            pass
-        for index in range(min(await locator.count(), 10)):
-            link = locator.nth(index)
-            try:
-                heading = link.locator("h3").first
-                title = " ".join((await heading.inner_text(timeout=1500)).split())
-                href = (await link.get_attribute("href") or "").strip()
-                snippet = await _snapshot_result_snippet(link, "google")
-            except Exception:
-                continue
+        google_results = await _get_google_organic_result_candidates(
+            page,
+            limit=10,
+            timeout_ms=3_500,
+            minimum_results=1,
+        )
 
-            if title:
+        for index, item in enumerate(google_results):
+            link = item["locator"]
+            title = str(item.get("title") or "").strip()
+            href = str(item.get("url") or "").strip()
+            snippet = await _snapshot_result_snippet(link, "google")
+
+            if title and href:
                 candidates.append({
                     "index": str(index + 1),
                     "title": title[:300],
                     "snippet": snippet,
-                    "url": _snapshot_canonical_url(href)[:1000],
+                    "url": href[:1000],
                 })
 
     elif "bing.com" in url:
