@@ -2666,11 +2666,17 @@ def _api_spoken_summary(
                     name = item.get("title") or item.get("name") or item.get("display_name")
                     if name: names.append(clean(name, 120))
             count = len(items)
-            if names: return f"I found {count} {label}{'s' if count != 1 else '}, including {' and '.join(names)}."
-            return f"I found {count} {label}{'s' if count != 1 else '}."
+            suffix = "s" if count != 1 else ""
+            if names:
+                joined_names = " and ".join(names)
+                return f"I found {count} {label}{suffix}, including {joined_names}."
+            suffix = "s" if count != 1 else ""
+            return f"I found {count} {label}{suffix}."
 
-        if tool == "nasa_eonet": return f"I found {len(data.get("events") or [])} open NASA natural-event reports."
-        if tool == "spacex_lookup": return f"I retrieved {len(data.get("launches") or [])} SpaceX launch record(s)."
+        if tool == "nasa_eonet":
+            return f"I found {len(data.get('events') or [])} open NASA natural-event reports."
+        if tool == "spacex_lookup":
+            return f"I retrieved {len(data.get('launches') or [])} SpaceX launch record(s)."
         if tool == "sunrise_sunset":
             sunrise = clean(data.get("sunrise"), 80); sunset = clean(data.get("sunset"), 80)
             return f"Sunrise is {sunrise}, and sunset is {sunset}." if sunrise and sunset else "I retrieved the sunrise and sunset data."
@@ -2687,7 +2693,8 @@ def _api_spoken_summary(
         if tool == "reverse_geocode":
             items = first_list("results")
             if items and isinstance(items[0], dict) and items[0].get("display_name"):
-                return f"That location resolves to {clean(items[0].get("display_name"), 260)}."
+                display_name = clean(items[0].get("display_name"), 260)
+                return f"That location resolves to {display_name}."
             return "I retrieved the reverse-geocoded location."
 
     # PUBLIC API DISCOVERY
