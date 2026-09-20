@@ -2631,6 +2631,8 @@ def _api_spoken_summary(
         "art_search", "nasa_eonet", "spacex_lookup", "sunrise_sunset",
         "topo_elevation", "public_ip", "reverse_geocode", "news_search",
         "cat_fact", "dog_image", "osm_search",
+        "pokemon_lookup", "food_product", "cocktail_search",
+        "openverse_search", "iss_location",
     }
 
     if tool in extended_tools:
@@ -2724,6 +2726,40 @@ def _api_spoken_summary(
                     except (TypeError, ValueError): feet_text = clean(feet, 40)
                     return f"The topographic elevation is about {meters_text} meters ({feet_text} feet)."
                 return f"The topographic elevation is about {meters_text} meters."
+        if tool == "pokemon_lookup":
+            items = first_list("results")
+            item = items[0] if items and isinstance(items[0], dict) else None
+            if item:
+                name = clean(item.get("name"), 80)
+                types = ", ".join(str(x) for x in (item.get("types") or [])[:3])
+                return f"{name.title()} is a {types}-type Pokémon." if name and types else f"I found {name.title()}." if name else "I retrieved the Pokémon data."
+
+        if tool == "food_product":
+            items = first_list("results")
+            item = items[0] if items and isinstance(items[0], dict) else None
+            if item:
+                name = clean(item.get("name"), 100)
+                brand = clean(item.get("brand"), 80)
+                return f"I found {brand} {name}." if name and brand else f"I found {name}." if name else "I retrieved the food product."
+            return "I retrieved the food product."
+
+        if tool == "cocktail_search":
+            items = first_list("items")
+            item = items[0] if items and isinstance(items[0], dict) else None
+            name = clean(item.get("name"), 100) if item else ""
+            return f"I found a cocktail recipe for {name}." if name else "I found a cocktail recipe."
+
+        if tool == "openverse_search":
+            items = first_list("results")
+            return f"I found {len(items)} openly licensed image result(s)." if items else "I found no image results."
+
+        if tool == "iss_location":
+            items = first_list("results")
+            item = items[0] if items and isinstance(items[0], dict) else None
+            if item and item.get("latitude") is not None and item.get("longitude") is not None:
+                return f"The ISS is currently near latitude {item.get('latitude')} and longitude {item.get('longitude')}."
+            return "I retrieved the ISS position."
+
         if tool == "reverse_geocode":
             items = first_list("results")
             if items and isinstance(items[0], dict) and items[0].get("display_name"):
