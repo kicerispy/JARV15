@@ -503,12 +503,62 @@ def _direct_identity_score(product_name: str, snapshot: dict[str, Any]) -> float
 
     valid_candidates = [
         candidate for candidate in candidates
-        if candidate and not _product_type_conflict(product_name, candidate)
+        if (
+            candidate
+            and not _product_type_conflict(product_name, candidate)
+            and not _variant_conflict(product_name, candidate)
+        )
     ]
     return max(
         (match_score(product_name, candidate) for candidate in valid_candidates),
         default=0.0,
     )
+
+
+def _variant_conflict(product_name: str, observed_text: str) -> bool:
+    """Reject bundles/stands/used variants when the user requested the base product."""
+    wanted = normalize_product_text(product_name)
+    observed = normalize_product_text(observed_text)
+
+    requested_variant = any(
+        marker in wanted
+        for marker in (
+            'bundle', 'kit', 'stand kit', 'charger bundle', 'case bundle',
+            'renewed', 'refurbished', 'used', 'open box', 'pre owned', 'preowned',
+        )
+    )
+    if requested_variant:
+        return False
+
+    mismatch_markers = (
+        'bundle',
+        'stand kit',
+        'charger bundle',
+        'case bundle',
+        'with pro stand',
+        'with stand',
+        'renewed',
+        'refurbished',
+        'remanufactured',
+        'open box',
+        'pre owned',
+        'preowned',
+        'used',
+    )
+    return any(marker in observed for marker in mismatch_markers)
+
+
+def _condition_from_text(observed_text: str) -> str:
+    text = normalize_product_text(observed_text)
+    if any(marker in text for marker in ('renewed', 'refurbished', 'remanufactured')):
+        return 'refurbished'
+    if 'open box' in text:
+        return 'open_box'
+    if any(marker in text for marker in ('pre owned', 'preowned', 'used')):
+        return 'used'
+    if 'new' in text:
+        return 'new'
+    return 'unknown'
 
 
 def _product_type_conflict(product_name: str, observed_text: str) -> bool:
@@ -1003,11 +1053,18 @@ class BrowserPriceChecker:
 
         exact_match = bool(direct_product_page_seen)
 
+        offer_condition = (
+            _condition_from_text(direct_body)
+            if direct_product_page_seen
+            else 'unknown'
+        )
+
         offer = PriceOffer(
             store=store_key,
             label=label,
             url=direct_url,
             price=price,
+            condition=offer_condition,
             exact_match=exact_match,
             match_score=score,
             notes=notes,
@@ -1056,17 +1113,36 @@ class BrowserPriceChecker:
                 if isinstance(offer.price, (int, float))
             )
             median_price = sorted_prices[len(sorted_prices) // 2]
+            max_price = max(sorted_prices) if sorted_prices else 0.0
+            min_price = min(sorted_prices) if sorted_prices else 0.0
+
+            # Detect a lone bargain-like outlier when another exact offer is
+            # several multiples higher. This protects the recommendation from
+            # bundle/variant/cross-seller prices that slipped through identity
+            # matching while preserving a genuine multi-store sale cluster.
             kept = []
             for offer in verified:
                 price = float(offer.price)
-                if price < 0.25 * median_price and price < 25.0:
+                lone_extreme_low = (
+                    price == min_price
+                    and price < 40.0
+                    and max_price >= price * 4.0
+                )
+                classic_extreme_low = (
+                    price < 0.25 * median_price
+                    and price < 25.0
+                )
+
+                if lone_extreme_low or classic_extreme_low:
                     offer.notes = (
                         (offer.notes + " " if offer.notes else "")
                         + "Price rejected as an extreme outlier versus "
                         "other exact product-page prices."
                     )
                     continue
+
                 kept.append(offer)
+
             verified = kept
         verified.sort(key=lambda offer: offer.price or float("inf"))
 
