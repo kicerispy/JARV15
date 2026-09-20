@@ -226,6 +226,38 @@ class StructuredResultContextTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("3", result["reply"])
 
+    def test_new_queries_are_not_hijacked(self):
+        currency = {
+            "last_tool": "currency_convert",
+            "last_result_data": {
+                "from": "USD",
+                "to": "EUR",
+                "rate": 0.87,
+            },
+        }
+
+        self.assertIsNone(
+            resolve_result_followup(
+                "What is the exchange rate for GBP?",
+                currency,
+            )
+        )
+
+        elevation = {
+            "last_tool": "elevation_lookup",
+            "last_result_data": {
+                "location": {"name": "Chicago"},
+                "elevation_meters": 179,
+            },
+        }
+
+        self.assertIsNone(
+            resolve_result_followup(
+                "What is the elevation of Denver?",
+                elevation,
+            )
+        )
+
     def test_no_context_does_not_intercept(self):
         result = resolve_result_followup(
             "What was the second one?",
