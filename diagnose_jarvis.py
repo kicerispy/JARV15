@@ -539,6 +539,11 @@ def check_extended_live_apis() -> list[str]:
         ("cat_fact", ""),
         ("dog_image", ""),
         ("osm_search", "Willis Tower Chicago"),
+        ("pokemon_lookup", "pikachu"),
+        ("food_product", "3017624010701"),
+        ("cocktail_search", "margarita"),
+        ("openverse_search", "Chicago skyline"),
+        ("iss_location", ""),
     ]
     failures = []
 
