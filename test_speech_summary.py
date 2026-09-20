@@ -105,7 +105,7 @@ class ApiSpeechSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             summary,
-            "I found 2 episode results, including Asteroid Blues and Stray Dog Strut.",
+            "I found 2 episodes, including Asteroid Blues and Stray Dog Strut.",
         )
 
     def test_location_direct_payload(self):
