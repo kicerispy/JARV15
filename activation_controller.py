@@ -183,10 +183,18 @@ def evaluate_wake_scores(
     This function is intentionally deterministic so it can be unit-tested
     without loading any audio models.
     """
-    recent_scores = [
+    # Preserve the original frame order for temporal confirmation. The
+    # candidate-filtered list is useful for peak/top-score reporting, but
+    # removing weak frames would make separated predictions look consecutive.
+    recent_timeline = [
         float(score)
         for score in scores
-        if float(score) >= HEED_CANDIDATE_THRESHOLD
+    ]
+
+    recent_scores = [
+        score
+        for score in recent_timeline
+        if score >= HEED_CANDIDATE_THRESHOLD
     ]
 
     recent_speech = [
@@ -252,9 +260,9 @@ def evaluate_wake_scores(
     # Require consecutive moderate/strong predictions. An isolated high
     # score such as 0.811 in a hard-negative "Jared" recording should not
     # activate JARVIS.
-    for index in range(len(recent_scores) - 1):
-        first = recent_scores[index]
-        second = recent_scores[index + 1]
+    for index in range(len(recent_timeline) - 1):
+        first = recent_timeline[index]
+        second = recent_timeline[index + 1]
 
         if (
             first >= NORMAL_MULTI_TRIGGER
@@ -274,8 +282,8 @@ def evaluate_wake_scores(
 
     # A softer path remains available, but all three moderate predictions
     # must be consecutive so a scattered sequence cannot trigger.
-    for index in range(len(recent_scores) - 2):
-        window = recent_scores[index:index + 3]
+    for index in range(len(recent_timeline) - 2):
+        window = recent_timeline[index:index + 3]
 
         if (
             all(
