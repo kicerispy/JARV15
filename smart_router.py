@@ -405,7 +405,6 @@ def route_command(command: str) -> RouteDecision:
         "bitcoin",
         "ethereum",
         "trivia",
-        "joke",
         "recipe",
         "recipes",
         "meal",
