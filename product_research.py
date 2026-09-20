@@ -24,7 +24,7 @@ MIN_CONFIDENT_SOURCES = 4
 
 _PRODUCT_BRANDS = {
     "apple", "sony", "bose", "sennheiser", "anker", "soundcore", "jbl",
-    "marshall", "shokz", "beats", "google", "samsung", "jabra",
+    "marshall", "shokz", "beats", "google", "samsung", "jabra", "jlab",
     "audio technica", "audio-technica", "bowers wilkins", "bowers & wilkins",
     "steelseries", "audeze", "nothing", "skullcandy", "technics",
     "beyerdynamic", "bang & olufsen", "master & dynamic", "master dynamic",
