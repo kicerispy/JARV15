@@ -2101,6 +2101,35 @@ def create_plan(
             ],
         }
 
+    # ========================================================
+    # DETERMINISTIC ANIME EPISODE ROUTER
+    # ========================================================
+    # Episode-list questions are specialized structured lookups. Keep them
+    # out of the generic knowledge planner so Qwen cannot substitute a
+    # knowledge_lookup when the user explicitly wants episode data.
+    anime_episode_match = None
+    for pattern in (
+        r"^(?:what are|what're|list|show|give me|tell me)\\s+(?:the\\s+)?episodes?\\s+(?:of|for)\\s+(.+)$",
+        r"^(?:episodes?|episode list)\\s+(?:of|for)\\s+(.+)$",
+    ):
+        anime_episode_match = re.match(pattern, normalized_command, re.IGNORECASE)
+        if anime_episode_match:
+            break
+
+    if anime_episode_match:
+        anime_title = anime_episode_match.group(1).strip().rstrip(".,!? ")
+        if anime_title:
+            return {
+                "goal": "get anime episode list",
+                "steps": [
+                    {
+                        "tool": "anime_episodes",
+                        "argument": anime_title,
+                    }
+                ],
+                "resolved_command": user_command.strip(),
+            }
+
     context_str = ""
     if active_context:
         context_str = f"""
@@ -2732,4 +2761,3 @@ def create_plan(command, *args, **kwargs):
         *args,
         **kwargs,
     )
-
