@@ -356,6 +356,108 @@ def _source_for(item: Any, context: Dict[str, Any]) -> str:
     return ""
 
 
+def _field_followup(
+    text: str,
+    tool: str,
+    data: Any,
+) -> Optional[str]:
+    """Answer common field-level follow-ups from the stored result."""
+    if not isinstance(data, dict):
+        return None
+
+    if tool == "currency_convert":
+        if re.search(
+            r"\b(?:what(?:'s| is)\s+)?(?:the\s+)?(?:exchange\s+)?rate\b",
+            text,
+            re.IGNORECASE,
+        ):
+            rate = data.get("rate")
+            source = data.get("from") or data.get("from_currency")
+            target = data.get("to") or data.get("to_currency")
+            if rate is not None and source and target:
+                return f"The exchange rate was {rate} {target} per {source}."
+
+    if tool == "weather_alerts":
+        if re.search(
+            r"\b(?:how many|number of|how much)\s+(?:weather\s+)?alerts\b",
+            text,
+            re.IGNORECASE,
+        ):
+            count = data.get("count")
+            if count is not None:
+                return f"There were {count} active weather alerts."
+
+        if re.search(
+            r"\b(?:what are|list)\s+(?:the\s+)?(?:weather\s+)?alerts\b",
+            text,
+            re.IGNORECASE,
+        ):
+            alerts = data.get("alerts") or []
+            names = []
+            for alert in alerts[:5]:
+                if isinstance(alert, dict):
+                    name = alert.get("event") or alert.get("headline")
+                    if name:
+                        names.append(str(name).strip())
+            if names:
+                return "The alerts were " + ", ".join(names) + "."
+
+    if tool == "location_lookup":
+        if "timezone" in text or "time zone" in text:
+            timezone = (
+                data.get("timezone")
+                or data.get("time_zone")
+            )
+            if timezone:
+                return f"The timezone is {timezone}."
+
+        if re.search(
+            r"\b(?:where is|what country is|which country is)\b",
+            text,
+            re.IGNORECASE,
+        ):
+            name = data.get("name") or "That location"
+            country = data.get("country")
+            if country:
+                return f"{name} is in {country}."
+
+    if tool == "air_quality":
+        current = data.get("current") or data
+        if isinstance(current, dict):
+            if "pm2_5" in text or "pm2.5" in text:
+                value = current.get("pm2_5")
+                if value is not None:
+                    return f"PM2.5 was {value} micrograms per cubic meter."
+            if re.search(r"\bpm10\b", text, re.IGNORECASE):
+                value = current.get("pm10")
+                if value is not None:
+                    return f"PM10 was {value} micrograms per cubic meter."
+
+    if tool == "elevation_lookup":
+        if re.search(
+            r"\b(?:how high|what is the elevation|how far above sea level)\b",
+            text,
+            re.IGNORECASE,
+        ):
+            meters = data.get("elevation_meters")
+            feet = data.get("elevation_feet")
+            if meters is not None:
+                name = (
+                    (data.get("location") or {}).get("name")
+                    if isinstance(data.get("location"), dict)
+                    else None
+                )
+                prefix = f"{name} is " if name else "The elevation is "
+                if feet is not None:
+                    return (
+                        f"{prefix}about {float(meters):,.0f} meters "
+                        f"({float(feet):,.0f} feet) above sea level."
+                    )
+                return f"{prefix}{float(meters):,.0f} meters above sea level."
+
+    return None
+
+
 def _knowledge_more(context: Dict[str, Any]) -> Optional[str]:
     data = _result_data(context)
 
@@ -383,7 +485,26 @@ def _knowledge_more(context: Dict[str, Any]) -> Optional[str]:
 
 def _general_more(item: Any, context: Dict[str, Any]) -> Optional[str]:
     if isinstance(item, dict):
-        title = _display_name(item, str(context.get("last_tool") or ""))
+        tool = str(context.get("last_tool") or "")
+        title = _display_name(item, tool)
+
+        if tool == "book_search":
+            authors = _authors_text(item)
+            year = item.get("first_publish_year")
+            editions = item.get("edition_count")
+            parts = []
+
+            if title:
+                parts.append(title)
+            if authors:
+                parts.append(f"by {authors}")
+            if year:
+                parts.append(f"first published {year}")
+            if editions:
+                parts.append(f"{editions} recorded editions")
+
+            if parts:
+                return ". ".join(parts) + "."
 
         text = (
             item.get("summary")
@@ -481,6 +602,19 @@ def resolve_result_followup(
 
     if not data:
         return None
+
+    field_reply = _field_followup(
+        text,
+        tool,
+        data,
+    )
+    if field_reply:
+        return {
+            "reply": field_reply,
+            "index": active_context.get("last_result_index"),
+            "selected": active_context.get("last_selected_result"),
+            "kind": "field_followup",
+        }
 
     # --------------------------------------------------------
     # Source requests
