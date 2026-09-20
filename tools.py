@@ -2705,6 +2705,11 @@ EXTENDED_API_TOOLS = {
     "cat_fact",
     "dog_image",
     "osm_search",
+    "pokemon_lookup",
+    "food_product",
+    "cocktail_search",
+    "openverse_search",
+    "iss_location",
 }
 
 GODS_EYE_TOOLS = {
