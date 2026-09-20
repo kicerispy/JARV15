@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 
 from logger import logger
 from state import ActiveContext, TaskState
-from tools import run_tool
+from tools import run_tool, run_browser_tool
 from tool_result import ToolResult
 from tool_registry import BROWSER_TOOLS as CANONICAL_BROWSER_TOOLS
 
