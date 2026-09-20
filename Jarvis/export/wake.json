@@ -1,6 +1,6 @@
 {
   "phrase": "Jarvis",
-  "threshold": 0.709,
+  "threshold": 0.7,
   "sample_rate": 16000,
   "audio_window_samples": 16000,
   "n_mels": 40,
