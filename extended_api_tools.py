@@ -542,6 +542,225 @@ def anime_search(argument: str = "") -> dict[str, Any]:
     return _success(tool, {"anime": anime}, f"Found {len(anime)} anime result(s).")
 
 
+def anime_episodes(argument: str = "") -> dict[str, Any]:
+    """Return anime episodes, preferring AniAPI and falling back to Jikan."""
+    tool = "anime_episodes"
+    raw = str(argument or "").strip()
+    if not raw:
+        return _error(tool, "Provide an anime title.", retryable=False)
+
+    query = raw
+    page = 1
+    per_page = 100
+
+    try:
+        options = json.loads(raw)
+        if isinstance(options, dict):
+            query = str(
+                options.get("anime")
+                or options.get("title")
+                or options.get("query")
+                or ""
+            ).strip()
+            page = max(1, int(options.get("page", 1)))
+            per_page = min(100, max(1, int(options.get("per_page", 100))))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    if not query:
+        return _error(tool, "Provide an anime title.", retryable=False)
+
+    normalized_query = re.sub(r"\s+", " ", query).strip().lower()
+
+    def candidates(row: dict[str, Any]) -> list[str]:
+        values: list[str] = []
+        titles = row.get("titles") or {}
+        if isinstance(titles, dict):
+            values.extend(str(v).strip() for v in titles.values() if v)
+        for key in ("title", "title_english", "title_romaji", "title_native"):
+            if row.get(key):
+                values.append(str(row[key]).strip())
+        return [value for value in values if value]
+
+    def choose(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not rows:
+            return None
+        for row in rows:
+            normalized = {
+                re.sub(r"\s+", " ", value).strip().lower()
+                for value in candidates(row)
+            }
+            if normalized_query in normalized:
+                return row
+        return rows[0]
+
+    try:
+        response = requests.get(
+            "https://api.aniapi.com/v1/anime",
+            params={
+                "title": query,
+                "locale": "en",
+                "nsfw": "false",
+                "page": 1,
+                "per_page": 5,
+            },
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        anime_data = payload.get("data") if isinstance(payload, dict) else None
+        rows = (
+            anime_data.get("documents")
+            if isinstance(anime_data, dict)
+            else []
+        ) or []
+        selected = choose(rows)
+        anime_id = selected.get("id") if isinstance(selected, dict) else None
+
+        if anime_id:
+            episode_response = requests.get(
+                "https://api.aniapi.com/v1/episode",
+                params={
+                    "anime_id": anime_id,
+                    "locale": "en",
+                    "page": page,
+                    "per_page": per_page,
+                },
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+                timeout=12.0,
+            )
+            episode_response.raise_for_status()
+            episode_payload = episode_response.json()
+            episode_data = (
+                episode_payload.get("data")
+                if isinstance(episode_payload, dict)
+                else None
+            )
+            documents = (
+                episode_data.get("documents")
+                if isinstance(episode_data, dict)
+                else []
+            ) or []
+
+            if documents:
+                titles = selected.get("titles") if isinstance(selected.get("titles"), dict) else {}
+                title = (
+                    titles.get("en")
+                    or selected.get("title")
+                    or query
+                )
+                episodes = []
+                for item in documents:
+                    episodes.append({
+                        "number": item.get("number"),
+                        "title": item.get("title"),
+                        "aired": item.get("aired") or item.get("release_date"),
+                        "locale": item.get("locale"),
+                        "quality": item.get("quality"),
+                        "format": item.get("format"),
+                        "is_dub": item.get("is_dub"),
+                        "id": item.get("id"),
+                    })
+                return _success(
+                    tool,
+                    {
+                        "anime": {
+                            "id": anime_id,
+                            "title": title,
+                            "anilist_id": selected.get("anilist_id"),
+                            "mal_id": selected.get("mal_id"),
+                        },
+                        "source": "aniapi",
+                        "page": page,
+                        "per_page": per_page,
+                        "total_episodes": episode_data.get("count"),
+                        "last_page": episode_data.get("last_page"),
+                        "episodes": episodes,
+                    },
+                    "Found episode data for " + str(title) + ".",
+                )
+    except Exception:
+        pass
+
+    # Jikan is the live no-key fallback and exposes paginated episode lists.
+    try:
+        search_response = requests.get(
+            "https://api.jikan.moe/v4/anime",
+            params={"q": query, "limit": 5, "sfw": "true"},
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            timeout=12.0,
+        )
+        search_response.raise_for_status()
+        search_payload = search_response.json()
+        search_rows = search_payload.get("data") or []
+        if not search_rows:
+            return _error(tool, "No anime found for '" + query + "'.", retryable=False)
+
+        selected = search_rows[0]
+        mal_id = selected.get("mal_id")
+        if not mal_id:
+            return _error(tool, "No usable anime identifier found for '" + query + "'.", retryable=False)
+
+        episode_response = requests.get(
+            "https://api.jikan.moe/v4/anime/" + str(mal_id) + "/episodes",
+            params={"page": page},
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            timeout=12.0,
+        )
+        episode_response.raise_for_status()
+        episode_payload = episode_response.json()
+
+        episodes = []
+        for item in episode_payload.get("data") or []:
+            episodes.append({
+                "number": item.get("mal_id"),
+                "title": item.get("title"),
+                "aired": item.get("aired"),
+                "score": item.get("score"),
+                "filler": item.get("filler"),
+                "recap": item.get("recap"),
+                "url": item.get("url"),
+            })
+
+        pagination = episode_payload.get("pagination") or {}
+        title_data = selected.get("title")
+        title = query
+        if isinstance(title_data, dict):
+            title = (
+                title_data.get("english")
+                or title_data.get("romaji")
+                or title_data.get("native")
+                or query
+            )
+        elif title_data:
+            title = str(title_data)
+
+        return _success(
+            tool,
+            {
+                "anime": {
+                    "id": mal_id,
+                    "title": title,
+                    "mal_id": mal_id,
+                },
+                "source": "jikan",
+                "page": page,
+                "per_page": len(episodes),
+                "total_episodes": (pagination.get("items") or {}).get("total"),
+                "last_page": pagination.get("last_visible_page"),
+                "episodes": episodes,
+            },
+            "Found " + str(len(episodes)) + " episode(s) for " + str(title) + ".",
+        )
+    except Exception as exc:
+        return _error(
+            tool,
+            "Anime episode lookup failed on AniAPI and Jikan: " + str(exc),
+        )
+
+
+
 _ghibli_cache: list[dict[str, Any]] | None = None
 _ghibli_cache_time = 0.0
 
