@@ -365,3 +365,26 @@ def test_background_memory_analysis_skips_software_tasks():
         "what is the weather today?"
     ) is True
 
+
+
+def test_browser_title_speech_uses_task_goal():
+    from tool_executor import _spoken_execution_summary
+    from tool_result import ToolResult
+
+    result = ToolResult(
+        success=True,
+        tool="browser_page_info",
+        data={
+            "success": True,
+            "verified": True,
+            "title": "Example Domain",
+            "url": "https://example.com/",
+        },
+    )
+
+    assert _spoken_execution_summary(
+        "browser_page_info",
+        'Browser page inspected. Title: Example Domain URL: https://example.com/',
+        result,
+        "What's the page title of example.com?",
+    ) == 'The page title is "Example Domain".'
