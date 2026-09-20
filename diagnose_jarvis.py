@@ -528,6 +528,7 @@ def check_extended_live_apis() -> list[str]:
         ("music_search", "Daft Punk"),
         ("musicbrainz_search", "Around the World Daft Punk"),
         ("anime_search", "Cowboy Bebop"),
+        ("anime_episodes", "Cowboy Bebop"),
         ("ghibli_search", "Totoro"),
         ("openalex_search", "quantum computing"),
         ("pubchem_lookup", "caffeine"),
