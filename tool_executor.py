@@ -2571,6 +2571,110 @@ def _api_spoken_summary(
             f"above sea level."
         )
 
+    # --------------------------------------------------------
+    # EXTENDED LOW-FRICTION APIS
+    # --------------------------------------------------------
+
+    extended_tools = {
+        "country_info", "crypto_price", "trivia_question", "joke",
+        "meal_search", "tv_search", "music_search", "musicbrainz_search",
+        "anime_search", "ghibli_search", "openalex_search", "pubchem_lookup",
+        "art_search", "nasa_eonet", "spacex_lookup", "sunrise_sunset",
+        "topo_elevation", "public_ip", "reverse_geocode", "news_search",
+        "cat_fact", "dog_image", "osm_search",
+    }
+
+    if tool in extended_tools:
+        def first_list(*keys):
+            for key in keys:
+                value = data.get(key)
+                if isinstance(value, list):
+                    return value
+            return []
+
+        if tool == "trivia_question":
+            items = first_list("items")
+            return clean(items[0].get("question"), 320) if items and isinstance(items[0], dict) else "I retrieved a trivia question."
+
+        if tool == "joke":
+            items = first_list("items")
+            return clean(items[0].get("text"), 420) if items and isinstance(items[0], dict) else "I retrieved a joke."
+
+        if tool == "cat_fact":
+            items = first_list("items")
+            return clean(items[0].get("fact"), 420) if items and isinstance(items[0], dict) else "I retrieved a cat fact."
+
+        if tool == "dog_image":
+            return "I found a random dog image."
+
+        if tool == "public_ip":
+            ip = clean(data.get("ip"), 80)
+            return f"Your public IP address is {ip}." if ip else "I found your public IP address."
+
+        if tool == "crypto_price":
+            items = first_list("results")
+            item = items[0] if items and isinstance(items[0], dict) else data
+            name = clean(item.get("name"), 80)
+            price = item.get("price_usd")
+            change = item.get("percent_change_24h")
+            if name and price is not None:
+                try: price_text = f"${float(price):,.2f}"
+                except (TypeError, ValueError): price_text = clean(price, 40)
+                if change is not None:
+                    try: change_text = f"{float(change):+.2f}%"
+                    except (TypeError, ValueError): change_text = clean(change, 30)
+                    return f"{name} is trading around {price_text}, with a 24-hour change of {change_text}."
+                return f"{name} is trading around {price_text}."
+            return "I retrieved the cryptocurrency price."
+
+        if tool == "country_info":
+            name = clean(data.get("name"), 80)
+            capital = clean(data.get("capital"), 80)
+            region = clean(data.get("region"), 100)
+            if name and capital: return f"{name}'s capital is {capital}." + (f" It is in {region}." if region else "")
+            return f"I found country information for {name}." if name else "I found the country information."
+
+        list_specs = {
+            "meal_search": ("meals", "meal"), "tv_search": ("shows", "TV show"),
+            "music_search": ("tracks", "music"), "musicbrainz_search": ("recordings", "recording"),
+            "anime_search": ("anime", "anime"), "ghibli_search": ("films", "film"),
+            "openalex_search": ("works", "research work"), "pubchem_lookup": ("results", "compound"),
+            "art_search": ("artworks", "artwork"), "news_search": ("articles", "news result"),
+            "osm_search": ("results", "map result"),
+        }
+        if tool in list_specs:
+            key, label = list_specs[tool]
+            items = data.get(key) or []
+            names = []
+            for item in items[:2]:
+                if isinstance(item, dict):
+                    name = item.get("title") or item.get("name") or item.get("display_name")
+                    if name: names.append(clean(name, 120))
+            count = len(items)
+            if names: return f"I found {count} {label}{'s' if count != 1 else '}, including {' and '.join(names)}."
+            return f"I found {count} {label}{'s' if count != 1 else '}."
+
+        if tool == "nasa_eonet": return f"I found {len(data.get("events") or [])} open NASA natural-event reports."
+        if tool == "spacex_lookup": return f"I retrieved {len(data.get("launches") or [])} SpaceX launch record(s)."
+        if tool == "sunrise_sunset":
+            sunrise = clean(data.get("sunrise"), 80); sunset = clean(data.get("sunset"), 80)
+            return f"Sunrise is {sunrise}, and sunset is {sunset}." if sunrise and sunset else "I retrieved the sunrise and sunset data."
+        if tool == "topo_elevation":
+            meters = data.get("elevation_meters"); feet = data.get("elevation_feet")
+            if meters is not None:
+                try: meters_text = f"{float(meters):,.0f}"
+                except (TypeError, ValueError): meters_text = clean(meters, 40)
+                if feet is not None:
+                    try: feet_text = f"{float(feet):,.0f}"
+                    except (TypeError, ValueError): feet_text = clean(feet, 40)
+                    return f"The topographic elevation is about {meters_text} meters ({feet_text} feet)."
+                return f"The topographic elevation is about {meters_text} meters."
+        if tool == "reverse_geocode":
+            items = first_list("results")
+            if items and isinstance(items[0], dict) and items[0].get("display_name"):
+                return f"That location resolves to {clean(items[0].get("display_name"), 260)}."
+            return "I retrieved the reverse-geocoded location."
+
     # PUBLIC API DISCOVERY
     # --------------------------------------------------------
 
