@@ -3199,11 +3199,3114 @@ def _candidate_form_factor(name):
     return 'other'
 
 
+def _candidate_has_model_signal(value: str) -> bool:
+    text = _normalize_product_text(value)
+    if not text:
+        return False
+
+    # Model families that frequently do not contain digits but are still
+    # concrete product identities (for example AirPods Pro, QuietComfort Ultra,
+    # Soundcore Space One, JLab JBuds Lux, Sennheiser ACCENTUM).
+    family_markers = (
+        'airpods',
+        'quietcomfort',
+        'space one',
+        'space q',
+        'jb uds',
+        'jbuds',
+        'accentum',
+        'momentum',
+        'maxwell',
+        'arctis',
+        'monitor',
+        'liberty',
+        'tune',
+        'live',
+        'openrun',
+        'solo',
+        'major',
+        'tour one',
+        'buds',
+    )
+    if any(marker in text for marker in family_markers):
+        return True
+
+    return bool(
+        re.search(
+            r'\\b(?:wh|wf|hdb|az|q|w|m|xm|ch|ea)[- ]?\\d[a-z0-9-]*\\b',
+            text,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r'\\b[a-z]{1,8}[- ]?\\d{1,5}[a-z0-9-]*\\b',
+            text,
+            re.IGNORECASE,
+        )
+        or any(
+            re.search(r'\\d', token)
+            for token in text.split()
+        )
+    )
+
+
 def _clean_candidate_name(candidate):
     value = ' '.join(str(candidate or '').split()).strip(' ,.;:()[]')
     if not value:
         return ''
-    value = re.sub(r'\s+\$', ' $', value)
+    value = re.sub(r'\s+\
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 120):match.end() + 320]
+                prices = []
+                budget_price_signal = False
+                for price_match in list(
+                    re.finditer(
+                        r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)',
+                        neighborhood,
+                    )
+                )[:8]:
+                    try:
+                        value = float(price_match.group(1).replace(',', ''))
+                    except ValueError:
+                        continue
+                    if not (1 <= value <= 100000):
+                        continue
+                    relevance = _candidate_price_relevance(
+                        neighborhood,
+                        price_match.start(),
+                        price_match.end(),
+                        budget,
+                    )
+                    if relevance < 0.5:
+                        continue
+                    prices.append(value)
+                    if isinstance(budget, (int, float)) and value <= float(budget):
+                        budget_price_signal = True
+
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(
+                    key,
+                    {
+                        'name': candidate,
+                        'source_ids': [],
+                        'observed_prices': [],
+                        'form_factor': _candidate_form_factor(candidate),
+                        'budget_price_signal': False,
+                        'review_source_count': 0,
+                        'known_source_count': 0,
+                    },
+                )
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                source_type = str(source.get('source_type') or '')
+                if source_type == 'independent_review':
+                    record['review_source_count'] += 1
+                if source_type in {'independent_review', 'manufacturer', 'retailer', 'community', 'video'}:
+                    record['known_source_count'] += 1
+                if budget_price_signal:
+                    record['budget_price_signal'] = True
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+
+    for record in signals.values():
+        record['budget_signal'] = bool(record.get('budget_price_signal'))
+        record.pop('budget_price_signal', None)
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            int(item.get('review_source_count') or 0),
+            int(item.get('known_source_count') or 0),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            int(item.get('review_source_count') or 0),
+            int(item.get('known_source_count') or 0),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- Treat arbitrary web_source pages as discovery/supporting evidence, not the primary basis
+  for best_match or best_value when independent_review evidence is available.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        # Arbitrary web-source pages are useful discovery leads, but they are
+        # not strong enough to be the deterministic primary recommendation
+        # when the evidence packet contains recognized review evidence.
+        review_evidence_exists = any(
+            source.get('source_type') == 'independent_review'
+            for source in evidence
+            if isinstance(source, dict)
+        )
+        if review_evidence_exists:
+            source_ids_for_product = set(product.get('source_ids') or [])
+            has_review_support = any(
+                source_types.get(source_id) == 'independent_review'
+                for source_id in source_ids_for_product
+            )
+            has_known_support = any(
+                source_types.get(source_id) in {
+                    'independent_review', 'manufacturer', 'retailer',
+                    'community', 'video'
+                }
+                for source_id in source_ids_for_product
+            )
+            if not has_known_support:
+                continue
+            if not has_review_support and product.get('candidate_signal'):
+                continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, ' 
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
+                prices = []
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
+                    try:
+                        value = float(raw.replace(',', ''))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+    for record in signals.values():
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, value)
     # Cut off price/specification spillover after a concrete model token.
     words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', value)
     if not words:
@@ -3214,6 +6317,9 @@ def _clean_candidate_name(candidate):
         'good', 'great', 'excellent', 'sound', 'quality', 'top', 'of', 'line',
         'app', 'battery', 'comfortable', 'comfort', 'anc', 'noise', 'cancellation',
         'tested', 'review', 'reviews', 'price', 'msrp', 'save', 'see',
+        'wireless', 'wired', 'bluetooth', 'headphone', 'headphones', 'earbud',
+        'earbuds', 'audio', 'dolby', 'atmos', 'true', 'active', 'hybrid',
+        'memory', 'foam', 'travel', 'office', 'home', 'charging', 'playtime',
     }
     for word in words:
         low = word.lower().strip()
@@ -3226,12 +6332,7524 @@ def _clean_candidate_name(candidate):
             if model_seen:
                 break
         cleaned.append(word)
-        if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s+4)\b', low, re.I):
+        if _candidate_has_model_signal(' '.join(cleaned)):
             model_seen = True
         if len(cleaned) >= 6:
             break
     result = ' '.join(cleaned).strip(' ,.;:()[]')
-    return result if _is_specific_product_name(result) else ''
+    if not _is_specific_product_name(result):
+        return ''
+    if not _candidate_has_model_signal(result):
+        return ''
+    return result
+
+
+def _candidate_price_relevance(
+    text: str,
+    start: int,
+    end: int,
+    budget: float | None = None,
+) -> float:
+    value = str(text or '')
+    context = value[max(0, start - 140):min(len(value), end + 180)].lower()
+    score = 0.0
+
+    positive = (
+        'current price', 'sale price', 'our price', 'price', 'now',
+        'add to cart', 'buy now', 'check price', 'was '
+    )
+    negative = (
+        'msrp', 'list price', 'list:', 'typical price', 'typical:',
+        'save ', 'savings', 'you save', 'coupon', 'clip coupon',
+        'with coupon', 'after coupon', 'extra savings', 'starting at',
+        'from 
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
+                prices = []
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
+                    try:
+                        value = float(raw.replace(',', ''))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+    for record in signals.values():
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, 'under 
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
+                prices = []
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
+                    try:
+                        value = float(raw.replace(',', ''))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+    for record in signals.values():
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, 'up to 
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
+                prices = []
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
+                    try:
+                        value = float(raw.replace(',', ''))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+    for record in signals.values():
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, 'below 
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
+                prices = []
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
+                    try:
+                        value = float(raw.replace(',', ''))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+    for record in signals.values():
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, 'maximum budget',
+        'budget of 
+
+def _extract_candidate_signals(evidence, budget=None):
+    """Extract concrete, cleaned product candidates from collected evidence."""
+    signals = {}
+    brands = sorted(_PRODUCT_BRANDS, key=len, reverse=True)
+    compact_brand_tokens = {re.sub(r'[^a-z0-9]+', '', b.lower()) for b in brands}
+    stop_words = {
+        'read', 'more', 'amazon', 'walmart', 'best', 'buy', 'price', 'product',
+        'products', 'page', 'review', 'reviews', 'headphones', 'headphone',
+        'wireless', 'earbuds', 'earbud', 'popular', 'latest', 'new', 'all',
+        'shop', 'now', 'compare', 'good', 'great', 'excellent', 'sound',
+        'quality', 'battery', 'comfortable', 'comfort', 'anc', 'noise',
+        'cancellation', 'tested', 'top', 'overall', 'pick', 'choice',
+    }
+    for source in evidence:
+        if not isinstance(source, dict):
+            continue
+        page_text = ' '.join(str(source.get('text') or '').split())
+        for brand in brands:
+            for match in re.finditer(rf'\b({re.escape(brand)})\b', page_text, re.IGNORECASE):
+                tail = page_text[match.end():match.end() + 140]
+                words = re.findall(r'[A-Za-z0-9][A-Za-z0-9&./+\-]*', tail)
+                parts = [match.group(1)]
+                model_seen = False
+                for word in words:
+                    normalized_word = re.sub(r'[^a-z0-9]+', '', word.lower())
+                    if normalized_word in stop_words or normalized_word in compact_brand_tokens:
+                        if model_seen:
+                            break
+                        continue
+                    parts.append(word)
+                    if re.search(r'\d', word) or re.search(r'\b(?:airpods|buds|q\d+|wh[- ]?\d+|wf[- ]?\d+|xm\d+|h\d+|770nc|720nc|solo\s*4)\b', word.lower(), re.I):
+                        model_seen = True
+                    if model_seen and len(parts) >= 4:
+                        break
+                    if len(parts) >= 5:
+                        break
+                candidate = _clean_candidate_name(' '.join(parts))
+                if not candidate:
+                    continue
+                neighborhood = page_text[max(0, match.start() - 100):match.end() + 260]
+                prices = []
+                for raw in re.findall(r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)', neighborhood)[:6]:
+                    try:
+                        value = float(raw.replace(',', ''))
+                    except ValueError:
+                        continue
+                    if 1 <= value <= 100000:
+                        prices.append(value)
+                key = ' '.join(candidate.lower().split())
+                record = signals.setdefault(key, {'name': candidate, 'source_ids': [], 'observed_prices': [], 'form_factor': _candidate_form_factor(candidate)})
+                source_id = source.get('id')
+                if source_id not in record['source_ids']:
+                    record['source_ids'].append(source_id)
+                for price in prices:
+                    if price not in record['observed_prices']:
+                        record['observed_prices'].append(price)
+    for record in signals.values():
+        prices = record.get('observed_prices') or []
+        record['budget_signal'] = bool(isinstance(budget, (int, float)) and any(price <= float(budget) for price in prices))
+    return sorted(
+        signals.values(),
+        key=lambda item: (
+            item.get('budget_signal', False),
+            len(item.get('source_ids') or []),
+            1 if item.get('form_factor') in {'earbuds', 'over_ear', 'on_ear', 'open_ear'} else 0,
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )[:16]
+
+def _inject_candidate_products(analysis, evidence, budget):
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
+    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
+    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+    signals = _extract_candidate_signals(evidence, budget)
+    # First reserve slots for approaches that the model omitted.
+    ordered = sorted(
+        signals,
+        key=lambda item: (
+            item.get('budget_signal', False),
+            1 if item.get('form_factor') not in existing_forms else 0,
+            len(item.get('source_ids') or []),
+            len(item.get('observed_prices') or []),
+        ),
+        reverse=True,
+    )
+    for signal in ordered:
+        if len(products) >= 6:
+            break
+        if not signal.get('budget_signal'):
+            continue
+        name = str(signal.get('name') or '').strip()
+        key = ' '.join(name.lower().split())
+        if not name or key in existing:
+            continue
+        product = {
+            'name': name, 'model_number': None, 'price': None,
+            'rating': None, 'review_count': None,
+            'source_ids': signal.get('source_ids') or [],
+            'pros': [], 'cons': [],
+            'fit': 'budget_alternative',
+            'candidate_signal': True,
+            'candidate_form_factor': signal.get('form_factor') or 'other',
+            'observed_prices': signal.get('observed_prices') or [],
+        }
+        products.append(product)
+        existing.add(key)
+        existing_forms.add(signal.get('form_factor') or 'other')
+    analysis['products'] = products[:6]
+    return analysis
+
+def _synthesize(
+    request: str,
+    item: str,
+    budget: float | None,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if budget is not None:
+        budget_note = (
+            "Maximum budget: $"
+            + format(budget, ",.2f")
+            + "."
+        )
+    else:
+        budget_note = "No explicit maximum budget."
+
+    compact_evidence = _compact_evidence_for_synthesis(
+        evidence,
+        per_source_chars=1500,
+    )
+    candidate_signals = _extract_candidate_signals(evidence, budget)
+
+    prompt = f"""
+You are JARVIS's evidence-constrained product research analyst.
+
+USER REQUEST: {request}
+ITEM / CATEGORY: {item}
+{budget_note}
+
+CANDIDATE SIGNALS EXTRACTED FROM EVIDENCE:
+{json.dumps(
+    candidate_signals,
+    ensure_ascii=False,
+)}
+
+SOURCE EVIDENCE:
+{json.dumps(
+    compact_evidence,
+    ensure_ascii=False,
+)}
+
+Use only the supplied evidence.
+Never invent product names, prices, ratings, review counts,
+specifications, or capabilities.
+- Treat CANDIDATE SIGNALS as evidence-derived product discoveries, not facts to expand or invent.
+- Prefer concrete model names from CANDIDATE SIGNALS when they are relevant to the user request.
+- For hard budgets, favor candidates with observed prices at or below the maximum; MSRP, savings, coupons, and unrelated dollar values do not qualify.
+- Products must be concrete identifiable models, never category-only labels.
+- Prefer products named explicitly in the supplied evidence.
+- Never output generic names such as "Active Noise Cancelling Headphones"
+  or "Bluetooth Headphones" as product entries.
+
+Evidence rules:
+- Manufacturer sources are strongest for specifications.
+- Retailers are strongest for observed price and customer ratings.
+- Independent reviews are strongest for testing/comparative analysis.
+- Video and community sources are supporting evidence, not proof.
+- Prefer agreement across independent domains and source types.
+- State conflicts or stale pricing.
+- When a maximum budget is supplied, it is a hard constraint. Do not
+  designate a product as best_match, best_value, or another budget-oriented
+  choice when its relevant listed/current price exceeds that maximum.
+- For a hard-budget request, prioritize products explicitly described as
+  budget/cheap picks or supported by an explicit non-MSRP price at or below
+  the budget. Ignore stray dollar values near MSRP, savings, coupons, or ads.
+- Prefer a current verified retailer price at or below the budget over MSRP.
+- Use null when evidence is missing.
+- Cite factual claims with source IDs.
+
+Keep the response compact. Return ONLY one valid JSON object.
+Do not use markdown fences.
+Do not add commentary before or after the JSON.
+Limit products to the 4 most relevant models.
+Limit comparisons to 2.
+Keep pros/cons to at most 3 items each.
+Keep tradeoffs and warnings to at most 3 items each.
+Keep summary to 2 sentences.
+
+JSON shape:
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "model_number": null,
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "pros": [],
+      "cons": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+
+    def run_synthesis(
+        synthesis_prompt: str,
+    ) -> dict[str, Any]:
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Output one compact, valid JSON object only. "
+                            "No markdown and no prose outside the JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: synthesis failed: "
+                f"{exc}"
+            )
+            return {}
+
+        raw_text = _response_text(response)
+        parsed = _parse_json(raw_text)
+
+        if parsed:
+            return parsed
+
+        # A 9B-class local model can still truncate a larger JSON response
+        # after a large evidence packet. Retry with a deliberately tiny
+        # evidence packet and output contract so the research pipeline can
+        # continue to price verification instead of failing closed.
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: retrying synthesis with compact schema "
+            "after invalid/truncated JSON."
+        )
+
+        retry_evidence = _compact_evidence_for_synthesis(
+            evidence,
+            per_source_chars=1600,
+        )
+
+        retry_prompt = f"""
+Synthesize this product research using ONLY the evidence below.
+
+Request: {request}
+Item: {item}
+{budget_note}
+
+Candidate signals:
+{json.dumps(candidate_signals, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(
+    retry_evidence,
+    ensure_ascii=False,
+)}
+
+Return ONLY this compact JSON object. No markdown. No extra text.
+Do not invent facts. Cite claims with source IDs.
+Keep products to at most 3 and comparisons to at most 1.
+Keep every reason to one short sentence.
+
+{{
+  "summary": "",
+  "confidence": "high|medium|low",
+  "products": [
+    {{
+      "name": "",
+      "price": null,
+      "rating": null,
+      "review_count": null,
+      "source_ids": [],
+      "fit": "best_match|strong_alternative|budget_alternative|mixed|poor_fit"
+    }}
+  ],
+  "best_match": {{"name": null, "reason": "", "source_ids": []}},
+  "best_value": {{"name": null, "reason": "", "source_ids": []}},
+  "cheapest_credible_option": {{"name": null, "reason": "", "source_ids": []}},
+  "better_reviewed_alternative": {{"name": null, "reason": "", "source_ids": []}},
+  "comparisons": [
+    {{"product_a": "", "product_b": "", "comparison": "", "source_ids": []}}
+  ],
+  "tradeoffs": [],
+  "warnings": []
+}}
+"""
+        try:
+            response = ModelManager().product_research(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only one valid JSON object. "
+                            "Be extremely concise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": retry_prompt,
+                    },
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "JARVIS PRODUCT RESEARCH: compact synthesis retry failed: "
+                f"{exc}"
+            )
+            return {}
+
+        return _parse_json(
+            _response_text(response)
+        )
+
+    return run_synthesis(prompt)
+
+def _sanitize_analysis_product_identity(analysis: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    products = analysis.get("products")
+    if isinstance(products, list):
+        clean = []
+        seen = set()
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            name = str(product.get("name") or product.get("product") or "").strip()
+            key = " ".join(name.lower().split())
+            if not _is_specific_product_name(name) or key in seen:
+                continue
+            seen.add(key)
+            clean.append(product)
+        analysis["products"] = clean
+    valid = {" ".join(str(p.get("name") or "").lower().split()) for p in (analysis.get("products") or []) if isinstance(p, dict)}
+    for field in ("best_match", "best_value", "cheapest_credible_option", "better_reviewed_alternative"):
+        choice = analysis.get(field)
+        if isinstance(choice, dict):
+            key = " ".join(str(choice.get("name") or "").lower().split())
+            if key not in valid:
+                choice["name"] = None
+                choice["reason"] = "No concrete evidence-backed product identity survived validation."
+                choice["source_ids"] = []
+    return analysis
+
+def _normalized_name(value: Any) -> str:
+    return " ".join(
+        str(value or "").lower().split()
+    ).strip()
+
+
+def _find_analysis_product(
+    analysis: dict[str, Any],
+    name: str,
+) -> dict[str, Any] | None:
+    wanted = _normalized_name(name)
+    if not wanted:
+        return None
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate == wanted:
+            return product
+
+    for product in analysis.get("products") or []:
+        if not isinstance(product, dict):
+            continue
+
+        candidate = _normalized_name(
+            product.get("name")
+            or product.get("product")
+        )
+
+        if candidate and (
+            wanted in candidate
+            or candidate in wanted
+        ):
+            return product
+
+    return None
+
+
+
+def _select_verified_budget_match(
+    analysis: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    budget: float,
+) -> dict[str, Any] | None:
+    """Choose a deterministic under-budget fallback after browser verification."""
+    products = analysis.get("products") or []
+    if not isinstance(products, list):
+        return None
+
+    source_types = {
+        source.get("id"): str(source.get("source_type") or "")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    ranked = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = comparison.get("budget_verified_offers") or []
+
+        valid_offers = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= float(budget)
+                and str(offer.get("url") or "").strip()
+            )
+        ]
+
+        if not valid_offers:
+            continue
+
+        cheapest = min(
+            valid_offers,
+            key=lambda offer: float(offer.get("price")),
+        )
+
+        source_ids = product.get("source_ids") or []
+        independent_reviews = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "independent_review"
+        })
+        retailer_sources = len({
+            source_id
+            for source_id in source_ids
+            if source_types.get(source_id) == "retailer"
+        })
+
+        rating = product.get("rating")
+        review_count = product.get("review_count")
+        rating_value = (
+            float(rating)
+            if isinstance(rating, (int, float))
+            else 0.0
+        )
+        review_count_value = (
+            int(review_count)
+            if isinstance(review_count, (int, float))
+            else 0
+        )
+
+        ranked.append(
+            (
+                independent_reviews,
+                retailer_sources,
+                1 if product.get("candidate_signal") else 0,
+                rating_value,
+                min(review_count_value, 1000000),
+                -float(cheapest.get("price")),
+                name,
+                cheapest,
+            )
+        )
+
+    if not ranked:
+        return None
+
+    ranked.sort(key=lambda item: item[:-2], reverse=True)
+    _ir, _rr, _candidate, _rating, _reviews, _neg_price, name, offer = ranked[0]
+    selected_record = next(
+        (
+            product
+            for product in products
+            if isinstance(product, dict)
+            and str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip() == name
+        ),
+        {},
+    )
+
+    return {
+        "name": name,
+        "reason": (
+            name
+            + " is the strongest verified under-budget match because it has "
+            + "direct retailer verification within the requested $"
+            + f"{float(budget):,.2f}"
+            + " limit and broader supporting product evidence than the other "
+            + "verified candidates."
+        ),
+        "source_ids": (
+            selected_record.get("source_ids") or []
+            if isinstance(selected_record, dict)
+            else []
+        ),
+        "_offer": offer,
+    }
+
+
+def _build_purchase_links(
+    analysis: dict[str, Any],
+    budget: float | None,
+) -> list[dict[str, Any]]:
+    """Expose only direct exact-match offers and enforce the budget at output."""
+    links = []
+
+    for product in (analysis.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not _is_specific_product_name(name):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        offers = (
+            comparison.get("budget_verified_offers") or []
+            if budget is not None
+            else comparison.get("verified_offers") or []
+        )
+
+        valid = [
+            offer
+            for offer in offers
+            if (
+                isinstance(offer, dict)
+                and offer.get("exact_match") is True
+                and isinstance(offer.get("price"), (int, float))
+                and str(offer.get("url") or "").strip()
+                and (
+                    budget is None
+                    or float(offer.get("price")) <= float(budget)
+                )
+            )
+        ]
+
+        if not valid:
+            continue
+
+        offer = min(
+            valid,
+            key=lambda item: float(item.get("price")),
+        )
+
+        links.append(
+            {
+                "product": name,
+                "seller": str(offer.get("label") or "").strip(),
+                "price": round(float(offer.get("price")), 2),
+                "url": str(offer.get("url") or "").strip(),
+            }
+        )
+
+        if len(links) >= 4:
+            break
+
+    return links
+
+def _enrich_product_price_comparisons(
+    analysis: dict[str, Any],
+    budget: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Add best-effort cross-store price evidence to synthesized products.
+    """
+    if not isinstance(analysis, dict):
+        return {}
+
+    products = analysis.get("products")
+    if not isinstance(products, list) or not products:
+        return analysis
+
+    try:
+        enriched = compare_products_prices(
+            products,
+            stores=("amazon", "bestbuy", "walmart", "target", "bhphoto"),
+            max_products=min(6, len(products)),
+            max_stores=5,
+        )
+    except Exception as exc:
+        logger.warning(
+            "JARVIS PRODUCT RESEARCH: price comparison failed: "
+            f"{exc}"
+        )
+        enriched = products
+
+    analysis["products"] = enriched
+
+    # A synthesized price is only a hint until the retailer checker ties it
+    # to an exact direct product page. Clear stale/MSRP/snippet-derived prices
+    # that were not independently verified, and prefer the current verified
+    # retailer price for the user's actual budget context.
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        # At this point the budget-specific offer list has not been built yet.
+        # Start from exact-product verified offers, then apply the budget gate
+        # below and replace the displayed price with budget-qualified pricing.
+        eligible_offers = comparison.get("verified_offers") or []
+
+        verified_price = None
+        for offer in eligible_offers:
+            if not isinstance(offer, dict):
+                continue
+            candidate_price = offer.get("price")
+            if isinstance(candidate_price, (int, float)):
+                verified_price = float(candidate_price)
+                break
+
+        product["price"] = (
+            round(verified_price, 2)
+            if verified_price is not None
+            else None
+        )
+
+    cheapest_by_name = {}
+    for product in enriched:
+        if not isinstance(product, dict):
+            continue
+
+        name = str(
+            product.get("name")
+            or product.get("product")
+            or ""
+        ).strip()
+
+        if not name:
+            continue
+
+        comparison = product.get("price_comparison") or {}
+        cheapest = comparison.get("cheapest")
+
+        if isinstance(cheapest, dict):
+            cheapest_by_name[_normalized_name(name)] = cheapest
+
+    best_value = analysis.get("best_value") or {}
+    best_value_name = str(
+        best_value.get("name") or ""
+    ).strip()
+
+    best_key = _normalized_name(best_value_name)
+    best_offer = cheapest_by_name.get(best_key)
+    best_price = (
+        best_offer.get("price")
+        if isinstance(best_offer, dict)
+        else None
+    )
+
+    cheaper_alternatives = []
+    if isinstance(best_price, (int, float)):
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            name = str(
+                product.get("name")
+                or product.get("product")
+                or ""
+            ).strip()
+
+            if not name or _normalized_name(name) == best_key:
+                continue
+
+            offer = cheapest_by_name.get(_normalized_name(name))
+            price = (
+                offer.get("price")
+                if isinstance(offer, dict)
+                else None
+            )
+
+            if isinstance(price, (int, float)) and price < best_price:
+                cheaper_alternatives.append(
+                    {
+                        "name": name,
+                        "price": price,
+                        "seller": offer.get("label"),
+                        "url": offer.get("url"),
+                        "savings_vs_best_value": round(
+                            best_price - price,
+                            2,
+                        ),
+                    }
+                )
+
+    analysis["cheaper_alternatives"] = cheaper_alternatives[:4]
+
+    if isinstance(budget, (int, float)) and budget >= 0:
+        budget_value = float(budget)
+
+        for product in enriched:
+            if not isinstance(product, dict):
+                continue
+
+            comparison = product.get("price_comparison") or {}
+            verified_offers = comparison.get("verified_offers") or []
+
+            budget_offers = [
+                offer
+                for offer in verified_offers
+                if isinstance(offer, dict)
+                and isinstance(offer.get("price"), (int, float))
+                and float(offer.get("price")) <= budget_value
+            ]
+
+            budget_offers.sort(
+                key=lambda offer: float(offer.get("price"))
+            )
+
+            comparison["budget_verified_offers"] = budget_offers
+            comparison["budget_eligible"] = bool(budget_offers)
+            comparison["budget_cheapest"] = budget_offers[0] if budget_offers else None
+
+            # For budget-constrained research, never leave an over-budget
+            # verified price in the product record as though it qualified.
+            if budget_offers:
+                product["price"] = round(
+                    float(budget_offers[0].get("price")),
+                    2,
+                )
+            else:
+                product["price"] = None
+
+            product["price_comparison"] = comparison
+
+        def product_is_budget_eligible(name: str) -> bool:
+            record = _find_analysis_product(analysis, name)
+            if not record:
+                return False
+
+            comparison = record.get("price_comparison") or {}
+            if comparison.get("budget_eligible"):
+                return True
+
+            listed_price = record.get("price")
+            return (
+                isinstance(listed_price, (int, float))
+                and float(listed_price) <= budget_value
+            )
+
+        fallback = _select_verified_budget_match(
+            analysis,
+            evidence or [],
+            budget_value,
+        )
+
+        current_best = analysis.get("best_match") or {}
+        current_best_record = _find_analysis_product(
+            analysis,
+            str(current_best.get("name") or "").strip(),
+        )
+        current_best_comparison = (
+            current_best_record.get("price_comparison") or {}
+            if current_best_record
+            else {}
+        )
+
+        if fallback and not current_best_comparison.get("budget_eligible"):
+            analysis["best_match"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        current_value = analysis.get("best_value") or {}
+        current_value_record = _find_analysis_product(
+            analysis,
+            str(current_value.get("name") or "").strip(),
+        )
+        current_value_comparison = (
+            current_value_record.get("price_comparison") or {}
+            if current_value_record
+            else {}
+        )
+
+        if fallback and not current_value_comparison.get("budget_eligible"):
+            analysis["best_value"] = {
+                "name": fallback["name"],
+                "reason": fallback["reason"],
+                "source_ids": fallback.get("source_ids") or [],
+            }
+
+        # A maximum budget is a hard constraint. Never expose a named
+        # recommendation whose known/listed price exceeds the limit.
+        for field in (
+            "best_match",
+            "best_value",
+            "cheapest_credible_option",
+            "better_reviewed_alternative",
+        ):
+            choice = analysis.get(field)
+            if not isinstance(choice, dict):
+                continue
+
+            name = str(choice.get("name") or "").strip()
+            if not name or product_is_budget_eligible(name):
+                continue
+
+            # For best_match, use the model's own best_value candidate when
+            # it satisfies the hard budget. Do not invent a new ranking for
+            # the other recommendation roles; clear them instead.
+            if field == "best_match":
+                best_value = analysis.get("best_value") or {}
+                best_value_name = str(best_value.get("name") or "").strip()
+                if best_value_name and product_is_budget_eligible(best_value_name):
+                    choice["name"] = best_value_name
+                    choice["reason"] = (
+                        "The synthesized best-value candidate is used as the "
+                        "budget-constrained best match because its listed or "
+                        "verified retailer price meets the maximum budget."
+                    )
+                    choice["source_ids"] = best_value.get("source_ids") or []
+                    continue
+
+            choice["name"] = None
+            choice["reason"] = (
+                "The synthesized choice exceeded the hard maximum budget, "
+                "and no verified under-budget replacement was established."
+            )
+            choice["source_ids"] = []
+
+        final_best_value = analysis.get("best_value") or {}
+        final_best_value_name = str(final_best_value.get("name") or "").strip()
+        final_best_key = _normalized_name(final_best_value_name)
+        final_best_record = _find_analysis_product(
+            analysis,
+            final_best_value_name,
+        )
+        final_best_comparison = (
+            final_best_record.get("price_comparison") or {}
+            if final_best_record
+            else {}
+        )
+        final_best_offer = final_best_comparison.get("budget_cheapest")
+
+        if isinstance(final_best_offer, dict):
+            final_best_price = final_best_offer.get("price")
+        else:
+            final_best_price = None
+
+        refreshed_alternatives = []
+        if isinstance(final_best_price, (int, float)):
+            for product in enriched:
+                if not isinstance(product, dict):
+                    continue
+
+                candidate_name = str(
+                    product.get("name")
+                    or product.get("product")
+                    or ""
+                ).strip()
+
+                if (
+                    not candidate_name
+                    or _normalized_name(candidate_name) == final_best_key
+                    or not _is_specific_product_name(candidate_name)
+                ):
+                    continue
+
+                comparison = product.get("price_comparison") or {}
+                offer = comparison.get("budget_cheapest")
+                candidate_price = (
+                    offer.get("price")
+                    if isinstance(offer, dict)
+                    else None
+                )
+
+                if (
+                    isinstance(candidate_price, (int, float))
+                    and float(candidate_price) <= budget_value
+                    and float(candidate_price) < float(final_best_price)
+                ):
+                    refreshed_alternatives.append(
+                        {
+                            "name": candidate_name,
+                            "price": round(float(candidate_price), 2),
+                            "seller": offer.get("label"),
+                            "url": offer.get("url"),
+                            "savings_vs_best_value": round(
+                                float(final_best_price) - float(candidate_price),
+                                2,
+                            ),
+                        }
+                    )
+
+        refreshed_alternatives.sort(
+            key=lambda item: float(item.get("price", float("inf")))
+        )
+        analysis["cheaper_alternatives"] = refreshed_alternatives[:4]
+
+        analysis["budget_constraint"] = {
+            "maximum": budget_value,
+            "enforced": True,
+        }
+
+        analysis["cheaper_alternatives"] = [
+            alternative
+            for alternative in (analysis.get("cheaper_alternatives") or [])
+            if isinstance(alternative, dict)
+            and isinstance(alternative.get("price"), (int, float))
+            and float(alternative.get("price")) <= budget_value
+        ][:4]
+
+        # Replace the model's free-form budget summary after enforcement so
+        # it cannot continue claiming that an over-budget product is the
+        # selected match after the deterministic budget gate has run.
+        budget_match = analysis.get("best_match") or {}
+        budget_match_name = str(budget_match.get("name") or "").strip()
+
+        if budget_match_name:
+            reason = " ".join(
+                str(budget_match.get("reason") or "").split()
+            ).strip()
+            if reason:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    f"based on the available review evidence and verified "
+                    f"retailer pricing. {reason}"
+                )
+            else:
+                analysis["summary"] = (
+                    f"Within the maximum budget of ${budget_value:,.2f}, "
+                    f"{budget_match_name} is the budget-qualified match "
+                    "based on the available review evidence and verified "
+                    "retailer pricing."
+                )
+        else:
+            analysis["summary"] = (
+                f"No currently verified retailer price at or below "
+                f"${budget_value:,.2f} was established for the researched "
+                "models."
+            )
+            analysis["confidence"] = "low"
+
+        analysis["price_check_status"] = "completed_best_effort"
+    return analysis
+
+
+def _final_synthesize_verified(request, item, budget, evidence, analysis):
+    """Use only the compact verified shortlist to explain the recommendation."""
+    products = []
+    allowed = set()
+    for product in analysis.get('products') or []:
+        if not isinstance(product, dict):
+            continue
+        name = str(product.get('name') or product.get('product') or '').strip()
+        if not _is_specific_product_name(name):
+            continue
+        key = _normalized_name(name)
+        allowed.add(key)
+        comparison = product.get('price_comparison') or {}
+        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        products.append({
+            'name': name,
+            'fit': product.get('fit'),
+            'pros': (product.get('pros') or [])[:2],
+            'cons': (product.get('cons') or [])[:2],
+            'source_ids': product.get('source_ids') or [],
+            'verified_offers': [
+                {'seller': o.get('label'), 'price': o.get('price')}
+                for o in (offers or [])
+                if isinstance(o, dict) and o.get('exact_match') is True
+            ][:3],
+        })
+    if not products:
+        return analysis
+
+    relevant_ids = set()
+    for product in products:
+        relevant_ids.update(product.get('source_ids') or [])
+    relevant_evidence = [
+        source for source in evidence
+        if isinstance(source, dict) and (not relevant_ids or source.get('id') in relevant_ids)
+    ]
+    if len(relevant_evidence) < 4:
+        relevant_evidence = [source for source in evidence if isinstance(source, dict)][:6]
+    relevant_evidence = _compact_evidence_for_synthesis(relevant_evidence[:6], per_source_chars=900)
+
+    budget_note = (
+        'Maximum budget: $' + format(float(budget), ',.2f') + '.'
+        if isinstance(budget, (int, float))
+        else 'No explicit maximum budget.'
+    )
+    locked = {
+        field: str((analysis.get(field) or {}).get('name') or '').strip()
+        for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative')
+    }
+
+    prompt = (
+        'JARVIS final product editor. Use ONLY verified shortlist and supplied evidence. '
+        'Do not invent facts or product names. Explain why best_match stands out, then give '
+        'up to 3 different approaches among these verified products. Keep every field very short.\n\n'
+        + 'REQUEST: ' + str(request) + '\nITEM: ' + str(item) + '\n' + budget_note + '\n'
+        + 'SHORTLIST:\n' + json.dumps(products, ensure_ascii=False) + '\n'
+        + 'LOCKED:\n' + json.dumps(locked, ensure_ascii=False) + '\n'
+        + 'EVIDENCE:\n' + json.dumps(relevant_evidence, ensure_ascii=False) + '\n\n'
+        + 'Return ONLY JSON. summary <= 2 sentences. reasons values <= 1 sentence. '
+        + 'product_updates <= 2 pros/cons each. comparisons <= 2. adjacent_options <= 3. '
+        + 'Each adjacent option must use a name from SHORTLIST and contain approach, why_consider, tradeoff, source_ids.'
+    )
+
+    def run_final(final_prompt):
+        try:
+            response = ModelManager().product_research([
+                {'role': 'system', 'content': 'Return only compact valid JSON. No invented facts.'},
+                {'role': 'user', 'content': final_prompt},
+            ])
+        except Exception as exc:
+            logger.warning('JARVIS PRODUCT RESEARCH: final synthesis failed: ' + str(exc))
+            return {}
+        return _parse_json(_response_text(response))
+
+    final = run_final(prompt)
+    if not final:
+        retry_prompt = (
+            'Return ONLY compact JSON. Explain the best_match using only this shortlist and evidence. '
+            'Do not introduce any new product name. summary and each reason must be one sentence.\n'
+            + 'SHORTLIST: ' + json.dumps(products, ensure_ascii=False) + '\n'
+            + 'LOCKED: ' + json.dumps(locked, ensure_ascii=False) + '\n'
+            + 'EVIDENCE: ' + json.dumps(relevant_evidence[:4], ensure_ascii=False)
+        )
+        final = run_final(retry_prompt)
+    if not final:
+        return analysis
+
+    reasons = final.get('reasons') or {}
+    for field in ('best_match', 'best_value', 'cheapest_credible_option', 'better_reviewed_alternative'):
+        text_value = ' '.join(str(reasons.get(field) or '').split()).strip()
+        locked_name = locked.get(field, '')
+        target = analysis.get(field)
+        if text_value and locked_name and isinstance(target, dict) and _normalized_name(target.get('name')) == _normalized_name(locked_name):
+            target['reason'] = text_value
+
+    by_name = {_normalized_name(p.get('name')): p for p in analysis.get('products') or [] if isinstance(p, dict)}
+    for update in final.get('product_updates') or []:
+        if not isinstance(update, dict):
+            continue
+        key = _normalized_name(update.get('name'))
+        if key not in allowed or key not in by_name:
+            continue
+        if isinstance(update.get('pros'), list):
+            by_name[key]['pros'] = [str(x).strip() for x in update['pros'][:3] if str(x).strip()]
+        if isinstance(update.get('cons'), list):
+            by_name[key]['cons'] = [str(x).strip() for x in update['cons'][:3] if str(x).strip()]
+
+    adjacent = []
+    for option in final.get('adjacent_options') or []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        if _normalized_name(name) not in allowed:
+            continue
+        adjacent.append({
+            'name': name,
+            'approach': ' '.join(str(option.get('approach') or '').split()).strip(),
+            'why_consider': ' '.join(str(option.get('why_consider') or '').split()).strip(),
+            'tradeoff': ' '.join(str(option.get('tradeoff') or '').split()).strip(),
+            'source_ids': option.get('source_ids') or [],
+        })
+    analysis['adjacent_options'] = adjacent[:3]
+
+    comparisons = []
+    for comparison in final.get('comparisons') or []:
+        if not isinstance(comparison, dict):
+            continue
+        a = str(comparison.get('product_a') or '').strip()
+        b = str(comparison.get('product_b') or '').strip()
+        if _normalized_name(a) not in allowed or _normalized_name(b) not in allowed:
+            continue
+        text_value = ' '.join(str(comparison.get('comparison') or '').split()).strip()
+        if text_value:
+            comparisons.append({'product_a': a, 'product_b': b, 'comparison': text_value, 'source_ids': comparison.get('source_ids') or []})
+    if comparisons:
+        analysis['comparisons'] = comparisons[:2]
+
+    for key in ('tradeoffs', 'warnings'):
+        values = final.get(key)
+        if isinstance(values, list):
+            analysis[key] = [' '.join(str(x or '').split()).strip() for x in values[:3] if str(x or '').strip()]
+
+    summary = ' '.join(str(final.get('summary') or '').split()).strip()
+    if summary:
+        analysis['summary'] = summary
+    confidence = str(final.get('confidence') or '').lower().strip()
+    if confidence in {'high', 'medium', 'low'}:
+        analysis['confidence'] = confidence
+    return analysis
+
+def _summary(
+    analysis: dict[str, Any],
+    source_count: int,
+) -> str:
+    parts = []
+
+    summary = " ".join(
+        str(
+            analysis.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).split()
+    ).strip()
+
+    if summary:
+        parts.append(summary)
+
+    for field, label in (
+        ("best_match", "Best match"),
+        ("best_value", "Best value"),
+        ("cheapest_credible_option", "Cheapest credible option"),
+        ("better_reviewed_alternative", "Better-reviewed alternative"),
+    ):
+        choice = analysis.get(field) or {}
+        name = str(
+            choice.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+        reason = " ".join(
+            str(
+                choice.get(
+                    "reason",
+                    "",
+                )
+                or ""
+            ).split()
+        ).strip()
+
+        if not name:
+            continue
+
+        price_note = ""
+        product_record = _find_analysis_product(
+            analysis,
+            name,
+        )
+        if product_record:
+            comparison = product_record.get("price_comparison") or {}
+            cheapest = (
+                comparison.get("budget_cheapest")
+                if comparison.get("budget_cheapest") is not None
+                else comparison.get("cheapest")
+            )
+            if isinstance(cheapest, dict):
+                store = str(cheapest.get("label") or "").strip()
+                price = cheapest.get("price")
+                if isinstance(price, (int, float)) and store:
+                    price_note = (
+                        f" Verified price check found it at {store} "
+                        f"for ${price:,.2f}. The direct purchase link "
+                        "is included in the research result."
+                    )
+
+        if reason:
+            parts.append(
+                f"{label}: {name}. {reason}{price_note}"
+            )
+        else:
+            parts.append(
+                f"{label}: {name}.{price_note}"
+            )
+
+    comparisons = analysis.get("comparisons") or []
+    for comparison in list(comparisons)[:2]:
+        if not isinstance(comparison, dict):
+            continue
+
+        product_a = str(comparison.get("product_a") or "").strip()
+        product_b = str(comparison.get("product_b") or "").strip()
+        comparison_text = " ".join(
+            str(comparison.get("comparison") or "").split()
+        ).strip()
+
+        if product_a and product_b and comparison_text:
+            parts.append(
+                f"Comparison: {product_a} versus {product_b}. "
+                f"{comparison_text}"
+            )
+
+    cheaper = analysis.get("cheaper_alternatives") or []
+    for alternative in list(cheaper)[:2]:
+        if not isinstance(alternative, dict):
+            continue
+        name = str(alternative.get("name") or "").strip()
+        price = alternative.get("price")
+        savings = alternative.get("savings_vs_best_value")
+        if name and isinstance(price, (int, float)):
+            if isinstance(savings, (int, float)) and savings > 0:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}, "
+                    f"about ${savings:,.2f} less than the best-value option "
+                    "based on verified prices."
+                )
+            else:
+                parts.append(
+                    f"Cheaper alternative: {name} at ${price:,.2f}."
+                )
+
+    adjacent_options = analysis.get("adjacent_options") or []
+    for option in list(adjacent_options)[:3]:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip()
+        approach = ' '.join(str(option.get('approach') or '').split()).strip()
+        why = ' '.join(str(option.get('why_consider') or '').split()).strip()
+        tradeoff_text = ' '.join(str(option.get('tradeoff') or '').split()).strip()
+        if not name:
+            continue
+        detail = 'Alternative approach: ' + name
+        if approach:
+            detail += ' (' + approach + ')'
+        if why:
+            detail += '. ' + why
+        if tradeoff_text:
+            detail += ' Tradeoff: ' + tradeoff_text
+        parts.append(detail + ".")
+
+    tradeoffs = analysis.get("tradeoffs") or []
+    for tradeoff in list(tradeoffs)[:2]:
+        text = " ".join(
+            str(tradeoff or "").split()
+        ).strip()
+        if text:
+            parts.append(
+                f"Tradeoff: {text}"
+            )
+
+    if not parts:
+        parts.append(
+            "I found online sources, but not enough "
+            "evidence for a confident conclusion."
+        )
+
+    confidence = str(
+        analysis.get(
+            "confidence",
+            "low",
+        )
+        or "low"
+    ).lower()
+
+    if confidence in {
+        "high",
+        "medium",
+        "low",
+    }:
+        parts.append(
+            f"Confidence is {confidence}."
+        )
+
+    if source_count < MIN_CONFIDENT_SOURCES:
+        parts.append(
+            f"Only {source_count} usable independent "
+            "sources were available."
+        )
+
+    return " ".join(parts)[:2200]
+
+def research_product(
+    argument: str = "",
+) -> dict[str, Any]:
+    """Research an item online and compare credible alternatives."""
+    parsed = _parse_argument(argument)
+
+    request = str(
+        parsed.get("request")
+        or ""
+    ).strip()
+
+    item = str(
+        parsed.get("item")
+        or ""
+    ).strip()
+
+    budget = parsed.get(
+        "budget"
+    )
+
+    # Final defensive normalization at the public entry point.
+    normalized_item, normalized_budget = _extract_item_and_budget(item or request)
+    if normalized_item:
+        item = normalized_item
+    if budget is None and normalized_budget is not None:
+        budget = normalized_budget
+
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        f"parsed item={item!r} budget={budget!r}"
+    )
+
+    if not item:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "Product research needs "
+                "an item or category."
+            ),
+        }
+
+    queries = _queries(
+        item,
+        budget=budget,
+    )
+    discovered = _discover(queries)
+    sources = _choose_sources(discovered)
+    evidence = _collect_evidence(sources)
+
+    if not evidence:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": (
+                "I could not collect usable "
+                "online sources for that item."
+            ),
+            "item": item,
+            "queries": queries,
+            "sources": [],
+        }
+
+    analysis = _synthesize(
+        request or item,
+        item,
+        budget,
+        evidence,
+    )
+
+    usable_source_ids = {
+        source.get("id")
+        for source in evidence
+        if isinstance(source, dict)
+    }
+    skipped_sources = [
+        {
+            "id": source.get("id"),
+            "domain": source.get("domain"),
+            "source_type": source.get("source_type"),
+            "title": source.get("title"),
+            "reason": "Source was discovered but did not provide usable research content.",
+        }
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("id") not in usable_source_ids
+    ]
+
+    analysis = _sanitize_analysis_product_identity(analysis)
+
+    analysis = _inject_candidate_products(analysis, evidence, budget)
+    analysis = _sanitize_analysis_product_identity(analysis)
+    print(
+        "[JARVIS] JARVIS PRODUCT RESEARCH: "
+        "draft synthesis complete; starting FINAL browser verification."
+    )
+
+    analysis = _enrich_product_price_comparisons(
+        analysis,
+        budget=budget,
+        evidence=evidence,
+    )
+    analysis = _final_synthesize_verified(request or item, item, budget, evidence, analysis)
+
+    best_match = analysis.get("best_match") or {}
+    best_value = analysis.get("best_value") or {}
+
+    if isinstance(budget, (int, float)):
+        best_record = _find_analysis_product(
+            analysis,
+            str(best_match.get("name") or "").strip(),
+        )
+        best_comparison = (
+            best_record.get("price_comparison") or {}
+            if best_record
+            else {}
+        )
+        verified = bool(
+            str(best_match.get("name") or "").strip()
+            and best_comparison.get("budget_eligible")
+        )
+    else:
+        verified = bool(
+            analysis
+            and (
+                str(best_match.get("name") or "").strip()
+                or str(best_value.get("name") or "").strip()
+            )
+        )
+
+    summary = _summary(
+        analysis,
+        len(evidence),
+    )
+
+    return {
+        "success": True,
+        "verified": verified,
+        "retryable": False,
+        "action": "product_research",
+        "request": request or item,
+        "item": item,
+        "budget": budget,
+        "queries": queries,
+        "source_count": len(evidence),
+        "sources": [
+            {
+                "id": source["id"],
+                "domain": source["domain"],
+                "source_type": source["source_type"],
+                "title": source["title"],
+                "url": source["url"],
+                "engine": source.get("engine"),
+                "query": source.get("query"),
+            }
+            for source in evidence
+        ],
+        "skipped_sources": skipped_sources,
+        "evidence": evidence,
+        "analysis": analysis,
+        "purchase_links": _build_purchase_links(
+            analysis,
+            budget,
+        ),
+        "summary": summary,
+        "confidence": str(
+            analysis.get(
+                "confidence",
+                "low",
+            )
+            or "low"
+        ).lower(),
+        "observed_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "message": summary,
+    }, 'advertisement', 'sponsored',
+    )
+
+    for marker in positive:
+        if marker in context:
+            score += 2.0
+
+    for marker in negative:
+        if marker in context:
+            score -= 5.0
+
+    if isinstance(budget, (int, float)):
+        # A bare "$150" in a "$150 budget" heading is a constraint, not a
+        # product price. An exact-budget value needs explicit price context.
+        matched = value[start:end]
+        try:
+            price = float(re.sub(r'[^0-9.]', '', matched))
+        except Exception:
+            price = None
+        if price is not None and abs(price - float(budget)) < 0.001:
+            if not any(
+                marker in context
+                for marker in ('current price', 'sale price', 'our price', 'price:', 'now')
+            ):
+                score -= 6.0
+
+    return score
 
 
 def _extract_candidate_signals(evidence, budget=None):
