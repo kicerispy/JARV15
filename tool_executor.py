@@ -2788,6 +2788,7 @@ def _spoken_execution_summary(
     tool_name: str,
     message: str,
     result: Any = None,
+    request: str = "",
 ) -> str:
     """
     Convert internal tool results into concise, natural JARVIS speech.
@@ -2806,6 +2807,43 @@ def _spoken_execution_summary(
 
     if api_summary:
         return api_summary
+
+    raw_result = (
+        result.data
+        if isinstance(result, ToolResult)
+        else result
+    )
+
+    if isinstance(raw_result, dict) and tool in {
+        "browser_page_info",
+        "browser_goto",
+    }:
+        request_lower = " ".join(
+            str(request or "").strip().lower().split()
+        )
+        title = str(
+            raw_result.get("title")
+            or raw_result.get("after_title")
+            or ""
+        ).strip()
+        url = str(
+            raw_result.get("url")
+            or raw_result.get("after_url")
+            or ""
+        ).strip()
+
+        if (
+            "page title" in request_lower
+            or "title of the page" in request_lower
+        ) and title:
+            return f'The page title is "{title}".'
+
+        if (
+            "current url" in request_lower
+            or "what is the url" in request_lower
+            or "what's the url" in request_lower
+        ) and url:
+            return f"The current URL is {url}."
 
     # Source/code inspection should stay intentionally brief.
     concise = {
@@ -3691,6 +3729,7 @@ def execute_plan(
                 final_tool_name,
                 final_tool_message,
                 result,
+                planning_input,
             )
         )
 
@@ -3704,6 +3743,8 @@ def execute_plan(
         spoken_message = _spoken_execution_summary(
             final_tool_name,
             final_tool_message,
+            result,
+            planning_input,
         )
 
         if executable_steps:
