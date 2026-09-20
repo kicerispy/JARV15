@@ -2050,6 +2050,22 @@ Search query: {active_context.get('last_query', 'none')}
 Last tool: {active_context.get('last_tool', 'none')}
 """
 
+        try:
+            from result_context import compact_context_description
+
+            compact_result_context = compact_context_description(
+                active_context
+            )
+
+            if compact_result_context:
+                context_str += (
+                    "\nStructured result context:\n"
+                    + compact_result_context
+                    + "\n"
+                )
+        except Exception:
+            pass
+
     history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
 
     # --------------------------------------------------------
