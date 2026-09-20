@@ -2413,8 +2413,43 @@ CONTEXTUAL_PHRASES = (
     "open that",
     "click that",
     "play that",
-    "select that",
-)
+    "select that",
+
+        "tell me more",
+
+        "tell me more about that",
+
+        "tell me more about this",
+
+        "tell me more about it",
+
+        "what else can you tell me",
+
+        "give me more details",
+
+        "expand on that",
+
+        "what was the first one",
+
+        "what was the second one",
+
+        "what was the third one",
+
+        "what was the last one",
+
+        "tell me about the first one",
+
+        "tell me about the second one",
+
+        "tell me about the third one",
+
+        "tell me about the last one",
+
+        "what is the source",
+
+        "where did you get that",
+
+    )
 
 REFERENCE_WORDS = (
     "it",
