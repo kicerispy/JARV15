@@ -1896,13 +1896,23 @@ def _api_spoken_summary(
     if not isinstance(raw, dict):
         return None
 
+    # API results have appeared in both of these shapes over the lifetime of
+    # the tool stack:
+    #
+    #   ToolResult(data={"success": True, "data": {...}})
+    #   ToolResult(data={...})
+    #
+    # Accept both so speech formatting stays decoupled from dispatcher
+    # wrapping details.
     if raw.get("success") is False:
         return None
 
-    data = raw.get("data")
+    nested_data = raw.get("data")
 
-    if not isinstance(data, dict):
-        return None
+    if isinstance(nested_data, dict):
+        data = nested_data
+    else:
+        data = raw
 
     def clean(value: Any, limit: int = 260) -> str:
         value = str(value or "").strip()
