@@ -132,6 +132,10 @@ async def _init_browser():
         user_data_dir=user_data_dir,
         headless=False,
         viewport={"width": 1920, "height": 1080},
+        # Playwright normally uses --remote-debugging-pipe internally.
+        # Filter that transport so Chromium exposes the TCP CDP endpoint used
+        # by Browser Use and other external CDP clients.
+        ignore_default_args=["--remote-debugging-pipe"],
         args=[
             "--disable-blink-features=AutomationControlled",
             f"--remote-debugging-port={JARVIS_CDP_PORT}",
