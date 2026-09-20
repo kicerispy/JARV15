@@ -142,7 +142,7 @@ def summarize(
 
 def score_heed_audio(
     audio: np.ndarray,
-) -> tuple[float, float, int, int]:
+) -> tuple[float, float, int, float]:
     """
     Run the actual Heed model over 1-second windows of a captured recording.
 
@@ -297,7 +297,7 @@ def print_heed_scores(
 
     print()
     print(f"===== {label} HEED MODEL =====")
-    print("Running the actual wake model over the recording...")
+    print("Running the actual wake model over the recording (live -55 dBFS energy floor applied)...")
 
     result = score_heed_audio(audio)
 
