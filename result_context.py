@@ -79,7 +79,13 @@ _SOURCE_PATTERNS = (
 
 
 def _normalize(value: Any) -> str:
-    return " ".join(str(value or "").strip().lower().split())
+    normalized = " ".join(
+        str(value or "").strip().lower().split()
+    )
+
+    # Voice/text input frequently carries terminal punctuation.
+    # Strip it so deterministic follow-up patterns remain stable.
+    return normalized.rstrip(".,!?;:")
 
 
 def _unwrap(data: Any) -> Any:
