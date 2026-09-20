@@ -46,10 +46,14 @@ HEED_CANDIDATE_THRESHOLD = float(
 # Normal speech:
 #   one very strong Heed frame can activate, or
 #   multiple moderate/strong frames can activate together.
+#
+# A single-frame activation is reserved for very high confidence. Moderate
+# candidates must arrive on consecutive frames, matching the exported Heed
+# trigger behavior and preventing isolated spikes inside unrelated words.
 NORMAL_SINGLE_TRIGGER = float(
     os.environ.get(
         "JARVIS_ACTIVATION_SINGLE_TRIGGER",
-        "0.72",
+        "0.90",
     )
 )
 
@@ -245,53 +249,52 @@ def evaluate_wake_scores(
             top_scores,
         )
 
-    # Two strong-ish predictions are a better signal than requiring one
-    # unusually high frame. This specifically supports natural pronunciations
-    # that produce scores near the model's trained threshold.
-    multi_scores = [
-        score
-        for score in recent_scores
-        if score >= NORMAL_MULTI_TRIGGER
-    ]
-
-    if len(multi_scores) >= 2:
-        top_two = sorted(
-            multi_scores,
-            reverse=True,
-        )[:2]
+    # Require consecutive moderate/strong predictions. An isolated high
+    # score such as 0.811 in a hard-negative "Jared" recording should not
+    # activate JARVIS.
+    for index in range(len(recent_scores) - 1):
+        first = recent_scores[index]
+        second = recent_scores[index + 1]
 
         if (
-            sum(top_two) / 2.0 >= NORMAL_MULTI_TRIGGER
-            and max(top_two) >= NORMAL_MULTI_SUPPORT_TRIGGER
+            first >= NORMAL_MULTI_TRIGGER
+            and second >= NORMAL_MULTI_TRIGGER
+            and max(first, second) >= NORMAL_MULTI_SUPPORT_TRIGGER
+            and (first + second) / 2.0 >= NORMAL_MULTI_TRIGGER
         ):
             return ActivationDecision(
                 True,
-                "multi-frame wake confirmation",
+                "consecutive multi-frame wake confirmation",
                 peak,
-                tuple(top_two),
+                (
+                    max(first, second),
+                    min(first, second),
+                ),
             )
 
-    soft_scores = [
-        score
-        for score in recent_scores
-        if score >= NORMAL_SOFT_TRIGGER
-    ]
-
-    if len(soft_scores) >= 3:
-        top_three = sorted(
-            soft_scores,
-            reverse=True,
-        )[:3]
+    # A softer path remains available, but all three moderate predictions
+    # must be consecutive so a scattered sequence cannot trigger.
+    for index in range(len(recent_scores) - 2):
+        window = recent_scores[index:index + 3]
 
         if (
-            sum(top_three) / 3.0 >= 0.59
-            and max(top_three) >= 0.64
+            all(
+                score >= NORMAL_SOFT_TRIGGER
+                for score in window
+            )
+            and sum(window) / 3.0 >= 0.59
+            and max(window) >= 0.64
         ):
             return ActivationDecision(
                 True,
-                "soft multi-frame wake confirmation",
+                "consecutive soft multi-frame wake confirmation",
                 peak,
-                tuple(top_three),
+                tuple(
+                    sorted(
+                        window,
+                        reverse=True,
+                    )
+                ),
             )
 
     return ActivationDecision(
