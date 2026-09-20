@@ -74,6 +74,23 @@ _REFERENCE_WORDS = (
     "product",
     "candidate",
     "entry",
+    "song",
+    "show",
+    "meal",
+    "recipe",
+    "film",
+    "movie",
+    "track",
+    "recording",
+    "artwork",
+    "event",
+    "article",
+    "launch",
+    "country",
+    "chemical",
+    "compound",
+    "coin",
+    "contact",
 )
 
 _MORE_PATTERNS = (
