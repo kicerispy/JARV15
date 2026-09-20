@@ -249,3 +249,376 @@ def check_live_apis() -> list[str]:
     from tool_executor import update_active_context
     from tools import run_tool
     from result_context import resolve_result_followup
+
+    failures = []
+
+    cases = [
+        ("currency_convert", "100 USD to EUR"),
+        ("location_lookup", "Chicago, Illinois"),
+        ("air_quality", "Chicago, Illinois"),
+        ("weather_alerts", "Illinois"),
+        ("elevation_lookup", "Denver, Colorado"),
+        ("knowledge_lookup", "quantum computing"),
+        ("book_search", "Frank Herbert"),
+        ("research_arxiv", "large language models"),
+        ("research_crossref", "quantum computing"),
+        ("holiday_lookup", "US 2026"),
+    ]
+
+    print()
+    print("=" * 80)
+    print("LIVE API SMOKE TESTS")
+    print("=" * 80)
+
+    for tool, argument in cases:
+        try:
+            result = run_tool(tool, argument)
+            success = (
+                bool(result.success)
+                if hasattr(result, "success")
+                else bool(
+                    result.get("success", False)
+                    if isinstance(result, dict)
+                    else False
+                )
+            )
+
+            if not success:
+                error = getattr(result, "error", None)
+                if not error and isinstance(result, dict):
+                    error = result.get("error")
+                failures.append(
+                    f"live API {tool}: {error or 'unsuccessful result'}"
+                )
+                print(
+                    f"[FAIL] live API: {tool} -> "
+                    f"{error or 'unsuccessful result'}"
+                )
+            else:
+                print(
+                    f"[PASS] live API: {tool}"
+                )
+
+                if tool == "book_search":
+                    context = ActiveContext()
+                    update_active_context(
+                        plan={
+                            "steps": [
+                                {
+                                    "tool": tool,
+                                    "argument": argument,
+                                }
+                            ]
+                        },
+                        active_context=context,
+                        result_message="I found live book results.",
+                        raw_result=result,
+                    )
+
+                    stored = context.to_dict()
+                    followup = resolve_result_followup(
+                        "What was the second one?",
+                        stored,
+                    )
+
+                    if (
+                        stored.get("last_result_data") is None
+                        or not followup
+                    ):
+                        raise AssertionError(
+                            "live structured result was not retained"
+                        )
+
+                    print(
+                        "[PASS] live structured result + ordinal follow-up"
+                    )
+
+        except Exception as exc:
+            failures.append(
+                f"live API {tool}: {exc}"
+            )
+            print(
+                f"[FAIL] live API: {tool} -> {exc}"
+            )
+
+    return failures
+
+
+def check_speech_summaries() -> list[str]:
+    from tool_executor import _api_spoken_summary
+    from tool_result import ToolResult
+
+    failures = []
+
+    cases = {
+        "currency_convert": {
+            "rate": 0.87005,
+            "converted": 87.005,
+            "from": "USD",
+            "to": "EUR",
+        },
+        "location_lookup": {
+            "name": "Chicago",
+            "country": "United States",
+            "timezone": "America/Chicago",
+        },
+        "air_quality": {
+            "location": "Chicago",
+            "current": {
+                "pm2_5": 3.2,
+                "pm10": 3.3,
+            },
+        },
+        "weather_alerts": {
+            "count": 2,
+            "alerts": [
+                {"event": "Flash Flood Warning"},
+                {"event": "Flood Advisory"},
+            ],
+        },
+        "elevation_lookup": {
+            "location": {"name": "Denver"},
+            "elevation_meters": 1615,
+            "elevation_feet": 5298.56,
+        },
+    }
+
+    field_cases = [
+        (
+            "currency_convert",
+            "What was the exchange rate?",
+            {
+                "from": "USD",
+                "to": "EUR",
+                "rate": 0.87,
+            },
+        ),
+        (
+            "weather_alerts",
+            "How many weather alerts were there?",
+            {
+                "count": 3,
+                "alerts": [],
+            },
+        ),
+    ]
+
+    for tool, query, data in field_cases:
+        try:
+            from result_context import resolve_result_followup
+
+            result = resolve_result_followup(
+                query,
+                {
+                    "last_tool": tool,
+                    "last_result_data": data,
+                },
+            )
+
+            if not result:
+                raise AssertionError("empty field follow-up")
+
+            print(
+                f"[PASS] field follow-up: {tool}"
+            )
+        except Exception as exc:
+            failures.append(
+                f"field follow-up {tool}: {exc}"
+            )
+            print(
+                f"[FAIL] field follow-up: {tool} -> {exc}"
+            )
+
+    for tool, data in cases.items():
+        try:
+            summary = _api_spoken_summary(
+                tool,
+                ToolResult(
+                    success=True,
+                    tool=tool,
+                    data=data,
+                ),
+            )
+
+            if not summary:
+                raise AssertionError("empty spoken summary")
+
+            print(
+                f"[PASS] speech summary: {tool}"
+            )
+
+        except Exception as exc:
+            failures.append(
+                f"speech summary {tool}: {exc}"
+            )
+            print(
+                f"[FAIL] speech summary: {tool} -> {exc}"
+            )
+
+    return failures
+
+
+
+def check_extended_integrations() -> list[str]:
+    from extended_api_tools import API_TOOLS
+    from gods_eye import gods_eye_status
+    from screen_memory import screen_memory_status
+
+    failures = []
+
+    required = {
+        "country_info",
+        "crypto_price",
+        "trivia_question",
+        "joke",
+        "meal_search",
+        "tv_search",
+        "music_search",
+        "anime_search",
+        "openalex_search",
+        "pubchem_lookup",
+        "art_search",
+        "nasa_eonet",
+        "sunrise_sunset",
+        "topo_elevation",
+        "public_ip",
+        "reverse_geocode",
+        "news_search",
+        "osm_search",
+    }
+
+    missing = sorted(required - set(API_TOOLS))
+    if missing:
+        failures.append(f"extended API registry missing: {', '.join(missing)}")
+        print(f"[FAIL] extended API registry -> {missing}")
+    else:
+        print(f"[PASS] extended API registry: {len(API_TOOLS)} tools")
+
+    try:
+        status = gods_eye_status()
+        if not isinstance(status, dict) or not status.get("success"):
+            raise AssertionError("invalid God's Eye View status payload")
+        print("[PASS] God's Eye View bridge import/status")
+    except Exception as exc:
+        failures.append(f"God's Eye View bridge: {exc}")
+        print(f"[FAIL] God's Eye View bridge -> {exc}")
+
+    try:
+        status = screen_memory_status()
+        if not isinstance(status, dict) or not status.get("success"):
+            raise AssertionError("invalid Screenpipe status payload")
+        print("[PASS] Screenpipe memory bridge import/status")
+    except Exception as exc:
+        failures.append(f"Screenpipe bridge: {exc}")
+        print(f"[FAIL] Screenpipe bridge -> {exc}")
+
+    return failures
+
+
+def check_extended_live_apis() -> list[str]:
+    """Exercise a broad sample of the new low-friction APIs."""
+    from tools import run_tool
+
+    cases = [
+        ("country_info", "US"),
+        ("crypto_price", "bitcoin"),
+        ("trivia_question", ""),
+        ("joke", ""),
+        ("meal_search", "chicken"),
+        ("tv_search", "The Office"),
+        ("music_search", "Daft Punk"),
+        ("musicbrainz_search", "Around the World Daft Punk"),
+        ("anime_search", "Cowboy Bebop"),
+        ("anime_episodes", "Cowboy Bebop"),
+        ("anime_episodes", "Cowboy Bebop"),
+        ("ghibli_search", "Totoro"),
+        ("openalex_search", "quantum computing"),
+        ("pubchem_lookup", "caffeine"),
+        ("art_search", "Vincent van Gogh"),
+        ("nasa_eonet", "wildfires"),
+        ("spacex_lookup", "latest"),
+        ("sunrise_sunset", "Chicago"),
+        ("topo_elevation", "Denver"),
+        ("public_ip", ""),
+        ("reverse_geocode", "41.8781,-87.6298"),
+        ("news_search", "NASA"),
+        ("cat_fact", ""),
+        ("dog_image", ""),
+        ("osm_search", "Willis Tower Chicago"),
+        ("pokemon_lookup", "pikachu"),
+        ("food_product", "3017624010701"),
+        ("cocktail_search", "margarita"),
+        ("openverse_search", "Chicago skyline"),
+        ("iss_location", ""),
+    ]
+    failures = []
+
+    print()
+    print("=" * 80)
+    print("EXTENDED API LIVE SMOKE TESTS")
+    print("=" * 80)
+
+    for tool, argument in cases:
+        try:
+            result = run_tool(tool, argument)
+            success = bool(result.success) if hasattr(result, "success") else bool(
+                result.get("success", False) if isinstance(result, dict) else False
+            )
+            if success:
+                print(f"[PASS] extended API: {tool}")
+            else:
+                error = getattr(result, "error", None) or (result.get("error") if isinstance(result, dict) else None)
+                failures.append(f"extended API {tool}: {error or 'unsuccessful result'}")
+                error_text = error or "unsuccessful result"
+                print(f"[FAIL] extended API: {tool} -> {error_text}")
+        except Exception as exc:
+            failures.append(f"extended API {tool}: {exc}")
+            print(f"[FAIL] extended API: {tool} -> {exc}")
+
+    return failures
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run JARVIS regression diagnostics."
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="also exercise the real no-key API endpoints",
+    )
+    args = parser.parse_args()
+
+    print("=" * 80)
+    print("JARVIS REGRESSION DIAGNOSTIC")
+    print("=" * 80)
+
+    failures = []
+    failures.extend(check_compile())
+
+    if not failures:
+        failures.extend(check_routing())
+        failures.extend(check_structured_context())
+        failures.extend(check_speech_summaries())
+        failures.extend(check_extended_integrations())
+
+        if args.live:
+            failures.extend(check_live_apis())
+            failures.extend(check_extended_live_apis())
+
+    print()
+    print("=" * 80)
+
+    if failures:
+        print(
+            f"DIAGNOSTIC FAILED: {len(failures)} issue(s)"
+        )
+        for failure in failures:
+            print(f" - {failure}")
+        return 1
+
+    print("DIAGNOSTIC PASSED")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
