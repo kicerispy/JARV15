@@ -7,6 +7,8 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from scipy.io.wavfile import write
 
+from adaptive_speech_gate import AdaptiveSpeechGate
+
 from config import (
     BARGE_IN_MINIMUM_CAPTURE,
     BARGE_IN_SILENCE_DURATION,
@@ -152,6 +154,10 @@ def listen(
         maxlen=PREBUFFER_CHUNKS
     )
 
+    speech_gate = AdaptiveSpeechGate(
+        legacy_threshold=float(SILENCE_THRESHOLD)
+    )
+
     # ========================================================
     # INITIAL BARGE-IN AUDIO
     # ========================================================
@@ -257,6 +263,14 @@ def listen(
                     audio
                 )
 
+                if not speech_started:
+                    start_threshold, end_threshold = (
+                        speech_gate.update(volume)
+                    )
+                else:
+                    start_threshold = speech_gate.start_threshold
+                    end_threshold = speech_gate.end_threshold
+
                 current_time = time.time()
 
                 # ------------------------------------------------
@@ -275,7 +289,7 @@ def listen(
 
                     if (
                         volume
-                        > SILENCE_THRESHOLD
+                        > start_threshold
                     ):
 
                         speech_started = True
@@ -303,6 +317,13 @@ def listen(
                             f"JARVIS: "
                             f"Start volume = "
                             f"{volume:.1f}"
+                        )
+
+                        print(
+                            f"JARVIS: "
+                            f"Adaptive threshold = "
+                            f"{start_threshold:.1f} "
+                            f"(noise floor={speech_gate.noise_floor:.1f})"
                         )
 
                     elif (
@@ -360,7 +381,7 @@ def listen(
 
                 if (
                     volume
-                    < SILENCE_THRESHOLD
+                    < end_threshold
                 ):
 
                     if silence_start is None:
@@ -480,7 +501,15 @@ def listen(
     )
 
     print(
-        f"Threshold: {SILENCE_THRESHOLD}"
+        f"Start threshold: {speech_gate.start_threshold:.1f}"
+    )
+
+    print(
+        f"End threshold:   {speech_gate.end_threshold:.1f}"
+    )
+
+    print(
+        f"Noise floor:     {speech_gate.noise_floor:.1f}"
     )
 
     print(
