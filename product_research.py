@@ -48,6 +48,28 @@ _GENERIC_PRODUCT_WORDS = {
     "flagship", "model", "product",
 }
 
+_PRODUCT_FAMILY_MARKERS = (
+    "airpods",
+    "quietcomfort",
+    "space one",
+    "space q",
+    "jbuds",
+    "accentum",
+    "momentum",
+    "maxwell",
+    "arctis",
+    "liberty",
+    "openrun",
+    "tour one",
+    "solo 4",
+    "major",
+    "wh 1000",
+    "wh ch",
+    "wf 1000",
+    "hdb 630",
+    "w820nb",
+)
+
 def _is_specific_product_name(value: Any) -> bool:
     name = " ".join(str(value or "").split()).strip()
     if len(name) < 5 or len(name) > 140:
@@ -58,10 +80,16 @@ def _is_specific_product_name(value: Any) -> bool:
     has_brand = any(brand in normalized for brand in _PRODUCT_BRANDS)
     has_model_token = any(re.search(r"\d", word) and len(word) >= 2 for word in words)
     has_model_pattern = bool(re.search(r"\b[a-z]{1,8}[- ]?\d{1,5}[a-z0-9-]*\b", normalized, re.IGNORECASE) or re.search(r"\b[ivx]{2,4}\b", normalized, re.IGNORECASE))
+    has_family_marker = any(
+        marker in normalized
+        for marker in _PRODUCT_FAMILY_MARKERS
+    )
     if not distinctive:
         return False
     if not has_brand and not has_model_token and not has_model_pattern:
         return False
+    if has_brand and has_family_marker and len(distinctive) >= 2:
+        return True
     if len(distinctive) == 1 and not (has_brand and has_model_token):
         return False
     return True
