@@ -2719,6 +2719,8 @@ GODS_EYE_TOOLS = {
     "gods_eye_open",
     "gods_eye_stop",
     "gods_eye_contacts",
+    "gods_eye_vessels",
+    "gods_eye_satellites",
     "gods_eye_launches",
     "gods_eye_cameras",
     "gods_eye_radio",
