@@ -9,6 +9,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.browser_agent_venv/
 jarvis_cuda/
 
 # Build/package output
