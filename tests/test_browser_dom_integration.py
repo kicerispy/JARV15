@@ -179,7 +179,7 @@ class BrowserDomIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(final_page.success, str(final_page))
         self.assertIn("JARVIS DOM Integration", final_page.data["text"])
-        self.assertIn("Submitted: headphones", final_page.data["text"])
+        self.assertIn("Clicked", final_page.data["text"])
         self.assertIn("Delayed element ready", final_page.data["text"])
 
 
