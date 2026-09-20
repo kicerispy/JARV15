@@ -946,6 +946,7 @@ def news_search(argument: str = "") -> dict[str, Any]:
     query = str(argument or "").strip()
     if not query:
         return _error(tool, "Provide a news topic or search phrase.", retryable=False)
+
     try:
         payload = _get_json(
             "https://api.gdeltproject.org/api/v2/doc/doc",
@@ -968,9 +969,43 @@ def news_search(argument: str = "") -> dict[str, Any]:
                 "language": item.get("language"),
                 "seen_date": item.get("seendate"),
             })
-        return _success(tool, {"articles": articles, "timespan": "24h"}, f"Found {len(articles)} recent news result(s).")
-    except Exception as exc:
-        return _error(tool, f"News search failed: {exc}")
+        return _success(tool, {"articles": articles, "timespan": "24h", "source": "GDELT"}, f"Found {len(articles)} recent news result(s).")
+    except Exception:
+        # GDELT can rate-limit bursts. Google News' RSS search feed is a
+        # keyless fallback and keeps this capability useful without another API key.
+        try:
+            import xml.etree.ElementTree as ET
+
+            response = requests.get(
+                "https://news.google.com/rss/search",
+                params={
+                    "q": query,
+                    "hl": "en-US",
+                    "gl": "US",
+                    "ceid": "US:en",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=12,
+            )
+            response.raise_for_status()
+            root = ET.fromstring(response.text)
+            articles = []
+            for item in root.findall(".//item")[:5]:
+                title = item.findtext("title") or ""
+                url = item.findtext("link") or ""
+                source = item.findtext("source") or ""
+                seen_date = item.findtext("pubDate") or ""
+                articles.append({
+                    "title": title,
+                    "url": url,
+                    "domain": source,
+                    "source_country": "US",
+                    "language": "en",
+                    "seen_date": seen_date,
+                })
+            return _success(tool, {"articles": articles, "timespan": "rss", "source": "Google News RSS"}, f"Found {len(articles)} recent news result(s).")
+        except Exception as exc:
+            return _error(tool, f"News search failed on GDELT and Google News RSS: {exc}")
 
 
 def cat_fact(argument: str = "") -> dict[str, Any]:
@@ -1032,7 +1067,10 @@ def food_product(argument: str = "") -> dict[str, Any]:
             headers={"User-Agent": "JARVIS/1.0 (local assistant)"},
         )
         product = payload.get("product") or {}
-        if int(payload.get("status", 0) or 0) != 1 and not product:
+        status_value = payload.get("status")
+        status_code = payload.get("status_code")
+        found = bool(product) or status_value in {"success", "1", 1} or status_code in {1, "1"}
+        if not found:
             return _error(tool, f"No food product found for barcode {barcode}.", retryable=False)
         nutriments = product.get("nutriments") or {}
         item = {
@@ -1106,15 +1144,16 @@ def openverse_search(argument: str = "") -> dict[str, Any]:
 def iss_location(argument: str = "") -> dict[str, Any]:
     tool = "iss_location"
     try:
-        payload = _get_json("https://api.open-notify.org/iss-now.json")
-        pos = payload.get("iss_position") or {}
+        payload = _get_json("https://api.wheretheiss.at/v1/satellites/25544")
         item = {
             "name": "International Space Station",
-            "latitude": pos.get("latitude"),
-            "longitude": pos.get("longitude"),
+            "latitude": payload.get("latitude"),
+            "longitude": payload.get("longitude"),
+            "altitude_km": payload.get("altitude"),
+            "velocity_km_h": payload.get("velocity"),
+            "visibility": payload.get("visibility"),
             "timestamp": payload.get("timestamp"),
-            "message": payload.get("message"),
-            "url": "https://api.open-notify.org/",
+            "url": "https://wheretheiss.at/",
         }
         return _success(tool, {"results": [item]}, "Current ISS position retrieved.")
     except Exception as exc:
