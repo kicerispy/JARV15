@@ -352,6 +352,7 @@ def check_speech_summaries() -> list[str]:
 
     cases = {
         "currency_convert": {
+            "amount": 100,
             "rate": 0.87005,
             "converted": 87.005,
             "from": "USD",
