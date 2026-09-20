@@ -309,7 +309,17 @@ def _looks_like_result_reference(text: str) -> bool:
 
     return (
         any(word in text for word in _REFERENCE_WORDS)
-        or text.startswith(("what was", "what is", "tell me about", "show me", "give me"))
+        or text.startswith(
+            (
+                "what was",
+                "what is",
+                "what about",
+                "tell me about",
+                "show me",
+                "give me",
+                "which one",
+            )
+        )
     )
 
 
@@ -449,6 +459,20 @@ def resolve_result_followup(
         return None
 
     if not active_context or active_context.get("last_result_data") is None:
+        return None
+
+    # Browser/action commands must continue through the existing
+    # browser context resolver instead of being answered as metadata.
+    if text.startswith(
+        (
+            "open ",
+            "click ",
+            "play ",
+            "select ",
+            "choose ",
+            "pick ",
+        )
+    ):
         return None
 
     data = _result_data(active_context)
