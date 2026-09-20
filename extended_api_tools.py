@@ -481,22 +481,58 @@ def anime_search(argument: str = "") -> dict[str, Any]:
             "https://api.jikan.moe/v4/anime",
             params={"q": query, "limit": 5, "sfw": "true"},
         )
-        anime = []
-        for item in payload.get("data") or []:
-            anime.append({
-                "title": item.get("title"),
-                "title_english": item.get("title_english"),
-                "type": item.get("type"),
-                "episodes": item.get("episodes"),
-                "status": item.get("status"),
-                "score": item.get("score"),
-                "year": (item.get("year") or (item.get("aired") or {}).get("prop", {}).get("from", "") or "") ,
-                "synopsis": _clean(item.get("synopsis"), 500),
-                "url": item.get("url"),
-            })
-        return _success(tool, {"anime": anime}, f"Found {len(anime)} anime result(s).")
-    except Exception as exc:
-        return _error(tool, f"Anime search failed: {exc}")
+        rows = payload.get("data") or []
+    except Exception:
+        # Jikan can transiently gateway-timeout. AniList exposes a public
+        # GraphQL API and provides an independent no-key fallback.
+        try:
+            graphql = {
+                "query": """
+                    query ($search: String) {
+                      Page(perPage: 5) {
+                        media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+                          id
+                          title { romaji english native }
+                          type
+                          episodes
+                          status
+                          averageScore
+                          startDate { year }
+                          description(asHtml: false)
+                          siteUrl
+                        }
+                      }
+                    }
+                """,
+                "variables": {"search": query},
+            }
+            response = requests.post(
+                "https://graphql.anilist.co",
+                json=graphql,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+                timeout=12,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            rows = ((payload.get("data") or {}).get("Page") or {}).get("media") or []
+        except Exception as exc:
+            return _error(tool, f"Anime search failed on both Jikan and AniList: {exc}")
+
+    anime = []
+    for item in rows:
+        title_data = item.get("title") or {}
+        anime.append({
+            "title": title_data.get("english") or title_data.get("romaji") or title_data.get("native") or item.get("title"),
+            "title_english": title_data.get("english"),
+            "type": item.get("type"),
+            "episodes": item.get("episodes"),
+            "status": item.get("status"),
+            "score": item.get("score") if item.get("score") is not None else item.get("averageScore"),
+            "year": item.get("year") if item.get("year") is not None else ((item.get("startDate") or {}).get("year")),
+            "synopsis": _clean(item.get("synopsis") or item.get("description"), 500),
+            "url": item.get("url") or item.get("siteUrl"),
+        })
+    return _success(tool, {"anime": anime}, f"Found {len(anime)} anime result(s).")
 
 
 _ghibli_cache: list[dict[str, Any]] | None = None
@@ -587,8 +623,28 @@ def pubchem_lookup(argument: str = "") -> dict[str, Any]:
             "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
             f"{encoded}/property/MolecularFormula,MolecularWeight,IUPACName/JSON"
         )
-        payload = _get_json(endpoint)
-        props = (payload.get("PropertyTable") or {}).get("Properties") or []
+        try:
+            payload = _get_json(endpoint)
+            props = (payload.get("PropertyTable") or {}).get("Properties") or []
+        except Exception:
+            time.sleep(1.1)
+            props = []
+        if not props:
+            # Name/property requests can briefly receive PubChem's documented
+            # 503 busy response. Resolve the CID first, then request properties.
+            cid_payload = _get_json(
+                "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
+                f"{encoded}/cids/JSON"
+            )
+            cids = (cid_payload.get("IdentifierList") or {}).get("CID") or []
+            if not cids:
+                return _error(tool, f"No compound found for '{query}'.", retryable=False)
+            cid = cids[0]
+            payload = _get_json(
+                f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/"
+                "property/MolecularFormula,MolecularWeight,IUPACName/JSON"
+            )
+            props = (payload.get("PropertyTable") or {}).get("Properties") or []
         if not props:
             return _error(tool, f"No compound found for '{query}'.", retryable=False)
         item = props[0]
@@ -700,36 +756,39 @@ def nasa_eonet(argument: str = "") -> dict[str, Any]:
 def spacex_lookup(argument: str = "") -> dict[str, Any]:
     tool = "spacex_lookup"
     mode = str(argument or "").strip().lower()
-    endpoint = (
-        "https://api.spacexdata.com/v4/launches/latest"
-        if mode in {"", "latest", "last"}
-        else "https://api.spacexdata.com/v4/launches"
-    )
+    limit = 1 if mode in {"", "latest", "last"} else 8
     try:
-        if endpoint.endswith("/latest"):
-            payload = _get_json(endpoint)
-            rows = [payload]
-        else:
-            payload = _get_json(endpoint)
-            rows = payload[-8:]
+        payload = _get_json(
+            "https://ll.thespacedevs.com/2.3.0/launches/previous/",
+            params={
+                "limit": limit,
+                "search": "SpaceX",
+                "ordering": "-net",
+            },
+        )
+        rows = payload.get("results") or []
         launches = []
         for item in rows:
-            links = item.get("links") or {}
+            status = item.get("status") or {}
+            mission = item.get("mission") or {}
+            pad = item.get("pad") or {}
             launches.append({
                 "name": item.get("name"),
-                "date_utc": item.get("date_utc"),
-                "success": item.get("success"),
-                "details": _clean(item.get("details"), 500),
-                "webcast": (links.get("webcast") if isinstance(links, dict) else None),
-                "patch": ((links.get("patch") or {}).get("small") if isinstance(links, dict) else None),
+                "date_utc": item.get("net"),
+                "status": status.get("name") if isinstance(status, dict) else status,
+                "success": (status.get("id") == 3) if isinstance(status, dict) else None,
+                "details": _clean(mission.get("description") if isinstance(mission, dict) else "", 500),
+                "location": (pad.get("location") or {}).get("name") if isinstance(pad, dict) and isinstance(pad.get("location"), dict) else None,
+                "image": item.get("image"),
+                "url": item.get("webcast_live"),
             })
         return _success(
             tool,
-            {"launches": launches, "source_status": "historical_community_api"},
+            {"launches": launches, "source_status": "launch_library_2"},
             f"Retrieved {len(launches)} SpaceX launch record(s).",
         )
     except Exception as exc:
-        return _error(tool, f"SpaceX lookup failed: {exc}")
+        return _error(tool, f"SpaceX launch lookup failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
