@@ -206,7 +206,7 @@ def gods_eye_start(argument: str = "") -> dict[str, Any]:
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             try:
-                _http_json("/", timeout=1)
+                _http_json("/api/opensky", timeout=1)
                 webbrowser.open(GEV_URL)
                 return {
                     "success": True,
