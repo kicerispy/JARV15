@@ -18,6 +18,8 @@ class ActiveContext:
     # Kept separate from last_result so existing spoken/planner context
     # remains lightweight.
     last_result_data: Any = None
+    last_result_index: Optional[int] = None
+    last_selected_result: Any = None
 
     page_url: Optional[str] = None
     page_title: Optional[str] = None
@@ -33,6 +35,8 @@ class ActiveContext:
         last_tool: Optional[str] = None,
         last_result: Optional[str] = None,
         last_result_data: Any = None,
+        last_result_index: Optional[int] = None,
+        last_selected_result: Any = None,
         page_url: Optional[str] = None,
         page_title: Optional[str] = None,
         last_result_title: Optional[str] = None,
@@ -71,6 +75,8 @@ class ActiveContext:
         self.last_tool = None
         self.last_result = None
         self.last_result_data = None
+        self.last_result_index = None
+        self.last_selected_result = None
         self.page_url = None
         self.page_title = None
         self.last_result_title = None
@@ -78,13 +84,18 @@ class ActiveContext:
         self.last_element = None
         self.last_action = None
 
-    def to_dict(self) -> Dict[str, Optional[str]]:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
             "site": self.site,
             "last_query": self.last_query,
             "last_tool": self.last_tool,
             "last_result": self.last_result,
+            "last_result_data": self.last_result_data,
+            "last_result_index": self.last_result_index,
+            "last_selected_result": self.last_selected_result,
+            "last_result_index": self.last_result_index,
+            "last_selected_result": self.last_selected_result,
             "page_url": self.page_url,
             "page_title": self.page_title,
             "last_result_title": self.last_result_title,
