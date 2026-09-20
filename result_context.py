@@ -435,7 +435,9 @@ def _field_followup(
 
     if tool == "elevation_lookup":
         if re.search(
-            r"\b(?:how high|what is the elevation|how far above sea level)\b",
+            r"^(?:how high is (?:it|that|this)|"
+            r"what(?:'s| is) (?:the )?elevation(?: of (?:it|that|this))?|"
+            r"how far (?:is|above) sea level is (?:it|that|this))$",
             text,
             re.IGNORECASE,
         ):
