@@ -81,7 +81,8 @@ def screen_memory_search(argument: str = "") -> dict:
         except json.JSONDecodeError:
             payload = {}
 
-    query = str(payload.get("q") or payload.get("query") or raw).strip()
+    query_value = payload.get("q") or payload.get("query")
+    query = str(query_value if query_value is not None else ("" if payload else raw)).strip()
     params = {
         "limit": int(payload.get("limit", 10) or 10),
         "content_type": str(payload.get("content_type", "all") or "all"),
