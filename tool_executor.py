@@ -2689,6 +2689,22 @@ def _api_spoken_summary(
             if name and capital: return f"{name}'s capital is {capital}." + (f" It is in {region}." if region else "")
             return f"I found country information for {name}." if name else "I found the country information."
 
+        if tool == "anime_episodes":
+            episodes = data.get("episodes") or []
+            if not isinstance(episodes, list):
+                return None
+            names = []
+            for item in episodes[:2]:
+                if isinstance(item, dict):
+                    title = clean(item.get("title"), 120)
+                    if title:
+                        names.append(title)
+            count = len(episodes)
+            label = "episode" if count == 1 else "episodes"
+            if names:
+                return f"I found {count} {label}, including {' and '.join(names)}."
+            return f"I found {count} {label}."
+
         list_specs = {
             "meal_search": ("meals", "meal"), "tv_search": ("shows", "TV show"),
             "music_search": ("tracks", "music"), "musicbrainz_search": ("recordings", "recording"),
