@@ -134,6 +134,30 @@ def test_startup_manager_builds_a_real_run_command():
     assert "--startup" in command
 
 
+def test_fast_browser_searches_skip_initial_acknowledgement():
+    from task_controller import _should_send_initial_acknowledgement
+
+    assert _should_send_initial_acknowledgement(
+        "Search Google for wifi skeleton"
+    ) is False
+
+    assert _should_send_initial_acknowledgement(
+        "Google search for wireless headphones"
+    ) is False
+
+    assert _should_send_initial_acknowledgement(
+        "Search Bing for JARVIS"
+    ) is False
+
+    assert _should_send_initial_acknowledgement(
+        "Bing search for Python"
+    ) is False
+
+    assert _should_send_initial_acknowledgement(
+        "Open a website and investigate the results"
+    ) is True
+
+
 def test_planner_lists_new_reliability_tools():
     import planner
 

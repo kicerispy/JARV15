@@ -53,6 +53,66 @@ class BrowserAgentTests(unittest.TestCase):
             "find the page title on example.com",
         )
 
+    def test_google_result_candidates_accept_goto_and_external_urls(self):
+        import asyncio
+        import browser_controller
+
+        class FakeLocator:
+            def __init__(self):
+                self.items = [
+                    {
+                        "index": 0,
+                        "visible": True,
+                        "title": "Example Direct",
+                        "href": "https://example.com/",
+                    },
+                    {
+                        "index": 1,
+                        "visible": True,
+                        "title": "Example Google Goto",
+                        "href": "https://www.google.com/goto?url=encoded-target",
+                    },
+                ]
+
+            async def evaluate_all(self, _script):
+                return self.items
+
+            def nth(self, index):
+                return {
+                    "locator_index": index,
+                }
+
+        class FakePage:
+            def __init__(self):
+                self.locator_instance = FakeLocator()
+
+            def locator(self, _selector):
+                return self.locator_instance
+
+            async def wait_for_timeout(self, _milliseconds):
+                return None
+
+        page = FakePage()
+
+        results = asyncio.run(
+            browser_controller._get_google_organic_result_candidates(
+                page,
+                limit=10,
+                timeout_ms=500,
+                minimum_results=1,
+            )
+        )
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["title"], "Example Direct")
+        self.assertEqual(results[0]["url"], "https://example.com/")
+        self.assertFalse(results[0]["url_is_google_redirect"])
+
+        self.assertEqual(results[1]["title"], "Example Google Goto")
+        self.assertTrue(results[1]["url_is_google_redirect"])
+        self.assertIn("/goto?url=encoded-target", results[1]["url"])
+
+
     def test_worker_prefers_explicit_url_target_for_direct_cdp_navigation(self):
         module = importlib.import_module("browser_agent_worker")
 
@@ -179,6 +239,7 @@ class BrowserAgentTests(unittest.TestCase):
             patch.object(module, "_browser_agent_python", return_value=fake_python),
             patch.object(Path, "is_file", return_value=True),
             patch.object(module, "_probe_url", return_value=True),
+            patch.object(module, "_probe_url", return_value=True),
             patch("subprocess.run", return_value=completed) as run_mock,
             patch(
                 "browser_controller.ensure_browser",
@@ -186,7 +247,7 @@ class BrowserAgentTests(unittest.TestCase):
             ),
         ):
             result = module.browser_agent_run(
-                '{"task":"read the page title","max_steps":4}'
+                '{"task":"inspect the current page","max_steps":4}'
             )
 
         self.assertTrue(result["success"])

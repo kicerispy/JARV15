@@ -132,8 +132,8 @@ async def _init_browser():
         user_data_dir=user_data_dir,
         headless=False,
         viewport={"width": 1920, "height": 1080},
-        # Keep Playwright's native remote-debugging-pipe.
-        # Browser Use and other external clients use the TCP CDP endpoint below.
+        # Keep Playwright's native debugging pipe while also exposing
+        # the explicit TCP CDP endpoint used by Browser Use.
         args=[
             "--disable-blink-features=AutomationControlled",
             f"--remote-debugging-port={JARVIS_CDP_PORT}",
@@ -531,6 +531,166 @@ def _snapshot_canonical_url(href: str) -> str:
     return value
 
 
+
+
+
+async def _get_google_organic_result_candidates(
+    page,
+    limit: int = 10,
+    timeout_ms: int = 5_000,
+    minimum_results: int = 1,
+) -> list[dict[str, Any]]:
+    """
+    Discover Google organic results from the live DOM.
+
+    Google may expose result anchors as opaque /goto?url=... controls rather
+    than direct destination URLs. Those anchors are still legitimate DOM
+    controls and can be clicked deterministically, so they must not be
+    discarded merely because their href is Google-owned.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except Exception:
+        limit = 10
+
+    try:
+        timeout_ms = max(250, min(int(timeout_ms), 10_000))
+    except Exception:
+        timeout_ms = 5_000
+
+    try:
+        minimum_results = max(1, min(int(minimum_results), limit))
+    except Exception:
+        minimum_results = 1
+
+    locator = page.locator("div#search a:has(h3)")
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + (timeout_ms / 1000.0)
+
+    while True:
+        try:
+            raw_candidates = await locator.evaluate_all(
+                """
+                anchors => anchors.map((anchor, index) => {
+                    const heading = anchor.querySelector('h3');
+
+                    if (!heading) {
+                        return null;
+                    }
+
+                    const rect = anchor.getBoundingClientRect();
+                    const style = window.getComputedStyle(anchor);
+
+                    const href = (
+                        anchor.href ||
+                        anchor.getAttribute('href') ||
+                        ''
+                    ).trim();
+
+                    return {
+                        index,
+                        visible: Boolean(
+                            rect.width > 0 &&
+                            rect.height > 0 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden'
+                        ),
+                        title: (
+                            heading.innerText ||
+                            heading.textContent ||
+                            ''
+                        ).trim(),
+                        href,
+                    };
+                }).filter(Boolean)
+                """
+            )
+        except Exception:
+            raw_candidates = []
+
+        candidates: list[dict[str, Any]] = []
+        seen_targets: set[str] = set()
+
+        for raw in raw_candidates:
+            try:
+                if not raw.get("visible"):
+                    continue
+
+                title = " ".join(
+                    str(raw.get("title") or "").split()
+                ).strip()
+
+                href = str(
+                    raw.get("href") or ""
+                ).strip()
+
+                if not title or not href:
+                    continue
+
+                parsed_href = urlparse(href)
+                host = (parsed_href.hostname or "").lower()
+                path = (parsed_href.path or "").lower()
+
+                # A result may be:
+                #   1. a direct external URL, or
+                #   2. Google's current opaque /goto result control.
+                is_external = href.startswith(
+                    ("http://", "https://")
+                ) and not (
+                    host == "google.com"
+                    or host.endswith(".google.com")
+                )
+
+                is_google_result_redirect = (
+                    (
+                        href.startswith("/goto?")
+                        or (
+                            host in {"google.com", "www.google.com"}
+                            and path.startswith("/goto")
+                        )
+                    )
+                )
+
+                if not (
+                    is_external
+                    or is_google_result_redirect
+                ):
+                    continue
+
+                if href in seen_targets:
+                    continue
+
+                seen_targets.add(href)
+
+                try:
+                    dom_index = int(raw.get("index"))
+                    candidate_locator = locator.nth(dom_index)
+                except Exception:
+                    continue
+
+                candidates.append(
+                    {
+                        "locator": candidate_locator,
+                        "title": title[:500],
+                        "url": href[:4000],
+                        "click_target": href[:4000],
+                        "url_is_google_redirect": is_google_result_redirect,
+                    }
+                )
+
+            except Exception:
+                continue
+
+        if len(candidates) >= minimum_results:
+            return candidates[:limit]
+
+        if loop.time() >= deadline:
+            return candidates[:limit]
+
+        await page.wait_for_timeout(125)
+
+
 async def _snapshot_result_snippet(link, site: str) -> str:
     """Extract a short result snippet without walking the whole page."""
     selectors = {
@@ -581,27 +741,25 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
     candidates = []
 
     if "google." in url:
-        locator = page.locator("div#search a:has(h3)")
-        try:
-            await locator.first.wait_for(state="visible", timeout=5_000)
-        except Exception:
-            pass
-        for index in range(min(await locator.count(), 10)):
-            link = locator.nth(index)
-            try:
-                heading = link.locator("h3").first
-                title = " ".join((await heading.inner_text(timeout=1500)).split())
-                href = (await link.get_attribute("href") or "").strip()
-                snippet = await _snapshot_result_snippet(link, "google")
-            except Exception:
-                continue
+        google_results = await _get_google_organic_result_candidates(
+            page,
+            limit=10,
+            timeout_ms=5_000,
+            minimum_results=1,
+        )
 
-            if title:
+        for index, item in enumerate(google_results):
+            link = item["locator"]
+            title = str(item.get("title") or "").strip()
+            href = str(item.get("url") or "").strip()
+            snippet = await _snapshot_result_snippet(link, "google")
+
+            if title and href:
                 candidates.append({
                     "index": str(index + 1),
                     "title": title[:300],
                     "snippet": snippet,
-                    "url": _snapshot_canonical_url(href)[:1000],
+                    "url": href[:1000],
                 })
 
     elif "bing.com" in url:
@@ -848,7 +1006,67 @@ def browser_page_snapshot(
         }
 
 def browser_search_google(query: str) -> dict[str, Any]:
-    return browser_goto("https://www.google.com/search?q=" + quote_plus(str(query or "").strip()))
+    """Search Google and verify that organic result DOM state is available."""
+    query = str(query or "").strip()
+
+    async def _search():
+        page = await _init_browser()
+        target_url = (
+            "https://www.google.com/search?q="
+            + quote_plus(query)
+        )
+
+        await page.goto(
+            target_url,
+            wait_until="domcontentloaded",
+            timeout=30_000,
+        )
+        await _auto_skip_ads(page)
+
+        organic_results = await _get_google_organic_result_candidates(
+            page,
+            limit=10,
+            timeout_ms=5_000,
+            minimum_results=1,
+        )
+
+        info = await browser_page_info_async(page)
+
+        results = [
+            {
+                "index": index + 1,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+            }
+            for index, item in enumerate(organic_results)
+        ]
+
+        info.update(
+            {
+                "action": "browser_search_google",
+                "query": query,
+                "search_url": target_url,
+                "results_ready": bool(results),
+                "result_count": len(results),
+                "results": results,
+                "verified": True,
+            }
+        )
+
+        return info
+
+    try:
+        return get_event_loop().run_until_complete(_search())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "action": "browser_search_google",
+            "query": query,
+            "error": str(exc),
+        }
+
 
 
 def browser_search_bing(query: str) -> dict[str, Any]:
@@ -1320,74 +1538,151 @@ def browser_click_result(
                 }
 
         resolved_site = _infer_site(site, page.url)
-        if resolved_site == "youtube":
-            results = page.locator(
-                "ytd-video-renderer a#video-title, ytd-search ytd-video-renderer #video-title"
+
+        result_candidates: list[dict[str, Any]] = []
+
+        if resolved_site == "google":
+            required_results = (
+                1
+                if index < 0
+                else max(1, min(index, 10))
             )
-        elif resolved_site == "google":
-            results = page.locator("div#search a:has(h3)")
+            result_candidates = await _get_google_organic_result_candidates(
+                page,
+                limit=50,
+                timeout_ms=5_000,
+                minimum_results=required_results,
+            )
+
+        elif resolved_site == "youtube":
+            results = page.locator(
+                "ytd-video-renderer a#video-title, "
+                "ytd-search ytd-video-renderer #video-title"
+            )
+            count = await results.count()
+
+            for position in range(min(count, 50)):
+                locator = results.nth(position)
+                try:
+                    if not await locator.is_visible():
+                        continue
+
+                    title = " ".join(
+                        (await locator.inner_text(timeout=1500)).split()
+                    ).strip()
+                    href = (
+                        await locator.get_attribute("href")
+                        or ""
+                    ).strip()
+
+                    if title and href:
+                        result_candidates.append({
+                            "locator": locator,
+                            "title": title[:500],
+                            "url": _snapshot_canonical_url(href)[:2000],
+                        })
+                except Exception:
+                    continue
+
         else:
             return {
                 "success": False,
                 "verified": False,
-                "error": f"Unsupported result site: {resolved_site or site}",
+                "retryable": False,
+                "terminal": True,
+                "failure_reason": "unsupported_result_site",
+                "error": (
+                    f"Unsupported result site: "
+                    f"{resolved_site or site}"
+                ),
                 "url": page.url,
             }
 
-        count = await results.count()
+        count = len(result_candidates)
+
         if count == 0:
             return {
                 "success": False,
                 "verified": False,
-                "error": "No organic browser results were found.",
+                "retryable": False,
+                "terminal": True,
+                "failure_reason": "no_organic_results",
+                "error": (
+                    "No active organic search results were found "
+                    "in the browser DOM."
+                ),
+                "site": resolved_site,
                 "url": page.url,
+                "title": await page.title(),
             }
 
-        selected_index = count - 1 if index < 0 else index - 1
+        selected_index = (
+            count - 1
+            if index < 0
+            else index - 1
+        )
+
         if selected_index < 0 or selected_index >= count:
             return {
                 "success": False,
                 "verified": False,
-                "error": f"Result number {index} is out of range; {count} result(s) are available.",
+                "retryable": False,
+                "terminal": True,
+                "failure_reason": "result_index_out_of_range",
+                "error": (
+                    f"Result number {index} is out of range; "
+                    f"{count} result(s) are available."
+                ),
+                "site": resolved_site,
                 "url": page.url,
             }
 
-        locator = results.nth(selected_index)
-        await locator.wait_for(state="visible", timeout=10_000)
+        selected = result_candidates[selected_index]
+        locator = selected["locator"]
+
+        await locator.wait_for(
+            state="visible",
+            timeout=5_000,
+        )
 
         before_url = page.url
         before_title = await page.title()
-        result_title = ""
+        result_title = str(
+            selected.get("title")
+            or ""
+        ).strip()
+        result_url = str(
+            selected.get("url")
+            or ""
+        ).strip()
+
+        if not result_url.startswith(("http://", "https://")):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "failure_reason": "result_has_no_usable_url",
+                "error": "The selected browser result has no usable URL.",
+                "before_url": before_url,
+                "before_title": before_title,
+                "result_title": result_title,
+            }
+
+        interaction_mode = "dom_click"
+
         try:
-            heading = locator.locator("h3").first
-            if await heading.count():
-                result_title = (await heading.inner_text()).strip()
-        except Exception:
-            pass
-
-        if not result_title:
-            result_title = (await locator.inner_text()).strip()
-
-        result_url = (await locator.get_attribute("href") or "").strip()
-
-        try:
-            await locator.scroll_into_view_if_needed(timeout=5_000)
+            await locator.scroll_into_view_if_needed(timeout=3_000)
             await locator.click(timeout=5_000)
         except Exception:
-            if result_url.startswith(("http://", "https://")):
-                await page.goto(
-                    result_url,
-                    wait_until="domcontentloaded",
-                    timeout=30_000,
-                )
-            else:
-                return {
-                    "success": False,
-                    "verified": False,
-                    "error": "DOM click failed and the result had no usable URL.",
-                    "before_url": before_url,
-                    "before_title": before_title,
-                }
+            # The exact URL came from the selected DOM element. Navigating to
+            # that URL is deterministic and remains browser/DOM-native.
+            interaction_mode = "dom_href_navigation"
+            await page.goto(
+                result_url,
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
 
         try:
             await page.wait_for_load_state(
@@ -1419,6 +1714,8 @@ def browser_click_result(
             "before_title": before_title,
             "after_title": after_title,
             "navigated": after_url != before_url,
+            "interaction_mode": interaction_mode,
+            "dom_control": True,
         }
 
     try:
@@ -1439,6 +1736,19 @@ def browser_click_first_result(site: str = "", query: str = "") -> dict[str, Any
     """Click the first organic result using Playwright DOM controls."""
     site = str(site or "").strip().lower()
     query = str(query or "").strip()
+
+    if site == "google":
+        result = browser_click_result(
+            index=1,
+            site="google",
+            query=query,
+        )
+
+        if isinstance(result, dict):
+            result = dict(result)
+            result["action"] = "click_first_result"
+
+        return result
 
     async def _click():
         page = await _init_browser()

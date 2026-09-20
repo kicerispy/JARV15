@@ -82,9 +82,37 @@ def _should_send_initial_acknowledgement(request: str) -> bool:
         "go forward",
         "current browser tab",
         "which tab is active",
+
+        # Fast deterministic browser searches complete quickly enough
+        # that an initial "On it." acknowledgement only adds latency.
+        "search google",
+        "search google for",
+        "google search",
+        "google search for",
+        "search bing",
+        "search bing for",
+        "bing search",
+        "bing search for",
+
+        "click the first result",
+        "click the second result",
+        "click the third result",
+        "click the last result",
+        "click the first link",
+        "click the second link",
+        "click the third link",
+        "click the last link",
+        "open the first result",
+        "open the second result",
+        "open the third result",
+        "open the last result",
+        "open the first link",
+        "open the second link",
+        "open the third link",
+        "open the last link",
     )
 
-    return not any(phrase in normalized for phrase in quick_phrases)
+    return not any(phrase == normalized or phrase in normalized for phrase in quick_phrases)
 
 
 class BackgroundTaskController:

@@ -2153,6 +2153,36 @@ def deterministic_route(user_request):
         }
 
     # ==================================================
+
+    # Barehands display requests must win over the generic
+    # "jarvis status" route below.
+    if (
+        "barehands" in text
+        and (
+            "display" in text
+            or "glass board" in text
+            or "show" in text
+            or "present" in text
+            or "put" in text
+            or "place" in text
+        )
+        and "status" in text
+        and (
+            "card" in text
+            or "status" in text
+        )
+    ):
+        print("JARVIS: Barehands status display detected.")
+        return {
+            "steps": [{
+                "tool": "barehands_present",
+                "argument": (
+                    "JARVIS Status|||"
+                    "JARVIS status requested on the Barehands display."
+                ),
+            }]
+        }
+
     # JARVIS / WINDOWS STATUS
     # ==================================================
 
