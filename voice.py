@@ -202,6 +202,21 @@ _duplicate_speech_lock = threading.Lock()
 _last_spoken_key = ""
 _last_spoken_at = 0.0
 
+# Playback reference for speaker-echo detection. The exact processed TTS waveform
+# is retained so the microphone monitor can distinguish room/speaker echo from
+# independently spoken user audio.
+_playback_reference = None
+_playback_reference_started_at = 0.0
+_playback_reference_lock = threading.Lock()
+
+ECHO_CORRELATION_THRESHOLD = 0.55
+ECHO_RESIDUAL_RATIO_THRESHOLD = 0.72
+ECHO_SUPPRESS_MAX_VOLUME = 360
+ECHO_SEARCH_MIN_DELAY_SECONDS = 0.02
+ECHO_SEARCH_MAX_DELAY_SECONDS = 0.35
+ECHO_SEARCH_STEP_SECONDS = 0.02
+DEBUG_BARGE_IN = False
+
 def _speech_dedup_key(text):
     """Build a key from the exact text after JARVIS speech normalization."""
     try:
@@ -665,6 +680,123 @@ def _get_volume(
     )
 
 
+
+# ============================================================
+# SPEAKER ECHO MATCHING
+# ============================================================
+def _prepare_playback_reference(audio, sample_rate):
+    """Convert the exact playback waveform to the microphone sample rate."""
+    try:
+        if audio is None or len(audio) < 64:
+            return None
+
+        reference = np.asarray(audio, dtype=np.float32).reshape(-1)
+
+        if sample_rate != SAMPLE_RATE:
+            reference = signal.resample_poly(
+                reference,
+                SAMPLE_RATE,
+                int(sample_rate),
+            ).astype(np.float32)
+
+        return reference
+    except Exception as e:
+        print("JARVIS TTS: Echo reference preparation warning:", e)
+        return None
+
+
+def _echo_match(audio):
+    """
+    Compare a microphone chunk against nearby delayed portions of the exact
+    JARVIS playback waveform.
+
+    Returns:
+        (correlation, residual_ratio)
+    """
+    with _playback_reference_lock:
+        reference = _playback_reference
+        started_at = _playback_reference_started_at
+
+    if reference is None or len(reference) < 1024 or started_at <= 0:
+        return 0.0, 1.0
+
+    mic = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if len(mic) < 256:
+        return 0.0, 1.0
+
+    mic = mic - float(np.mean(mic))
+    mic_norm = float(np.linalg.norm(mic))
+    if mic_norm < 1.0:
+        return 0.0, 1.0
+
+    elapsed = time.monotonic() - started_at
+    if elapsed <= 0:
+        return 0.0, 1.0
+
+    best_corr = 0.0
+    best_residual_ratio = 1.0
+
+    min_delay = ECHO_SEARCH_MIN_DELAY_SECONDS
+    max_delay = ECHO_SEARCH_MAX_DELAY_SECONDS
+    step = ECHO_SEARCH_STEP_SECONDS
+
+    delay = min_delay
+    while delay <= max_delay:
+        center = int(
+            (elapsed - delay)
+            * SAMPLE_RATE
+        )
+
+        start = center
+        end = start + len(mic)
+
+        if start < 0 or end > len(reference):
+            delay += step
+            continue
+
+        ref = reference[start:end].copy()
+        ref -= float(np.mean(ref))
+
+        ref_norm = float(np.linalg.norm(ref))
+        if ref_norm < 1e-6:
+            delay += step
+            continue
+
+        corr = float(
+            np.dot(mic, ref)
+            / (
+                mic_norm
+                * ref_norm
+            )
+        )
+
+        if corr > best_corr:
+            gain = float(
+                np.dot(mic, ref)
+                / max(
+                    np.dot(ref, ref),
+                    1e-9
+                )
+            )
+
+            residual = (
+                mic
+                - gain * ref
+            )
+
+            residual_ratio = float(
+                np.linalg.norm(residual)
+                / mic_norm
+            )
+
+            best_corr = corr
+            best_residual_ratio = residual_ratio
+
+        delay += step
+
+    return best_corr, best_residual_ratio
+
+
 # ============================================================
 # MICROPHONE BARGE-IN MONITOR
 # ============================================================
@@ -736,6 +868,35 @@ def _monitor_microphone():
                 volume = _get_volume(
                     audio
                 )
+
+                echo_correlation, echo_residual_ratio = (
+                    _echo_match(audio)
+                )
+
+                # Speaker echo has the same waveform as the known TTS output,
+                # only delayed and attenuated by the room. Suppress a probable
+                # echo when its energy is still in the low/intermediate range;
+                # louder independent speech remains eligible for barge-in.
+                likely_echo = (
+                    volume <= ECHO_SUPPRESS_MAX_VOLUME
+                    and echo_correlation
+                    >= ECHO_CORRELATION_THRESHOLD
+                    and echo_residual_ratio
+                    <= ECHO_RESIDUAL_RATIO_THRESHOLD
+                )
+
+                if likely_echo:
+                    consecutive_loud = 0
+
+                    if DEBUG_BARGE_IN:
+                        print(
+                            "JARVIS: Speaker echo suppressed "
+                            f"(volume={volume:.1f}, "
+                            f"corr={echo_correlation:.2f}, "
+                            f"residual={echo_residual_ratio:.2f})"
+                        )
+
+                    continue
 
 
                 # -----------------------------------------
@@ -1044,6 +1205,22 @@ def speak(text):
 
 
             # ------------------------------------------------
+            # Prepare exact playback reference for speaker-echo detection.
+            # ------------------------------------------------
+
+            playback_reference = _prepare_playback_reference(
+                audio,
+                sample_rate
+            )
+
+            with _playback_reference_lock:
+                global _playback_reference
+                global _playback_reference_started_at
+
+                _playback_reference = playback_reference
+                _playback_reference_started_at = 0.0
+
+            # ------------------------------------------------
             # Start microphone monitor
             # ------------------------------------------------
 
@@ -1079,6 +1256,9 @@ def speak(text):
             # ------------------------------------------------
 
             t_playback_start = time.perf_counter()
+
+            with _playback_reference_lock:
+                _playback_reference_started_at = time.monotonic()
 
             sd.play(
                 audio,
@@ -1174,6 +1354,10 @@ def speak(text):
 
             sd.stop()
 
+            with _playback_reference_lock:
+                _playback_reference = None
+                _playback_reference_started_at = 0.0
+
 
             # ------------------------------------------------
             # Final status.
@@ -1223,6 +1407,10 @@ def speak(text):
 
             except Exception:
                 pass
+
+            with _playback_reference_lock:
+                _playback_reference = None
+                _playback_reference_started_at = 0.0
 
             return False
 
