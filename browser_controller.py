@@ -538,6 +538,7 @@ async def _get_google_organic_result_candidates(
     page,
     limit: int = 10,
     timeout_ms: int = 3_500,
+    minimum_results: int = 1,
 ) -> list[dict[str, Any]]:
     """
     Discover conservative Google organic-result candidates from live DOM state.
@@ -555,6 +556,11 @@ async def _get_google_organic_result_candidates(
         timeout_ms = max(250, min(int(timeout_ms), 10_000))
     except Exception:
         timeout_ms = 3_500
+
+    try:
+        minimum_results = max(1, min(int(minimum_results), 50))
+    except Exception:
+        minimum_results = 1
 
     selectors = (
         "div#search a:has(h3)",
@@ -629,17 +635,20 @@ async def _get_google_organic_result_candidates(
                         "url": canonical[:2000],
                     })
 
-                    if len(candidates) >= limit:
-                        return candidates
+                    if len(candidates) >= max(
+                        minimum_results,
+                        limit if minimum_results > limit else minimum_results,
+                    ):
+                        return candidates[:limit]
 
                 except Exception:
                     continue
 
-        if candidates:
-            return candidates
+        if len(candidates) >= minimum_results:
+            return candidates[:limit]
 
         if loop.time() >= deadline:
-            return []
+            return candidates[:limit]
 
         await page.wait_for_timeout(150)
 
@@ -1436,10 +1445,16 @@ def browser_click_result(
         result_candidates: list[dict[str, Any]] = []
 
         if resolved_site == "google":
+            required_results = (
+                1
+                if index < 0
+                else max(1, min(index, 10))
+            )
             result_candidates = await _get_google_organic_result_candidates(
                 page,
                 limit=50,
                 timeout_ms=3_500,
+                minimum_results=required_results,
             )
 
         elif resolved_site == "youtube":
