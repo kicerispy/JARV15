@@ -996,6 +996,8 @@ def update_active_context(
         "openverse_search",
         "iss_location",
         "gods_eye_contacts",
+        "gods_eye_vessels",
+        "gods_eye_satellites",
         "gods_eye_launches",
         "gods_eye_cameras",
         "gods_eye_radio",
