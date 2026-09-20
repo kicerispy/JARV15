@@ -87,6 +87,27 @@ class ApiSpeechSummaryTests(unittest.TestCase):
             "100 USD is 87.00 EUR. The exchange rate is 0.87000.",
         )
 
+    def test_anime_episode_payload(self):
+        summary = _api_spoken_summary(
+            "anime_episodes",
+            ToolResult(
+                success=True,
+                tool="anime_episodes",
+                data={
+                    "anime": {"title": "Cowboy Bebop"},
+                    "episodes": [
+                        {"number": 1, "title": "Asteroid Blues"},
+                        {"number": 2, "title": "Stray Dog Strut"},
+                    ],
+                },
+            ),
+        )
+
+        self.assertEqual(
+            summary,
+            "I found 2 episode results, including Asteroid Blues and Stray Dog Strut.",
+        )
+
     def test_location_direct_payload(self):
         result = ToolResult(
             success=True,
