@@ -26,6 +26,7 @@ dev = [
 [tool.setuptools]
 py-modules = [
     "main", "config", "commands", "code_gen", "context_aware",
+  "activation_controller",
     "context_resolver", "conversation", "conversation_handler",
     "file_tools", "jarvis_status", "launcher", "logger", "memory",
     "memory_ai", "mic_test", "mouse_calibration", "planner", "recovery",

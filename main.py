@@ -2224,8 +2224,8 @@ def main():
 
             try:
 
-                from wakeword import (
-                    wait_for_wake_word
+                from activation_controller import (
+                    wait_for_activation
                 )
 
                 wake_start = perf_now()
@@ -2251,7 +2251,7 @@ def main():
 
                     with state.io_lock:
                         triggered = (
-                            wait_for_wake_word(
+                            wait_for_activation(
                                 interrupt_event=wake_interrupt_event,
                                 active_task=active_task_for_wake,
                             )
@@ -2267,7 +2267,7 @@ def main():
             except Exception as e:
 
                 logger.error(
-                    f"Wake word error: {e}"
+                    f"Activation engine error: {e}"
                 )
 
                 triggered = False
