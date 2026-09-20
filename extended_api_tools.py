@@ -728,8 +728,10 @@ def anime_episodes(argument: str = "") -> dict[str, Any]:
         if kitsu_id:
             offset = (page - 1) * per_page
             episode_kitsu_response = requests.get(
-                "https://kitsu.io/api/edge/anime/" + str(kitsu_id) + "/episodes",
+                "https://kitsu.io/api/edge/episodes",
                 params={
+                    "filter[mediaType]": "Anime",
+                    "filter[media_id]": kitsu_id,
                     "page[limit]": per_page,
                     "page[offset]": offset,
                     "sort": "number",
