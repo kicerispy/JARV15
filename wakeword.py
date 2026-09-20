@@ -89,18 +89,21 @@ VOICE_BAND_MIN_FRACTION = float(
 # Wake detection tuning
 # ==================================================
 
-# Keep a short history so the detector can recognize
-# several strong predictions belonging to the same
-# spoken wake word.
-SCORE_HISTORY_SIZE = 5
+# Keep a short history so the detector can recognize the
+# natural rise/fall pattern of a normally spoken wake word without
+# requiring the user to unnaturally stretch the syllables.
+SCORE_HISTORY_SIZE = 4
 
-# Require at least two real threshold hits.
+# Require at least two true-threshold hits when the model is near
+# its trained confidence level.
 MIN_STRONG_HITS = 2
 
-# A single extremely confident prediction is enough.
+# A strong but not extreme single prediction is enough. This keeps
+# normal "Jarvis" speech responsive while leaving room below this
+# level for multi-frame confirmation.
 STRONG_TRIGGER_THRESHOLD = max(
-    0.88,
-    WAKE_THRESHOLD + 0.12,
+    0.76,
+    WAKE_THRESHOLD + 0.05,
 )
 
 # While JARVIS is already performing a background task, require a
@@ -112,15 +115,16 @@ ACTIVE_TASK_STRONG_TRIGGER_THRESHOLD = max(
     STRONG_TRIGGER_THRESHOLD + 0.03,
 )
 
-# Only slightly below the trained threshold.
-# This is NOT allowed to trigger by itself.
+# Moderately below the trained threshold. This allows the detector
+# to catch normal short speech when two recent frames support the
+# same wake-word event, while the energy/voice-band gates continue
+# filtering non-speech audio.
 SOFT_THRESHOLD = max(
-    0.68,
-    WAKE_THRESHOLD - 0.03,
+    0.60,
+    WAKE_THRESHOLD - 0.08,
 )
 
-# Require two moderately strong predictions when
-# they are just below the main threshold.
+# Require two moderately strong predictions.
 MIN_SOFT_HITS = 2
 
 # Don't print tiny probabilities.
