@@ -684,6 +684,117 @@ def anime_episodes(argument: str = "") -> dict[str, Any]:
     except Exception:
         pass
 
+    # Kitsu is a second live no-key fallback. Its public JSON:API exposes
+    # anime episodes as a first-class relationship and is independent of Jikan.
+    try:
+        kitsu_response = requests.get(
+            "https://kitsu.io/api/edge/anime",
+            params={
+                "filter[text]": query,
+                "page[limit]": 5,
+                "page[offset]": 0,
+            },
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/vnd.api+json",
+            },
+            timeout=12.0,
+        )
+        kitsu_response.raise_for_status()
+        kitsu_payload = kitsu_response.json()
+        kitsu_rows = kitsu_payload.get("data") or []
+        selected = None
+        for row in kitsu_rows:
+            attrs = row.get("attributes") or {}
+            title_values = [
+                attrs.get("canonicalTitle"),
+                attrs.get("slug"),
+            ]
+            localized_titles = attrs.get("titles")
+            if isinstance(localized_titles, dict):
+                title_values.extend(localized_titles.values())
+            normalized_titles = {
+                re.sub(r"\\s+", " ", str(value)).strip().lower()
+                for value in title_values
+                if value
+            }
+            if normalized_query in normalized_titles:
+                selected = row
+                break
+        if selected is None and kitsu_rows:
+            selected = kitsu_rows[0]
+
+        kitsu_id = selected.get("id") if isinstance(selected, dict) else None
+        if kitsu_id:
+            offset = (page - 1) * per_page
+            episode_kitsu_response = requests.get(
+                "https://kitsu.io/api/edge/anime/" + str(kitsu_id) + "/episodes",
+                params={
+                    "page[limit]": per_page,
+                    "page[offset]": offset,
+                    "sort": "number",
+                },
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/vnd.api+json",
+                },
+                timeout=12.0,
+            )
+            episode_kitsu_response.raise_for_status()
+            episode_payload = episode_kitsu_response.json()
+            episode_rows = episode_payload.get("data") or []
+            episodes = []
+            for item in episode_rows:
+                attrs = item.get("attributes") or {}
+                episodes.append({
+                    "number": attrs.get("number") or attrs.get("episodeNumber"),
+                    "title": attrs.get("canonicalTitle") or attrs.get("title"),
+                    "aired": attrs.get("airdate") or attrs.get("airDate"),
+                    "synopsis": _clean(attrs.get("synopsis"), 400),
+                    "length": attrs.get("length"),
+                    "thumbnail": attrs.get("thumbnail"),
+                    "kitsu_id": item.get("id"),
+                })
+
+            if episodes:
+                anime_attrs = selected.get("attributes") or {}
+                total = None
+                meta = episode_payload.get("meta") or {}
+                if isinstance(meta, dict):
+                    total = (meta.get("count") or meta.get("total"))
+                if total is None:
+                    total = anime_attrs.get("episodeCount")
+                last_page = None
+                if total is not None and per_page:
+                    try:
+                        last_page = (int(total) + per_page - 1) // per_page
+                    except (TypeError, ValueError):
+                        last_page = None
+
+                title = (
+                    anime_attrs.get("canonicalTitle")
+                    or query
+                )
+                return _success(
+                    tool,
+                    {
+                        "anime": {
+                            "id": kitsu_id,
+                            "title": title,
+                            "kitsu_id": kitsu_id,
+                        },
+                        "source": "kitsu",
+                        "page": page,
+                        "per_page": len(episodes),
+                        "total_episodes": total,
+                        "last_page": last_page,
+                        "episodes": episodes,
+                    },
+                    "Found " + str(len(episodes)) + " episode(s) for " + str(title) + ".",
+                )
+    except Exception:
+        pass
+
     # Jikan is the live no-key fallback and exposes paginated episode lists.
     try:
         search_response = requests.get(
@@ -956,6 +1067,68 @@ def pubchem_lookup(argument: str = "") -> dict[str, Any]:
             "PubChem data retrieved for " + query + ".",
         )
     except Exception as exc:
+        # Final fallback: NCI/CADD CACTUS is a separate public resolver and
+        # can provide the core chemical properties when PubChem is temporarily busy.
+        try:
+            encoded = requests.utils.quote(query, safe="")
+
+            def cactus_get(representation: str) -> str:
+                response = requests.get(
+                    "https://cactus.nci.nih.gov/chemical/structure/"
+                    + encoded
+                    + "/"
+                    + representation,
+                    headers={
+                        "User-Agent": USER_AGENT,
+                        "Accept": "text/plain",
+                    },
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                return response.text.strip()
+
+            formula = None
+            molecular_weight = None
+            iupac_name = None
+            for representation, target in (
+                ("formula", "formula"),
+                ("mw", "weight"),
+                ("iupac_name", "iupac"),
+            ):
+                try:
+                    value = cactus_get(representation)
+                except Exception:
+                    value = ""
+                if not value:
+                    continue
+                if target == "formula":
+                    formula = value
+                elif target == "weight":
+                    molecular_weight = value
+                else:
+                    iupac_name = value
+
+            if formula or molecular_weight or iupac_name:
+                result = {
+                    "cid": None,
+                    "name": query,
+                    "molecular_formula": formula,
+                    "molecular_weight": molecular_weight,
+                    "iupac_name": iupac_name,
+                    "url": (
+                        "https://cactus.nci.nih.gov/chemical/structure/"
+                        + encoded
+                        + "/formula"
+                    ),
+                }
+                return _success(
+                    tool,
+                    {"results": [result]},
+                    "Chemical data retrieved for " + query + " via NCI CACTUS.",
+                )
+        except Exception:
+            pass
+
         return _error(tool, "PubChem lookup failed: " + str(exc))
 
 
