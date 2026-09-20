@@ -209,12 +209,17 @@ _playback_reference = None
 _playback_reference_started_at = 0.0
 _playback_reference_lock = threading.Lock()
 
-ECHO_CORRELATION_THRESHOLD = 0.55
-ECHO_RESIDUAL_RATIO_THRESHOLD = 0.72
-ECHO_SUPPRESS_MAX_VOLUME = 360
-ECHO_SEARCH_MIN_DELAY_SECONDS = 0.02
-ECHO_SEARCH_MAX_DELAY_SECONDS = 0.35
-ECHO_SEARCH_STEP_SECONDS = 0.02
+ECHO_CORRELATION_THRESHOLD = 0.42
+ECHO_RESIDUAL_RATIO_THRESHOLD = 0.86
+ECHO_SEARCH_MIN_DELAY_SECONDS = 0.00
+ECHO_SEARCH_MAX_DELAY_SECONDS = 0.75
+ECHO_SEARCH_STEP_SECONDS = 0.01
+
+# Evaluate a short rolling window so one imperfect echo match cannot
+# accidentally trigger an interruption. Six 1024-sample chunks at 16 kHz
+# cover ~384 ms.
+BARGE_IN_WINDOW_CHUNKS = 6
+MAX_ECHO_CHUNKS_IN_WINDOW = 1
 DEBUG_BARGE_IN = False
 
 def _speech_dedup_key(text):
@@ -813,6 +818,16 @@ def _monitor_microphone():
 
     consecutive_loud = 0
 
+    # Rolling evidence for barge-in decisions. A user interruption should
+    # contain sustained loud audio with very little resemblance to JARVIS'
+    # known playback waveform.
+    loud_window = collections.deque(
+        maxlen=BARGE_IN_WINDOW_CHUNKS
+    )
+    echo_window = collections.deque(
+        maxlen=BARGE_IN_WINDOW_CHUNKS
+    )
+
 
     monitor_start = time.time()
 
@@ -873,34 +888,44 @@ def _monitor_microphone():
                     _echo_match(audio)
                 )
 
-                # Speaker echo has the same waveform as the known TTS output,
-                # only delayed and attenuated by the room. Suppress a probable
-                # echo when its energy is still in the low/intermediate range;
-                # louder independent speech remains eligible for barge-in.
+                # Speaker echo is compared against the exact processed TTS
+                # waveform with a broad delay search. Do not use a fixed
+                # microphone-volume ceiling: room acoustics and speaker
+                # placement can make the echoed signal substantially louder
+                # than the earlier calibration.
                 likely_echo = (
-                    volume <= ECHO_SUPPRESS_MAX_VOLUME
-                    and echo_correlation
+                    echo_correlation
                     >= ECHO_CORRELATION_THRESHOLD
                     and echo_residual_ratio
                     <= ECHO_RESIDUAL_RATIO_THRESHOLD
                 )
 
-                if likely_echo:
-                    consecutive_loud = 0
-
+                if likely_echo and volume >= INTERRUPT_THRESHOLD:
                     if DEBUG_BARGE_IN:
                         print(
-                            "JARVIS: Speaker echo suppressed "
+                            "JARVIS: Speaker echo candidate suppressed "
                             f"(volume={volume:.1f}, "
                             f"corr={echo_correlation:.2f}, "
                             f"residual={echo_residual_ratio:.2f})"
                         )
 
+                loud_window.append(
+                    volume >= INTERRUPT_THRESHOLD
+                )
+                echo_window.append(
+                    likely_echo
+                )
+
+                # An echo-like chunk cannot contribute to sustained
+                # interruption evidence. A rolling window tolerates an
+                # occasional correlation miss without allowing a pure speaker
+                # echo stream to trigger playback cancellation.
+                if likely_echo:
+                    consecutive_loud = 0
                     continue
 
-
                 # -----------------------------------------
-                # Sustained speech detection.
+                # Sustained speech evidence.
                 # -----------------------------------------
 
                 if (
@@ -919,9 +944,23 @@ def _monitor_microphone():
                 # Real user interruption.
                 # -----------------------------------------
 
-                if (
-                    consecutive_loud
+                enough_loud = (
+                    len(loud_window)
+                    >= BARGE_IN_WINDOW_CHUNKS
+                    and sum(loud_window)
                     >= INTERRUPT_CHUNKS
+                )
+
+                mostly_non_echo = (
+                    len(echo_window)
+                    >= BARGE_IN_WINDOW_CHUNKS
+                    and sum(echo_window)
+                    <= MAX_ECHO_CHUNKS_IN_WINDOW
+                )
+
+                if (
+                    enough_loud
+                    and mostly_non_echo
                 ):
 
                     buffered = list(
