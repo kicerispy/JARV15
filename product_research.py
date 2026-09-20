@@ -3215,15 +3215,18 @@ def _normalize_product_text(value: Any) -> str:
 def _candidate_form_factor(name):
     value = _normalize_product_text(name)
 
+    # AirPods Max and similar full-size models must be classified before the
+    # generic AirPods/earbuds family marker.
     if any(
         term in value
         for term in (
-            'earbud', 'earbuds', 'true wireless', 'tws', 'in ear',
-            'airpods', 'jbuds', 'liberty', 'wf-', 'wf ',
-            'ea az', 'az100', 'galaxy buds',
+            'airpods max', 'over ear', 'over-ear', 'headphone',
+            'headphones', 'wh-', 'wh ', 'ch720n', 'hdb', 'quietcomfort',
+            'space one', 'accentum', 'momentum', 'monitor',
+            'live 770', 'tune 770', 'w820nb',
         )
     ):
-        return 'earbuds'
+        return 'over_ear'
 
     if any(
         term in value
@@ -3240,17 +3243,6 @@ def _candidate_form_factor(name):
         )
     ):
         return 'on_ear'
-
-    if any(
-        term in value
-        for term in (
-            'over ear', 'over-ear', 'headphone', 'headphones',
-            'wh-', 'wh ', 'ch720n', 'hdb', 'quietcomfort',
-            'space one', 'accentum', 'momentum', 'monitor',
-            'live 770', 'tune 770', 'w820nb',
-        )
-    ):
-        return 'over_ear'
 
     if 'headset' in value:
         return 'headset'
@@ -3685,6 +3677,48 @@ def _inject_candidate_products(analysis, evidence, budget):
         products.append(product)
         existing.add(key)
         existing_forms.add(signal.get('form_factor') or 'other')
+
+    # Rebalance the six verification slots around evidence quality. The LLM
+    # can over-select a single generic buyer-guide source; replace weak
+    # generic-only records with concrete candidates supported by independent
+    # reviews or other known source types.
+    source_types = {
+        source.get('id'): str(source.get('source_type') or '')
+        for source in evidence
+        if isinstance(source, dict)
+    }
+
+    def support_score(product):
+        if not isinstance(product, dict):
+            return (-1, -1, -1, 0)
+        ids = set(product.get('source_ids') or [])
+        review_count = sum(
+            1 for source_id in ids
+            if source_types.get(source_id) == 'independent_review'
+        )
+        known_count = sum(
+            1 for source_id in ids
+            if source_types.get(source_id) in {
+                'independent_review', 'manufacturer', 'retailer',
+                'community', 'video'
+            }
+        )
+        generic_only = 1 if known_count == 0 else 0
+        return (
+            review_count,
+            known_count,
+            -generic_only,
+            len(ids),
+        )
+
+    # Sort support-first while keeping explicit budget candidates in front.
+    products.sort(
+        key=lambda product: (
+            1 if isinstance(product, dict) and product.get('candidate_signal') else 0,
+            *support_score(product),
+        ),
+        reverse=True,
+    )
 
     analysis['products'] = products[:6]
     return analysis
