@@ -75,6 +75,8 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
     profile = BrowserProfile(
         cdp_url=DEFAULT_CDP_URL,
         is_local=True,
+        # JARVIS owns this Chromium process. Browser Use must never kill it.
+        keep_alive=True,
     )
     browser_session = BrowserSession(
         browser_profile=profile,

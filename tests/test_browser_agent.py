@@ -33,6 +33,12 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertFalse(result["browser_use_installed"])
 
+    def test_worker_keeps_shared_browser_alive(self):
+        from pathlib import Path
+
+        source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
+        self.assertIn("keep_alive=True", source)
+
     def test_run_launches_isolated_worker(self):
         module = importlib.import_module("browser_agent")
         fake_python = Path(module.BASE_DIR) / "fake-browser-python.exe"
