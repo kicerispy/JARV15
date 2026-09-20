@@ -454,6 +454,63 @@ def check_speech_summaries() -> list[str]:
     return failures
 
 
+
+def check_extended_integrations() -> list[str]:
+    from extended_api_tools import API_TOOLS
+    from gods_eye import gods_eye_status
+    from screen_memory import screen_memory_status
+
+    failures = []
+
+    required = {
+        "country_info",
+        "crypto_price",
+        "trivia_question",
+        "joke",
+        "meal_search",
+        "tv_search",
+        "music_search",
+        "anime_search",
+        "openalex_search",
+        "pubchem_lookup",
+        "art_search",
+        "nasa_eonet",
+        "sunrise_sunset",
+        "topo_elevation",
+        "public_ip",
+        "reverse_geocode",
+        "news_search",
+        "osm_search",
+    }
+
+    missing = sorted(required - set(API_TOOLS))
+    if missing:
+        failures.append(f"extended API registry missing: {', '.join(missing)}")
+        print(f"[FAIL] extended API registry -> {missing}")
+    else:
+        print(f"[PASS] extended API registry: {len(API_TOOLS)} tools")
+
+    try:
+        status = gods_eye_status()
+        if not isinstance(status, dict) or not status.get("success"):
+            raise AssertionError("invalid God's Eye View status payload")
+        print("[PASS] God's Eye View bridge import/status")
+    except Exception as exc:
+        failures.append(f"God's Eye View bridge: {exc}")
+        print(f"[FAIL] God's Eye View bridge -> {exc}")
+
+    try:
+        status = screen_memory_status()
+        if not isinstance(status, dict) or not status.get("success"):
+            raise AssertionError("invalid Screenpipe status payload")
+        print("[PASS] Screenpipe memory bridge import/status")
+    except Exception as exc:
+        failures.append(f"Screenpipe bridge: {exc}")
+        print(f"[FAIL] Screenpipe bridge -> {exc}")
+
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run JARVIS regression diagnostics."
@@ -476,6 +533,7 @@ def main() -> int:
         failures.extend(check_routing())
         failures.extend(check_structured_context())
         failures.extend(check_speech_summaries())
+        failures.extend(check_extended_integrations())
 
         if args.live:
             failures.extend(check_live_apis())
