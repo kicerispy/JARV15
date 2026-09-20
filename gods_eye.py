@@ -318,6 +318,56 @@ def gods_eye_contacts(argument: str = "") -> dict[str, Any]:
         return {"success": False, "tool": "gods_eye_contacts", "message": f"Could not read live aircraft contacts: {exc}", "retryable": True}
 
 
+def gods_eye_vessels(argument: str = "") -> dict[str, Any]:
+    try:
+        payload = _http_json("/api/ais-live", timeout=12)
+        rows = payload.get("rows") if isinstance(payload, dict) else []
+        rows = rows if isinstance(rows, list) else []
+        vessels = rows[:100]
+        return {
+            "success": True,
+            "tool": "gods_eye_vessels",
+            "data": {"vessels": vessels, "count": len(vessels), "source": "God's Eye View / AISStream"},
+            "message": f"God's Eye View reports {len(vessels)} vessel contacts.",
+        }
+    except Exception as exc:
+        return {"success": False, "tool": "gods_eye_vessels", "message": f"Could not read live vessel contacts: {exc}", "retryable": True}
+
+
+def gods_eye_satellites(argument: str = "") -> dict[str, Any]:
+    group = str(argument or "").strip().lower() or "stations"
+    allowed = {"stations", "active", "starlink"}
+    if group not in allowed:
+        group = "stations"
+    request = urllib.request.Request(
+        f"{GEV_URL}/api/celestrak/{group}",
+        headers={"User-Agent": "JARVIS/1.0", "Accept": "text/plain"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            text_body = response.read().decode("utf-8", errors="replace")
+        lines = [line.strip() for line in text_body.splitlines() if line.strip()]
+        satellites = []
+        for index in range(0, len(lines) - 2, 3):
+            name = lines[index]
+            line1 = lines[index + 1]
+            line2 = lines[index + 2]
+            if not (line1.startswith("1 ") and line2.startswith("2 ")):
+                continue
+            satellites.append({"name": name, "tle1": line1, "tle2": line2})
+            if len(satellites) >= 50:
+                break
+        return {
+            "success": True,
+            "tool": "gods_eye_satellites",
+            "data": {"group": group, "satellites": satellites, "count": len(satellites), "source": "God's Eye View / CelesTrak"},
+            "message": f"God's Eye View returned {len(satellites)} satellite records from the {group} group.",
+        }
+    except Exception as exc:
+        return {"success": False, "tool": "gods_eye_satellites", "message": f"Could not read satellite data: {exc}", "retryable": True}
+
+
 def gods_eye_launches(argument: str = "") -> dict[str, Any]:
     return _gev_list("/api/launches", "launches", "launches")
 
@@ -341,6 +391,8 @@ DISPATCH = {
     "gods_eye_open": gods_eye_open,
     "gods_eye_stop": gods_eye_stop,
     "gods_eye_contacts": gods_eye_contacts,
+    "gods_eye_vessels": gods_eye_vessels,
+    "gods_eye_satellites": gods_eye_satellites,
     "gods_eye_launches": gods_eye_launches,
     "gods_eye_cameras": gods_eye_cameras,
     "gods_eye_radio": gods_eye_radio,
