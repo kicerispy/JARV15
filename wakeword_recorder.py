@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import time
 import wave
 from datetime import datetime
@@ -240,7 +239,18 @@ def parse_args() -> argparse.Namespace:
         "--negative-count",
         type=int,
         default=30,
-        help="Number of negative recordings (default: 30)",
+        help="Number of standard negative recordings (default: 30)",
+    )
+
+    parser.add_argument(
+        "--negative-phrase",
+        action="append",
+        default=[],
+        metavar="PHRASE",
+        help=(
+            "Record a specific hard-negative phrase. Repeat the option "
+            "for multiple phrases. This is added after standard negatives."
+        ),
     )
 
     parser.add_argument(
@@ -275,13 +285,18 @@ def parse_args() -> argparse.Namespace:
     if args.positive_count < 0 or args.negative_count < 0:
         parser.error("sample counts cannot be negative")
 
-    if args.positive_count == 0 and args.negative_count == 0:
+    if (
+        args.positive_count == 0
+        and args.negative_count == 0
+        and not args.negative_phrase
+    ):
         parser.error(
-            "at least one sample count must be greater than 0"
+            "at least one sample count or --negative-phrase is required"
         )
 
     if args.positive_only:
         args.negative_count = 0
+        args.negative_phrase = []
 
     if args.negative_only:
         args.positive_count = 0
@@ -328,7 +343,14 @@ def main() -> int:
             seconds=args.seconds,
         )
 
-    if args.negative_count:
+    negative_phrases = [
+        NEGATIVE_PROMPTS[index % len(NEGATIVE_PROMPTS)]
+        for index in range(args.negative_count)
+    ]
+
+    negative_phrases.extend(args.negative_phrase)
+
+    if negative_phrases:
         print()
         print("NEGATIVE SET")
         print(
@@ -336,15 +358,10 @@ def main() -> int:
             "naturally in your normal voice."
         )
 
-        phrases = [
-            NEGATIVE_PROMPTS[index % len(NEGATIVE_PROMPTS)]
-            for index in range(args.negative_count)
-        ]
-
         record_set(
             dataset_dir=dataset_dir,
             kind="negative",
-            phrases=phrases,
+            phrases=negative_phrases,
             device=args.device,
             sample_rate=args.sample_rate,
             seconds=args.seconds,
