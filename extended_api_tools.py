@@ -843,36 +843,98 @@ def pubchem_lookup(argument: str = "") -> dict[str, Any]:
     query = str(argument or "").strip()
     if not query:
         return _error(tool, "Provide a chemical name or compound.", retryable=False)
+
+    def pubchem_get(url: str) -> Any:
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                response = requests.get(
+                    url,
+                    headers={
+                        "User-Agent": USER_AGENT,
+                        "Accept": "application/json",
+                    },
+                    timeout=12.0,
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.HTTPError as exc:
+                last_exc = exc
+                status = exc.response.status_code if exc.response is not None else None
+                if status not in {429, 500, 502, 503, 504} or attempt >= 3:
+                    raise
+                retry_after = 0.0
+                if exc.response is not None:
+                    try:
+                        retry_after = float(
+                            exc.response.headers.get("Retry-After", "0") or 0
+                        )
+                    except (TypeError, ValueError):
+                        retry_after = 0.0
+                time.sleep(max(retry_after, 1.25 * (2 ** attempt)))
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt >= 3:
+                    raise
+                time.sleep(0.75 * (2 ** attempt))
+        raise last_exc or RuntimeError("PubChem request failed.")
+
     try:
         encoded = requests.utils.quote(query, safe="")
-        endpoint = (
-            "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
-            f"{encoded}/property/MolecularFormula,MolecularWeight,IUPACName/JSON"
+        property_path = (
+            "property/MolecularFormula,MolecularWeight,IUPACName/JSON"
         )
+
         try:
-            payload = _get_json(endpoint)
-            props = (payload.get("PropertyTable") or {}).get("Properties") or []
-        except Exception:
-            time.sleep(1.1)
-            props = []
-        if not props:
-            # Name/property requests can briefly receive PubChem's documented
-            # 503 busy response. Resolve the CID first, then request properties.
-            cid_payload = _get_json(
+            payload = pubchem_get(
                 "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
-                f"{encoded}/cids/JSON"
+                + encoded
+                + "/"
+                + property_path
             )
-            cids = (cid_payload.get("IdentifierList") or {}).get("CID") or []
-            if not cids:
-                return _error(tool, f"No compound found for '{query}'.", retryable=False)
-            cid = cids[0]
-            payload = _get_json(
-                f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/"
-                "property/MolecularFormula,MolecularWeight,IUPACName/JSON"
+            props = (
+                (payload.get("PropertyTable") or {}).get("Properties")
+                or []
             )
-            props = (payload.get("PropertyTable") or {}).get("Properties") or []
+        except Exception:
+            props = []
+
         if not props:
-            return _error(tool, f"No compound found for '{query}'.", retryable=False)
+            cid_payload = pubchem_get(
+                "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
+                + encoded
+                + "/cids/JSON"
+            )
+            cids = (
+                (cid_payload.get("IdentifierList") or {}).get("CID")
+                or []
+            )
+            if not cids:
+                return _error(
+                    tool,
+                    "No compound found for '" + query + "'.",
+                    retryable=False,
+                )
+
+            cid = cids[0]
+            payload = pubchem_get(
+                "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/"
+                + str(cid)
+                + "/"
+                + property_path
+            )
+            props = (
+                (payload.get("PropertyTable") or {}).get("Properties")
+                or []
+            )
+
+        if not props:
+            return _error(
+                tool,
+                "No compound found for '" + query + "'.",
+                retryable=False,
+            )
+
         item = props[0]
         result = {
             "cid": item.get("CID"),
@@ -881,14 +943,19 @@ def pubchem_lookup(argument: str = "") -> dict[str, Any]:
             "molecular_weight": item.get("MolecularWeight"),
             "iupac_name": item.get("IUPACName"),
             "url": (
-                f"https://pubchem.ncbi.nlm.nih.gov/compound/{item.get('CID')}"
+                "https://pubchem.ncbi.nlm.nih.gov/compound/"
+                + str(item.get("CID"))
                 if item.get("CID")
                 else None
             ),
         }
-        return _success(tool, {"results": [result]}, f"PubChem data retrieved for {query}.")
+        return _success(
+            tool,
+            {"results": [result]},
+            "PubChem data retrieved for " + query + ".",
+        )
     except Exception as exc:
-        return _error(tool, f"PubChem lookup failed: {exc}")
+        return _error(tool, "PubChem lookup failed: " + str(exc))
 
 
 def art_search(argument: str = "") -> dict[str, Any]:
