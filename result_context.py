@@ -702,13 +702,28 @@ def resolve_result_followup(
         for pattern in _MORE_PATTERNS
     ):
         selected = active_context.get("last_selected_result")
+        selected_index = active_context.get("last_result_index")
+
+        # Prefer an explicitly requested ordinal over the previously
+        # selected item, e.g. "tell me more about the second one".
+        requested_index = _ordinal_index(text)
+        if requested_index is not None and items:
+            actual_index = (
+                len(items) - 1
+                if requested_index == -1
+                else requested_index
+            )
+
+            if 0 <= actual_index < len(items):
+                selected = items[actual_index]
+                selected_index = actual_index
 
         if selected is not None:
             detail = _general_more(selected, active_context)
             if detail:
                 return {
                     "reply": detail,
-                    "index": active_context.get("last_result_index"),
+                    "index": selected_index,
                     "selected": selected,
                     "kind": "selected_result",
                 }
