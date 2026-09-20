@@ -2109,8 +2109,8 @@ def create_plan(
     # knowledge_lookup when the user explicitly wants episode data.
     anime_episode_match = None
     for pattern in (
-        r"^(?:what are|what're|list|show|give me|tell me)\\s+(?:the\\s+)?episodes?\\s+(?:of|for)\\s+(.+)$",
-        r"^(?:episodes?|episode list)\\s+(?:of|for)\\s+(.+)$",
+        r"^(?:what are|what're|list|show|give me|tell me)\s+(?:the\s+)?episodes?\s+(?:of|for)\s+(.+)$",
+        r"^(?:episodes?|episode list)\s+(?:of|for)\s+(.+)$",
     ):
         anime_episode_match = re.match(pattern, normalized_command, re.IGNORECASE)
         if anime_episode_match:
