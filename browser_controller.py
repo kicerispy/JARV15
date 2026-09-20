@@ -2233,11 +2233,14 @@ def browser_press_key(
         before_title = await page.title()
 
         try:
-            # Focus the DOM target, then send the key through the page keyboard.
-            # This avoids Locator.press waiting on a navigation triggered by
-            # Enter, which previously produced ~27 second command latency.
-            await locator.first.focus(timeout=5_000)
-            await page.keyboard.press(requested_key)
+            # Send the key through the target locator so Playwright targets
+            # the element directly. no_wait_after keeps Enter-driven navigation
+            # from making the tool block on a full navigation lifecycle.
+            await locator.first.press(
+                requested_key,
+                timeout=5_000,
+                no_wait_after=True,
+            )
         except Exception as exc:
             return {
                 "success": False,
