@@ -520,10 +520,17 @@ def anime_search(argument: str = "") -> dict[str, Any]:
 
     anime = []
     for item in rows:
-        title_data = item.get("title") or {}
+        raw_title = item.get("title") or {}
+        title_data = raw_title if isinstance(raw_title, dict) else {}
+        title_text = (
+            title_data.get("english")
+            or title_data.get("romaji")
+            or title_data.get("native")
+            or (raw_title if isinstance(raw_title, str) else "")
+        )
         anime.append({
-            "title": title_data.get("english") or title_data.get("romaji") or title_data.get("native") or item.get("title"),
-            "title_english": title_data.get("english"),
+            "title": title_text,
+            "title_english": title_data.get("english") or (item.get("title_english") if isinstance(item.get("title_english"), str) else None),
             "type": item.get("type"),
             "episodes": item.get("episodes"),
             "status": item.get("status"),
