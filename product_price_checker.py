@@ -760,6 +760,94 @@ class BrowserPriceChecker:
 
         return profile["search_url"].format(query=rendered_query)
 
+    def _google_direct_product_url(
+        self,
+        store_key: str,
+        product_name: str,
+        model_number: str = "",
+    ) -> str:
+        """Resolve a direct retailer product page through Google when the store
+        search page is blocked or does not expose usable product links."""
+        profile = STORE_PROFILES.get(store_key) or {}
+        expected_domain = str(profile.get("domain") or "").strip()
+        if not expected_domain or not self.browser_page_snapshot:
+            return ""
+
+        query = f'site:{expected_domain} "{product_name}"'
+        if model_number:
+            query += f' "{model_number}"'
+        google_url = "https://www.google.com/search?q=" + quote_plus(query)
+
+        try:
+            self.browser_goto(google_url)
+            if self.browser_wait_for_element is not None:
+                try:
+                    self.browser_wait_for_element(selector="body", timeout=5000)
+                except Exception:
+                    pass
+            try:
+                snapshot = self.browser_page_snapshot(max_links=120) or {}
+            except TypeError:
+                snapshot = self.browser_page_snapshot() or {}
+        except Exception:
+            return ""
+
+        links = snapshot.get("links", []) if isinstance(snapshot, dict) else []
+        if not isinstance(links, list):
+            return ""
+
+        best = None
+        wanted = set(product_tokens(product_name))
+        model_norm = normalize_product_text(model_number)
+
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            href = str(link.get("href") or "").strip()
+            text = " ".join(str(link.get("text") or "").split()).strip()
+            if not href:
+                continue
+
+            try:
+                absolute = _canonical_retailer_url(
+                    store_key,
+                    urljoin(google_url, href),
+                )
+                parsed = urlparse(absolute)
+                host = (parsed.hostname or "").lower().removeprefix("www.")
+            except Exception:
+                continue
+
+            if not _host_is_expected(host, expected_domain):
+                continue
+            if not _is_direct_product_url(store_key, absolute):
+                continue
+
+            haystack = f"{text} {absolute}"
+            if _product_type_conflict(product_name, haystack):
+                continue
+            if _variant_conflict(product_name, haystack):
+                continue
+
+            product_score = match_score(product_name, haystack, model_number)
+            observed = set(product_tokens(text))
+            token_overlap = (
+                len(wanted & observed) / max(len(wanted), 1)
+                if wanted else 0.0
+            )
+            model_hit = bool(
+                model_norm
+                and model_norm in normalize_product_text(haystack)
+            )
+            score = (
+                100.0 if model_hit else 0.0
+            ) + (product_score * 10.0) + (token_overlap * 5.0)
+
+            if best is None or score > best[0]:
+                best = (score, absolute)
+
+        return best[1] if best and best[0] >= 10.0 else ""
+
     def _direct_product_url(
         self,
         store_key: str,
@@ -849,7 +937,18 @@ class BrowserPriceChecker:
             if best is None or score > best[0]:
                 best = (score, absolute)
 
-        return best[1] if best and best[0] >= 5.0 else search_url
+        if best and best[0] >= 5.0:
+            return best[1]
+
+        # Store search pages are frequently challenge-protected or omit direct
+        # links. A Google site-restricted lookup is a fallback only; JARVIS
+        # still verifies identity, variant, and price on the retailer page.
+        google_fallback = self._google_direct_product_url(
+            store_key,
+            product_name,
+            model_number,
+        )
+        return google_fallback or search_url
 
     def _scan_store(
         self,
