@@ -3179,8 +3179,13 @@ def _compact_evidence_for_synthesis(
     return compact
 
 
+
+def _normalize_product_text(value: Any) -> str:
+    """Normalize product text for lightweight form-factor matching."""
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
 def _candidate_form_factor(name):
-    value = normalize_product_text(name)
+    value = _normalize_product_text(name)
     if any(term in value for term in ('earbud', 'earbuds', 'true wireless', 'tws', 'in ear')):
         return 'earbuds'
     if any(term in value for term in ('over ear', 'over-ear', 'headphone', 'headphones')):
