@@ -220,6 +220,9 @@ class BackgroundTaskController:
 
         task.status = "queued"
         task.started_at = None
+        task.initial_acknowledged = not _should_send_initial_acknowledgement(
+            description
+        )
 
         if hasattr(task_state, "prepare"):
             task_state.prepare(
