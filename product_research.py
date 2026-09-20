@@ -3179,10 +3179,10 @@ def _compact_evidence_for_synthesis(
     return compact
 
 
-
 def _normalize_product_text(value: Any) -> str:
     """Normalize product text for lightweight form-factor matching."""
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
 
 def _candidate_form_factor(name):
     value = _normalize_product_text(name)
