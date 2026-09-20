@@ -36,6 +36,7 @@ task_memory.json
 conversation_history.json
 jarvis_history.json
 input.wav
+wakeword_dataset/
 
 # Screenshots / generated images
 *.png
