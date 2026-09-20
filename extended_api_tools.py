@@ -29,6 +29,7 @@ API_TOOLS = {
     "music_search",
     "musicbrainz_search",
     "anime_search",
+    "anime_episodes",
     "ghibli_search",
     "openalex_search",
     "pubchem_lookup",
