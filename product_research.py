@@ -4606,7 +4606,25 @@ def _final_synthesize_verified(request, item, budget, evidence, analysis):
         key = _normalized_name(name)
         allowed.add(key)
         comparison = product.get('price_comparison') or {}
-        offers = comparison.get('budget_verified_offers') if budget is not None else comparison.get('verified_offers')
+        offers = (
+            comparison.get('budget_verified_offers')
+            if budget is not None
+            else comparison.get('verified_offers')
+        )
+
+        # With a hard budget, the final editor may only reason about products
+        # that already have a deterministic, direct, under-budget offer.
+        # Over-budget/unverified products remain available to the earlier
+        # research stages but cannot be resurrected by the LLM summary pass.
+        if budget is not None and not any(
+            isinstance(o, dict)
+            and o.get('exact_match') is True
+            and isinstance(o.get('price'), (int, float))
+            and float(o.get('price')) <= float(budget)
+            for o in (offers or [])
+        ):
+            continue
+
         products.append({
             'name': name,
             'fit': product.get('fit'),
