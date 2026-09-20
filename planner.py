@@ -1667,12 +1667,90 @@ def create_plan(
     # Use the canonical command router as the first safety boundary.
     # Agent Core may call this planner directly, bypassing main.py's
     # fast-command lookup, so simple actions must still stay model-free.
-    try:
-        from commands import deterministic_route
+    normalized_pre_route = " ".join(
+        user_command.strip().lower().rstrip(".,!?").split()
+    )
 
-        deterministic_plan = deterministic_route(
-            user_command
+    # Some commands have a more specific planner-level route that must
+    # run before commands.deterministic_route(). The generic command router
+    # intentionally handles many broad browser/status phrases, so let the
+    # specialized context-aware routes below own these cases.
+    defer_contextual_route = False
+
+    if active_context:
+        active_site_pre_route = str(
+            active_context.get("site", "") or ""
+        ).strip().lower()
+
+        active_query_pre_route = str(
+            active_context.get("last_query", "") or ""
+        ).strip()
+
+        if (
+            active_site_pre_route in {"google", "youtube"}
+            and active_query_pre_route
+            and re.match(
+                r"^(?:click|open|play|select|choose|pick)\s+"
+                r"(?:the\s+)?"
+                r"(?:first|top|second|third|last|final)\s+"
+                r"(?:browser\s+)?"
+                r"(?:result|link|video|one|item)"
+                r"(?:\s+on\s+[a-z0-9.-]+)?$",
+                normalized_pre_route,
+                re.IGNORECASE,
+            )
+        ):
+            defer_contextual_route = True
+
+    if re.match(
+        r"^(?:click|open|play|select|choose|pick)\s+"
+        r"the\s+browser\s+element\s+with\s+visible\s+text\s+"
+        r"['\"].+['\"]$",
+        user_command.strip(),
+        re.IGNORECASE,
+    ):
+        defer_contextual_route = True
+
+    if normalized_pre_route in {
+        "read the current browser page",
+        "read current browser page",
+        "read this page",
+        "read the page",
+        "read page",
+        "read the page text",
+        "show this page",
+        "open the previously selected browser result",
+        "open the previously selected result",
+    }:
+        defer_contextual_route = True
+
+    if (
+        "barehands" in normalized_pre_route
+        and (
+            "display" in normalized_pre_route
+            or "glass board" in normalized_pre_route
+            or "show" in normalized_pre_route
+            or "present" in normalized_pre_route
+            or "put" in normalized_pre_route
+            or "place" in normalized_pre_route
         )
+        and "status" in normalized_pre_route
+        and (
+            "card" in normalized_pre_route
+            or "status" in normalized_pre_route
+        )
+    ):
+        defer_contextual_route = True
+
+    try:
+        if defer_contextual_route:
+            deterministic_plan = None
+        else:
+            from commands import deterministic_route
+
+            deterministic_plan = deterministic_route(
+                user_command
+            )
 
         if deterministic_plan:
             deterministic_result = validate_plan(

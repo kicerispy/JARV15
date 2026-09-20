@@ -132,8 +132,8 @@ async def _init_browser():
         user_data_dir=user_data_dir,
         headless=False,
         viewport={"width": 1920, "height": 1080},
-        # Keep Playwright's native remote-debugging-pipe.
-        # Browser Use and other external clients use the TCP CDP endpoint below.
+        # Keep Playwright's native debugging pipe while also exposing
+        # the explicit TCP CDP endpoint used by Browser Use.
         args=[
             "--disable-blink-features=AutomationControlled",
             f"--remote-debugging-port={JARVIS_CDP_PORT}",
@@ -537,15 +537,16 @@ def _snapshot_canonical_url(href: str) -> str:
 async def _get_google_organic_result_candidates(
     page,
     limit: int = 10,
-    timeout_ms: int = 3_500,
+    timeout_ms: int = 5_000,
     minimum_results: int = 1,
 ) -> list[dict[str, Any]]:
     """
-    Discover conservative Google organic-result candidates from live DOM state.
+    Discover Google organic results from the live DOM.
 
-    A candidate must be visible, contain an h3 heading, and expose a usable
-    HTTP(S) URL. Multiple selectors are tried because Google's wrapper markup
-    can change while the semantic result structure remains stable.
+    Google may expose result anchors as opaque /goto?url=... controls rather
+    than direct destination URLs. Those anchors are still legitimate DOM
+    controls and can be clicked deterministically, so they must not be
+    discarded merely because their href is Google-owned.
     """
     try:
         limit = max(1, min(int(limit), 50))
@@ -555,94 +556,131 @@ async def _get_google_organic_result_candidates(
     try:
         timeout_ms = max(250, min(int(timeout_ms), 10_000))
     except Exception:
-        timeout_ms = 3_500
+        timeout_ms = 5_000
 
     try:
-        minimum_results = max(1, min(int(minimum_results), 50))
+        minimum_results = max(1, min(int(minimum_results), limit))
     except Exception:
         minimum_results = 1
 
-    selectors = (
-        "div#search a:has(h3)",
-        "#search a:has(h3)",
-        "main a:has(h3)",
-        "a:has(h3)",
-    )
+    locator = page.locator("div#search a:has(h3)")
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + (timeout_ms / 1000.0)
-    candidates: list[dict[str, Any]] = []
-    seen_urls: set[str] = set()
 
     while True:
-        for selector in selectors:
-            try:
-                links = page.locator(selector)
-                count = min(await links.count(), 50)
-            except Exception:
-                continue
+        try:
+            raw_candidates = await locator.evaluate_all(
+                """
+                anchors => anchors.map((anchor, index) => {
+                    const heading = anchor.querySelector('h3');
 
-            for position in range(count):
-                link = links.nth(position)
+                    if (!heading) {
+                        return null;
+                    }
+
+                    const rect = anchor.getBoundingClientRect();
+                    const style = window.getComputedStyle(anchor);
+
+                    const href = (
+                        anchor.href ||
+                        anchor.getAttribute('href') ||
+                        ''
+                    ).trim();
+
+                    return {
+                        index,
+                        visible: Boolean(
+                            rect.width > 0 &&
+                            rect.height > 0 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden'
+                        ),
+                        title: (
+                            heading.innerText ||
+                            heading.textContent ||
+                            ''
+                        ).trim(),
+                        href,
+                    };
+                }).filter(Boolean)
+                """
+            )
+        except Exception:
+            raw_candidates = []
+
+        candidates: list[dict[str, Any]] = []
+        seen_targets: set[str] = set()
+
+        for raw in raw_candidates:
+            try:
+                if not raw.get("visible"):
+                    continue
+
+                title = " ".join(
+                    str(raw.get("title") or "").split()
+                ).strip()
+
+                href = str(
+                    raw.get("href") or ""
+                ).strip()
+
+                if not title or not href:
+                    continue
+
+                parsed_href = urlparse(href)
+                host = (parsed_href.hostname or "").lower()
+                path = (parsed_href.path or "").lower()
+
+                # A result may be:
+                #   1. a direct external URL, or
+                #   2. Google's current opaque /goto result control.
+                is_external = href.startswith(
+                    ("http://", "https://")
+                ) and not (
+                    host == "google.com"
+                    or host.endswith(".google.com")
+                )
+
+                is_google_result_redirect = (
+                    (
+                        href.startswith("/goto?")
+                        or (
+                            host in {"google.com", "www.google.com"}
+                            and path.startswith("/goto")
+                        )
+                    )
+                )
+
+                if not (
+                    is_external
+                    or is_google_result_redirect
+                ):
+                    continue
+
+                if href in seen_targets:
+                    continue
+
+                seen_targets.add(href)
 
                 try:
-                    if not await link.is_visible():
-                        continue
-
-                    heading = link.locator("h3").first
-                    if not await heading.count():
-                        continue
-
-                    title = " ".join(
-                        (await heading.inner_text(timeout=1500)).split()
-                    ).strip()
-
-                    href = (
-                        await link.get_attribute("href")
-                        or ""
-                    ).strip()
-                    canonical = _snapshot_canonical_url(href)
-
-                    if (
-                        not title
-                        or not canonical.startswith(
-                            ("http://", "https://")
-                        )
-                    ):
-                        continue
-
-                    parsed = urlparse(canonical)
-                    host = (parsed.hostname or "").lower()
-                    path = (parsed.path or "").lower()
-
-                    if (
-                        host in {"google.com", "www.google.com"}
-                        and path.startswith((
-                            "/search",
-                            "/preferences",
-                            "/advanced_search",
-                        ))
-                    ):
-                        continue
-
-                    if canonical in seen_urls:
-                        continue
-
-                    seen_urls.add(canonical)
-                    candidates.append({
-                        "locator": link,
-                        "title": title[:500],
-                        "url": canonical[:2000],
-                    })
-
-                    if len(candidates) >= max(
-                        minimum_results,
-                        limit if minimum_results > limit else minimum_results,
-                    ):
-                        return candidates[:limit]
-
+                    dom_index = int(raw.get("index"))
+                    candidate_locator = locator.nth(dom_index)
                 except Exception:
                     continue
+
+                candidates.append(
+                    {
+                        "locator": candidate_locator,
+                        "title": title[:500],
+                        "url": href[:4000],
+                        "click_target": href[:4000],
+                        "url_is_google_redirect": is_google_result_redirect,
+                    }
+                )
+
+            except Exception:
+                continue
 
         if len(candidates) >= minimum_results:
             return candidates[:limit]
@@ -650,7 +688,8 @@ async def _get_google_organic_result_candidates(
         if loop.time() >= deadline:
             return candidates[:limit]
 
-        await page.wait_for_timeout(150)
+        await page.wait_for_timeout(125)
+
 
 async def _snapshot_result_snippet(link, site: str) -> str:
     """Extract a short result snippet without walking the whole page."""
@@ -705,7 +744,7 @@ async def _snapshot_search_results(page) -> list[dict[str, str]]:
         google_results = await _get_google_organic_result_candidates(
             page,
             limit=10,
-            timeout_ms=3_500,
+            timeout_ms=5_000,
             minimum_results=1,
         )
 
@@ -967,7 +1006,67 @@ def browser_page_snapshot(
         }
 
 def browser_search_google(query: str) -> dict[str, Any]:
-    return browser_goto("https://www.google.com/search?q=" + quote_plus(str(query or "").strip()))
+    """Search Google and verify that organic result DOM state is available."""
+    query = str(query or "").strip()
+
+    async def _search():
+        page = await _init_browser()
+        target_url = (
+            "https://www.google.com/search?q="
+            + quote_plus(query)
+        )
+
+        await page.goto(
+            target_url,
+            wait_until="domcontentloaded",
+            timeout=30_000,
+        )
+        await _auto_skip_ads(page)
+
+        organic_results = await _get_google_organic_result_candidates(
+            page,
+            limit=10,
+            timeout_ms=5_000,
+            minimum_results=1,
+        )
+
+        info = await browser_page_info_async(page)
+
+        results = [
+            {
+                "index": index + 1,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+            }
+            for index, item in enumerate(organic_results)
+        ]
+
+        info.update(
+            {
+                "action": "browser_search_google",
+                "query": query,
+                "search_url": target_url,
+                "results_ready": bool(results),
+                "result_count": len(results),
+                "results": results,
+                "verified": True,
+            }
+        )
+
+        return info
+
+    try:
+        return get_event_loop().run_until_complete(_search())
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "action": "browser_search_google",
+            "query": query,
+            "error": str(exc),
+        }
+
 
 
 def browser_search_bing(query: str) -> dict[str, Any]:
@@ -1451,7 +1550,7 @@ def browser_click_result(
             result_candidates = await _get_google_organic_result_candidates(
                 page,
                 limit=50,
-                timeout_ms=3_500,
+                timeout_ms=5_000,
                 minimum_results=required_results,
             )
 

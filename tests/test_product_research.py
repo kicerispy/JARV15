@@ -30,13 +30,21 @@ def test_product_research_parses_structured_argument():
 def test_product_research_builds_multiple_research_angles():
     queries = _queries("wireless headphones")
 
-    assert queries == [
+    assert queries[:5] == [
         "wireless headphones reviews price",
         "wireless headphones best reviews",
         "wireless headphones alternatives",
         "wireless headphones cheaper alternatives",
         "wireless headphones comparison review",
     ]
+
+    assert len(queries) > 5
+    assert all(
+        query.strip()
+        and not query.endswith(" under")
+        and not query.endswith(" budget")
+        for query in queries
+    )
 
 
 def test_product_research_classifies_known_source_domains():

@@ -338,52 +338,108 @@ def _parse_argument(argument: str) -> dict[str, Any]:
     }
 
 
-def _queries(subject, budget):
+def _queries(subject, budget=None):
     """Generate broad research angles without using the browser."""
     subject = str(subject or "").strip()
-    normalized_subject, normalized_budget = _extract_item_and_budget(subject)
+
+    normalized_subject, normalized_budget = _extract_item_and_budget(
+        subject
+    )
+
     if normalized_subject:
         subject = normalized_subject
+
     if budget is None and normalized_budget is not None:
         budget = normalized_budget
+
     try:
         budget_text = f"${float(budget):g}"
     except Exception:
         budget_text = ""
+
     clean = subject.replace(chr(34), "").strip()
+
     if not clean:
         return []
+
     phrase = f'"{clean}"'
-    queries = [
-        f"{phrase} reviews under {budget_text}".strip(),
-        f"{phrase} best budget {budget_text}".strip(),
-        f"{phrase} best overall".strip(),
-        f"{phrase} comparison".strip(),
-        f"{phrase} expert review".strip(),
-        f"{phrase} pros cons".strip(),
-        f"{phrase} alternatives".strip(),
-        f"{phrase} cheaper alternatives under {budget_text}".strip(),
-        f"{phrase} best value under {budget_text}".strip(),
-        f"{phrase} most comfortable".strip(),
-        f"{phrase} different types".strip(),
-        f"{phrase} premium alternative".strip(),
-        f"{clean} official manufacturer specifications".strip(),
-        f"{clean} official product page".strip(),
-    ]
+
+    if budget_text:
+        queries = [
+            f"{phrase} reviews under {budget_text}",
+            f"{phrase} best budget {budget_text}",
+            f"{phrase} best overall",
+            f"{phrase} comparison",
+            f"{phrase} expert review",
+            f"{phrase} pros cons",
+            f"{phrase} alternatives",
+            f"{phrase} cheaper alternatives under {budget_text}",
+            f"{phrase} best value under {budget_text}",
+            f"{phrase} most comfortable",
+            f"{phrase} different types",
+            f"{phrase} premium alternative",
+            f"{clean} official manufacturer specifications",
+            f"{clean} official product page",
+        ]
+    else:
+        # Preserve the original no-budget research angles first, then
+        # add the expanded research coverage.
+        queries = [
+            f"{clean} reviews price",
+            f"{clean} best reviews",
+            f"{clean} alternatives",
+            f"{clean} cheaper alternatives",
+            f"{clean} comparison review",
+            f"{phrase} best overall",
+            f"{phrase} expert review",
+            f"{phrase} pros cons",
+            f"{phrase} different types",
+            f"{phrase} premium alternative",
+            f"{clean} official manufacturer specifications",
+            f"{clean} official product page",
+        ]
+
     lowered = clean.lower()
-    audio = any(term in lowered for term in (
-        "headphone", "headphones", "earbud", "earbuds",
-        "earphone", "earphones", "headset", "audio",
-    ))
+
+    audio = any(
+        term in lowered
+        for term in (
+            "headphone",
+            "headphones",
+            "earbud",
+            "earbuds",
+            "earphone",
+            "earphones",
+            "headset",
+            "audio",
+        )
+    )
+
     if audio:
-        queries.extend([
-            f"{phrase} earbuds under {budget_text}".strip(),
-            f"{phrase} over ear comfortable under {budget_text}".strip(),
-            f"{phrase} on ear alternatives under {budget_text}".strip(),
-            f"{phrase} AirPods alternatives under {budget_text}".strip(),
-            f"{phrase} active noise cancelling alternatives under {budget_text}".strip(),
-        ])
-    return list(dict.fromkeys(query for query in queries if query))
+        if budget_text:
+            queries.extend([
+                f"{phrase} earbuds under {budget_text}",
+                f"{phrase} over ear comfortable under {budget_text}",
+                f"{phrase} on ear alternatives under {budget_text}",
+                f"{phrase} AirPods alternatives under {budget_text}",
+                f"{phrase} active noise cancelling alternatives under {budget_text}",
+            ])
+        else:
+            queries.extend([
+                f"{phrase} earbuds",
+                f"{phrase} over ear comfortable",
+                f"{phrase} on ear alternatives",
+                f"{phrase} AirPods alternatives",
+                f"{phrase} active noise cancelling alternatives",
+            ])
+
+    return list(
+        dict.fromkeys(
+            query.strip()
+            for query in queries
+            if query and query.strip()
+        )
+    )
 
 def _is_search_url(url: str) -> bool:
     """Return True only for search-engine result pages."""
@@ -2543,6 +2599,18 @@ def _choose_sources(discovered):
                 query
             ):
                 return True
+
+        recognized_type = forced_source_type(
+            source,
+            source.get("source_type"),
+        )
+
+        # Known source families are still useful even when a fixture,
+        # fallback result, or lightweight discovery record does not carry
+        # title/snippet/query metadata. Apply the strict relevance threshold
+        # only to otherwise-unclassified web sources.
+        if recognized_type != "web_source":
+            return False
 
         return source_relevance(source) < 3
 
