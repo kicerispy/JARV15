@@ -91,6 +91,11 @@ _REFERENCE_WORDS = (
     "compound",
     "coin",
     "contact",
+    "aircraft",
+    "vessel",
+    "ship",
+    "satellite",
+    "spacecraft",
 )
 
 _MORE_PATTERNS = (
