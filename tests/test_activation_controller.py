@@ -51,3 +51,31 @@ def test_active_task_accepts_high_confidence_wake():
 
     assert decision.triggered is True
     assert decision.reason == "strong active-task wake"
+
+
+def test_natural_jarvis_two_moderate_hits_with_support():
+    decision = evaluate_wake_scores(
+        [0.315, 0.711, 0.538, 0.713],
+        [0.79, 0.81, 0.78, 0.82],
+    )
+
+    assert decision.triggered is True
+    assert decision.reason == "multi-frame wake confirmation"
+
+
+def test_two_weak_speech_hits_do_not_activate():
+    decision = evaluate_wake_scores(
+        [0.57, 0.58, 0.56],
+        [0.80, 0.82, 0.81],
+    )
+
+    assert decision.triggered is False
+
+
+def test_moderate_hits_without_stronger_support_do_not_activate():
+    decision = evaluate_wake_scores(
+        [0.62, 0.63, 0.50],
+        [0.80, 0.81, 0.82],
+    )
+
+    assert decision.triggered is False

@@ -49,21 +49,31 @@ HEED_CANDIDATE_THRESHOLD = float(
 NORMAL_SINGLE_TRIGGER = float(
     os.environ.get(
         "JARVIS_ACTIVATION_SINGLE_TRIGGER",
-        "0.78",
+        "0.72",
     )
 )
 
 NORMAL_MULTI_TRIGGER = float(
     os.environ.get(
         "JARVIS_ACTIVATION_MULTI_TRIGGER",
-        "0.67",
+        "0.62",
+    )
+)
+
+# A second moderate hit must still have one stronger companion hit. This
+# supports naturally spoken "Jarvis" patterns such as ~0.71 + ~0.71 while
+# avoiding activation from a string of uniformly weak speech scores.
+NORMAL_MULTI_SUPPORT_TRIGGER = float(
+    os.environ.get(
+        "JARVIS_ACTIVATION_MULTI_SUPPORT_TRIGGER",
+        "0.68",
     )
 )
 
 NORMAL_SOFT_TRIGGER = float(
     os.environ.get(
         "JARVIS_ACTIVATION_SOFT_TRIGGER",
-        "0.60",
+        "0.56",
     )
 )
 
@@ -75,10 +85,12 @@ ACTIVE_TASK_SINGLE_TRIGGER = float(
     )
 )
 
+# Keep confirmation tightly bound to one spoken wake-word event.
+# At 100 ms per activation frame, six frames cover ~600 ms.
 SCORE_WINDOW_FRAMES = int(
     os.environ.get(
         "JARVIS_ACTIVATION_SCORE_WINDOW",
-        "10",
+        "6",
     )
 )
 
@@ -248,7 +260,10 @@ def evaluate_wake_scores(
             reverse=True,
         )[:2]
 
-        if sum(top_two) / 2.0 >= NORMAL_MULTI_TRIGGER:
+        if (
+            sum(top_two) / 2.0 >= NORMAL_MULTI_TRIGGER
+            and max(top_two) >= NORMAL_MULTI_SUPPORT_TRIGGER
+        ):
             return ActivationDecision(
                 True,
                 "multi-frame wake confirmation",
@@ -269,8 +284,8 @@ def evaluate_wake_scores(
         )[:3]
 
         if (
-            sum(top_three) / 3.0 >= 0.62
-            and max(top_three) >= 0.66
+            sum(top_three) / 3.0 >= 0.59
+            and max(top_three) >= 0.64
         ):
             return ActivationDecision(
                 True,
