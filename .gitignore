@@ -62,6 +62,10 @@ input.wav
 # JARVIS autonomous repair checkpoints
 .jarvis_checkpoints/
 
+# Optional external integrations
+.jarvis_external/
+.jarvis_gods_eye.pid
+
 # Historical backup files
 *.before_*
 *.backup
