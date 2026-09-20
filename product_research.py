@@ -3481,6 +3481,7 @@ def _extract_candidate_signals(evidence, budget=None):
 
                 prices = []
                 budget_price_signal = False
+                budget_price_hint = False
 
                 price_matches = re.finditer(
                     r'(?<![\w])\$\s*([0-9]{1,4}(?:,[0-9]{3})*(?:\.\d{1,2})?)',
@@ -3497,6 +3498,15 @@ def _extract_candidate_signals(evidence, budget=None):
 
                     if not (1 <= price_value <= 100000):
                         continue
+
+                    if (
+                        isinstance(budget, (int, float))
+                        and price_value <= float(budget)
+                    ):
+                        # This is only a discovery hint. It may be MSRP/list
+                        # pricing and must still pass final direct-page
+                        # verification before it can satisfy the budget.
+                        budget_price_hint = True
 
                     relevance = _candidate_price_relevance(
                         neighborhood,
@@ -3524,6 +3534,7 @@ def _extract_candidate_signals(evidence, budget=None):
                         'observed_prices': [],
                         'form_factor': _candidate_form_factor(candidate),
                         'budget_price_signal': False,
+                        'budget_price_hint': False,
                         'review_source_count': 0,
                         'known_source_count': 0,
                     },
@@ -3547,6 +3558,8 @@ def _extract_candidate_signals(evidence, budget=None):
 
                 if budget_price_signal:
                     record['budget_price_signal'] = True
+                if budget_price_hint:
+                    record['budget_price_hint'] = True
 
                 for price in prices:
                     if price not in record['observed_prices']:
@@ -3554,12 +3567,15 @@ def _extract_candidate_signals(evidence, budget=None):
 
     for record in signals.values():
         record['budget_signal'] = bool(record.get('budget_price_signal'))
+        record['budget_hint'] = bool(record.get('budget_price_hint'))
         record.pop('budget_price_signal', None)
+        record.pop('budget_price_hint', None)
 
     return sorted(
         signals.values(),
         key=lambda item: (
             item.get('budget_signal', False),
+            item.get('budget_hint', False),
             int(item.get('review_source_count') or 0),
             int(item.get('known_source_count') or 0),
             1 if item.get('form_factor') in {
@@ -3575,15 +3591,40 @@ def _extract_candidate_signals(evidence, budget=None):
 def _inject_candidate_products(analysis, evidence, budget):
     if not isinstance(analysis, dict):
         return {}
-    products = analysis.get('products') if isinstance(analysis.get('products'), list) else []
-    existing = {' '.join(str(p.get('name') or '').lower().split()) for p in products if isinstance(p, dict)}
-    existing_forms = {_candidate_form_factor(p.get('name')) for p in products if isinstance(p, dict)}
+
+    products = (
+        analysis.get('products')
+        if isinstance(analysis.get('products'), list)
+        else []
+    )
+    existing = {
+        ' '.join(str(p.get('name') or '').lower().split())
+        for p in products
+        if isinstance(p, dict)
+    }
+    existing_forms = {
+        _candidate_form_factor(p.get('name'))
+        for p in products
+        if isinstance(p, dict)
+    }
+
     signals = _extract_candidate_signals(evidence, budget)
-    # First reserve slots for approaches that the model omitted.
-    ordered = sorted(
-        signals,
+
+    # Preserve review-backed candidates even when the page did not expose a
+    # current price. A discovery hint is never treated as verified pricing.
+    review_backed = [
+        signal
+        for signal in signals
+        if int(signal.get('review_source_count') or 0) >= 1
+        or (
+            int(signal.get('known_source_count') or 0) >= 1
+            and bool(signal.get('budget_hint'))
+        )
+    ]
+    review_backed.sort(
         key=lambda item: (
             item.get('budget_signal', False),
+            item.get('budget_hint', False),
             int(item.get('review_source_count') or 0),
             int(item.get('known_source_count') or 0),
             1 if item.get('form_factor') not in existing_forms else 0,
@@ -3592,28 +3633,59 @@ def _inject_candidate_products(analysis, evidence, budget):
         ),
         reverse=True,
     )
+
+    generic_budget = [
+        signal
+        for signal in signals
+        if signal.get('budget_signal')
+        and int(signal.get('review_source_count') or 0) == 0
+    ]
+
+    ordered = review_backed + generic_budget
+
     for signal in ordered:
         if len(products) >= 6:
             break
-        if not signal.get('budget_signal'):
-            continue
+
         name = str(signal.get('name') or '').strip()
         key = ' '.join(name.lower().split())
         if not name or key in existing:
             continue
+
+        if not (
+            signal.get('budget_signal')
+            or signal.get('budget_hint')
+            or int(signal.get('review_source_count') or 0) >= 1
+        ):
+            continue
+
+        if signal.get('budget_signal'):
+            fit = 'budget_alternative'
+        elif signal.get('budget_hint'):
+            fit = 'budget_candidate'
+        else:
+            fit = 'review_candidate'
+
         product = {
-            'name': name, 'model_number': None, 'price': None,
-            'rating': None, 'review_count': None,
+            'name': name,
+            'model_number': None,
+            'price': None,
+            'rating': None,
+            'review_count': None,
             'source_ids': signal.get('source_ids') or [],
-            'pros': [], 'cons': [],
-            'fit': 'budget_alternative',
+            'pros': [],
+            'cons': [],
+            'fit': fit,
             'candidate_signal': True,
             'candidate_form_factor': signal.get('form_factor') or 'other',
             'observed_prices': signal.get('observed_prices') or [],
+            'budget_discovery_hint': bool(signal.get('budget_hint')),
+            'review_source_count': int(signal.get('review_source_count') or 0),
         }
         products.append(product)
         existing.add(key)
         existing_forms.add(signal.get('form_factor') or 'other')
+
     analysis['products'] = products[:6]
     return analysis
 
