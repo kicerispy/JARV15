@@ -67,6 +67,26 @@ class ApiSpeechSummaryTests(unittest.TestCase):
             "100 USD is 87.00 EUR. The exchange rate is 0.87005.",
         )
 
+    def test_currency_legacy_from_to_shape(self):
+        summary = _api_spoken_summary(
+            "currency_convert",
+            ToolResult(
+                success=True,
+                tool="currency_convert",
+                data={
+                    "amount": 100,
+                    "from": "USD",
+                    "to": "EUR",
+                    "converted": 87.0,
+                    "rate": 0.87,
+                },
+            ),
+        )
+        self.assertEqual(
+            summary,
+            "100 USD is 87.00 EUR. The exchange rate is 0.87000.",
+        )
+
     def test_location_direct_payload(self):
         result = ToolResult(
             success=True,
