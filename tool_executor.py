@@ -220,6 +220,16 @@ def _browser_result_status(result: Any) -> tuple[bool, bool]:
     return True, True
 
 
+def _browser_failure_terminal(result: Any) -> bool:
+    """Return True when a browser failure is explicitly terminal."""
+    data = result.data if isinstance(result, ToolResult) else result
+
+    if isinstance(data, dict):
+        return bool(data.get("terminal", False))
+
+    return False
+
+
 def _observe_browser_state() -> dict:
     """Re-read the current browser page before attempting recovery."""
     try:
@@ -482,6 +492,14 @@ def _execute_browser_with_fallback(
 
         result = retry_result
 
+    if _browser_failure_terminal(result):
+        return _augment_browser_recovery_result(
+            result,
+            observed_before=observed_before,
+            observed_after=_observe_browser_state(),
+            recovered_by="terminal_dom_failure",
+        )
+
     # Try a single alternate strategy only after re-observing the page.
     alternate_tool, alternate_argument = _browser_alternate_strategy(
         tool_name,
@@ -536,72 +554,6 @@ def _execute_browser_with_fallback(
 
     if success and verified:
         return result
-
-    # Existing desktop-vision fallback remains the last browser-click resort.
-    if tool_name in {"browser_click_element", "browser_click_result", "browser_click_first_result"}:
-        if tool_name == "browser_click_element":
-            target = (
-                str(payload.get("text") or "").strip()
-                or str(payload.get("role") or "").strip()
-                or str(payload.get("selector") or "").strip()
-            )
-        else:
-            if tool_name == "browser_click_result":
-                index = payload.get("index", 1)
-                try:
-                    is_last = (
-                        str(index).strip().lower() in {"last", "final"}
-                        or int(index) < 0
-                    )
-                except Exception:
-                    is_last = False
-                ordinal = "last" if is_last else str(index)
-            else:
-                ordinal = "1"
-            target = f"{ordinal} search result"
-
-            site = str(
-                payload.get("site")
-                or observed_before.get("site")
-                or ""
-            ).strip()
-
-            if site:
-                target += f" on {site}"
-
-        if target:
-            try:
-                from screen_vision import click_screen_target
-
-                fallback = click_screen_target(target)
-
-                if isinstance(fallback, dict) and fallback.get("success"):
-                    after_fallback = _observe_browser_state()
-
-                    return ToolResult(
-                        success=True,
-                        tool=tool_name,
-                        data={
-                            **fallback,
-                            "original_browser_failure": str(
-                                getattr(result, "error", "")
-                                or (
-                                    result.get("error", "")
-                                    if isinstance(result, dict)
-                                    else ""
-                                )
-                            ),
-                            "recovered_by": "desktop_vision",
-                            "observed_before": observed_before,
-                            "observed_after": after_fallback,
-                        },
-                        observation=fallback,
-                    )
-            except Exception as fallback_error:
-                logger.debug(
-                    "JARVIS: Desktop fallback unavailable: %s",
-                    fallback_error,
-                )
 
     return _augment_browser_recovery_result(
         result,
@@ -3431,6 +3383,30 @@ def execute_plan(
                 trace_entry["verified"] = verified
                 trace_entry["result"] = result
                 trace_entry["message"] = message
+                trace_entry["retryable"] = bool(
+                    result.retryable
+                    if isinstance(result, ToolResult)
+                    else (
+                        result.get("retryable", False)
+                        if isinstance(result, dict)
+                        else False
+                    )
+                )
+
+                trace_data = (
+                    result.data
+                    if isinstance(result, ToolResult)
+                    else result
+                )
+                if isinstance(trace_data, dict):
+                    trace_entry["terminal"] = bool(
+                        trace_data.get("terminal", False)
+                    )
+                    if trace_data.get("failure_reason"):
+                        trace_entry["failure_reason"] = str(
+                            trace_data["failure_reason"]
+                        )
+
                 trace_entry["attempts"] = max(
                     1,
                     int(task_state.attempts or 1),
@@ -3657,6 +3633,8 @@ def execute_plan(
                 trace_entry["message"] = error_message
                 trace_entry["status"] = "failed"
                 trace_entry["failure_type"] = "exception"
+                trace_entry["retryable"] = True
+                trace_entry["terminal"] = False
                 trace_entry["attempts"] = max(
                     1,
                     int(task_state.attempts or 1),
