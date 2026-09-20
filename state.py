@@ -55,6 +55,10 @@ class ActiveContext:
             self.last_result = last_result
         if last_result_data is not None:
             self.last_result_data = last_result_data
+        if last_result_index is not None:
+            self.last_result_index = last_result_index
+        if last_selected_result is not None:
+            self.last_selected_result = last_selected_result
         if page_url is not None:
             self.page_url = page_url
         if page_title is not None:
@@ -92,8 +96,6 @@ class ActiveContext:
             "last_tool": self.last_tool,
             "last_result": self.last_result,
             "last_result_data": self.last_result_data,
-            "last_result_index": self.last_result_index,
-            "last_selected_result": self.last_selected_result,
             "last_result_index": self.last_result_index,
             "last_selected_result": self.last_selected_result,
             "page_url": self.page_url,
