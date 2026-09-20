@@ -1006,14 +1006,27 @@ class BrowserPriceChecker:
                 notes=f"DOM extraction failed: {exc}",
             )
 
-        if is_blocked(body):
-            return PriceOffer(
-                store=store_key,
-                label=label,
-                url=url,
-                price=None,
-                notes="Retailer page appears to be blocked or protected; JARVIS did not bypass it.",
+        search_page_blocked = is_blocked(body)
+        google_direct_url = ""
+
+        # A protected retailer search page may still be unable to provide
+        # links, but a public Google site-restricted result can point at the
+        # same retailer's direct product page. We never bypass the retailer
+        # protection; we simply verify the direct public page independently.
+        if search_page_blocked:
+            google_direct_url = self._google_direct_product_url(
+                store_key,
+                product_name,
+                model_number,
             )
+            if not google_direct_url:
+                return PriceOffer(
+                    store=store_key,
+                    label=label,
+                    url=url,
+                    price=None,
+                    notes="Retailer page appears to be blocked or protected; JARVIS did not bypass it.",
+                )
 
         score = match_score(product_name, body, model_number)
 
@@ -1025,17 +1038,24 @@ class BrowserPriceChecker:
         direct_product_page_seen = False
         direct_snapshot = {}
 
-        direct_url = self._direct_product_url(
-            store_key,
-            url,
-            product_name,
-            model_number,
+        direct_url = (
+            google_direct_url
+            or self._direct_product_url(
+                store_key,
+                url,
+                product_name,
+                model_number,
+            )
         )
 
         # A search-result page can contain several products and unrelated
         # prices. When we can resolve an exact product link, inspect that
         # public product page too so the price is tied to the product itself.
-        if direct_url and direct_url != url and score >= 0.80:
+        if (
+            direct_url
+            and direct_url != url
+            and (score >= 0.80 or bool(google_direct_url))
+        ):
             try:
                 self.browser_goto(direct_url)
 
