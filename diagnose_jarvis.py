@@ -144,15 +144,16 @@ def check_structured_context() -> list[str]:
     )
     from state import ActiveContext
     from tool_executor import update_active_context
+    from tool_result import ToolResult
 
     failures = []
 
     context = ActiveContext()
 
-    raw_book_result = {
-        "success": True,
-        "tool": "book_search",
-        "data": {
+    raw_book_result = ToolResult(
+        success=True,
+        tool="book_search",
+        data={
             "query": "Frank Herbert",
             "books": [
                 {
@@ -167,7 +168,7 @@ def check_structured_context() -> list[str]:
                 },
             ],
         },
-    }
+    )
 
     try:
         update_active_context(
