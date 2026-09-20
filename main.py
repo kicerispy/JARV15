@@ -33,6 +33,7 @@ from config import (
 from typed_input import TypedInputChannel
 from context_aware import JarvisContext
 from context_resolver import resolve_followup
+from result_context import resolve_result_followup
 from conversation import ConversationHistory
 from conversation_handler import (
     handle_normal_conversation,
@@ -878,6 +879,69 @@ def process_command(
         "user",
         user_input,
     )
+
+    # ==================================================
+    # STRUCTURED RESULT FOLLOW-UP
+    # ==================================================
+    #
+    # Resolve simple references such as "What was the second one?"
+    # and "Tell me more about that" directly from the stored result.
+    # This avoids another planner/API call when the information is
+    # already available locally.
+    # ==================================================
+
+    if (
+        task_controller is None
+        or not task_controller.has_active_task()
+    ):
+        try:
+            result_followup = resolve_result_followup(
+                user_input,
+                state.active_context.to_dict(),
+            )
+        except Exception as exc:
+            logger.debug(
+                f"JARVIS: Structured result follow-up skipped: {exc}"
+            )
+            result_followup = None
+
+        if result_followup:
+            reply = str(
+                result_followup.get("reply", "")
+                or ""
+            ).strip()
+
+            if reply:
+                index = result_followup.get("index")
+                selected = result_followup.get("selected")
+
+                if index is not None:
+                    state.active_context.last_result_index = index
+
+                if selected is not None:
+                    state.active_context.last_selected_result = selected
+
+                state.active_context.last_action = (
+                    "structured_result_followup"
+                )
+
+                conversation.add_message(
+                    "assistant",
+                    reply,
+                )
+
+                logger.info(
+                    f"JARVIS: Structured result follow-up: {reply}"
+                )
+
+                speak_callback(reply)
+
+                logger.info(
+                    f"PERF: total command processing: "
+                    f"{perf_now() - command_start:.3f}s"
+                )
+
+                return "done"
 
     # ==================================================
     # FAST COMMAND
