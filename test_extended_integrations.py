@@ -10,7 +10,7 @@ class ExtendedIntegrationTests(unittest.TestCase):
         expected = {
             "country_info", "crypto_price", "trivia_question", "joke",
             "meal_search", "tv_search", "music_search", "musicbrainz_search",
-            "anime_search", "ghibli_search", "openalex_search", "pubchem_lookup",
+            "anime_search", "anime_episodes", "ghibli_search", "openalex_search", "pubchem_lookup",
             "art_search", "nasa_eonet", "spacex_lookup", "sunrise_sunset",
             "topo_elevation", "public_ip", "reverse_geocode", "news_search",
             "cat_fact", "dog_image", "osm_search",
