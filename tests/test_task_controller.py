@@ -286,6 +286,18 @@ class PlanningFakeAgent:
         return task
 
 
+def test_tiny_browser_task_skips_initial_acknowledgement():
+    from task_controller import _should_send_initial_acknowledgement
+
+    assert _should_send_initial_acknowledgement(
+        "open example.com and tell me the page title"
+    ) is False
+
+    assert _should_send_initial_acknowledgement(
+        "inspect the browser and repair the search workflow"
+    ) is True
+
+
 def test_background_planning_does_not_block_caller():
     agent = PlanningFakeAgent()
     controller = BackgroundTaskController(agent)
@@ -609,3 +621,36 @@ def test_controller_queues_staged_final_speech_once_on_worker_finish():
         lambda message: spoken.append(message) or False
     ) == 0
     assert spoken == ["Found 'Downloads' on the page."]
+
+
+def test_start_marks_quick_browser_task_as_initially_acknowledged():
+    agent = FakeAgent()
+    controller = BackgroundTaskController(agent)
+    task_state = TaskState()
+
+    task = type("Task", (), {
+        "task_id": "quick-browser-task",
+        "request": "What's the page title of example.com?",
+        "goal": "What's the page title of example.com?",
+        "status": "created",
+        "steps": [object(), object()],
+        "current_step": -1,
+        "replan_count": 0,
+        "error": None,
+        "started_at": None,
+        "completed_at": None,
+        "initial_acknowledged": False,
+    })()
+
+    assert controller.start(
+        task,
+        {},
+        task_state,
+        None,
+    ) is True
+
+    assert task.initial_acknowledged is True
+    assert controller.drain_speech(lambda message: False) == 0
+
+    agent.release.set()
+    assert controller.wait_for_current(timeout=1) is True

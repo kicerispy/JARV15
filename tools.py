@@ -18,6 +18,7 @@ import certifi
 import psutil
 
 from tool_result import ToolResult
+from tool_registry import BROWSER_TOOLS
 
 import barehands_tools
 import file_tools
@@ -1706,6 +1707,22 @@ def code_restore_checkpoint(argument=""):
             manifest_path.read_text(encoding="utf-8")
         )
 
+        manifest_names = {
+            str(Path(name)).replace("\\", "/")
+            for name in manifest.get("files", [])
+        }
+
+        removed_new_files = 0
+        for current_path in _checkpoint_source_files():
+            relative_name = str(current_path.relative_to(base)).replace("\\", "/")
+            if relative_name in manifest_names:
+                continue
+            try:
+                current_path.unlink()
+                removed_new_files += 1
+            except OSError:
+                pass
+
         restored = 0
         for relative_name in manifest.get("files", []):
             relative = Path(relative_name)
@@ -1731,9 +1748,15 @@ def code_restore_checkpoint(argument=""):
             "verified": restored == expected,
             "message": (
                 f"Restored {restored} of {expected} checkpointed source files."
+                + (
+                    f" Removed {removed_new_files} source file(s) created after the checkpoint."
+                    if removed_new_files
+                    else ""
+                )
             ),
             "restored_files": restored,
             "expected_files": expected,
+            "removed_new_source_files": removed_new_files,
         }
 
     except Exception as e:
@@ -2639,27 +2662,7 @@ PRODUCT_RESEARCH_TOOLS = {
 }
 
 
-BROWSER_TOOLS = {
-    "browser_find_element",
-    "browser_click_element",
-    "browser_fill_element",
-    "browser_press_key",
-    "browser_wait_for_element",
-    "browser_extract_text",
-    "browser_find_text",
-    "browser_click_first_result",
-    "browser_connect",
-    "browser_search_google",
-    "browser_search_bing",
-    "browser_click_first_bing_result",
-    "browser_goto",
-    "browser_page_info",
-    "browser_page_snapshot",
-    "browser_click_result",
-    "browser_back",
-    "browser_agent_run",
-    "browser_agent_status",
-}
+BROWSER_TOOLS = BROWSER_TOOLS
 
 
 # ============================================================
@@ -2909,6 +2912,15 @@ def run_browser_tool(
         browser_page_info,
         browser_page_snapshot,
         browser_find_text,
+        browser_refresh,
+        browser_forward,
+        browser_new_tab,
+        browser_switch_tab,
+        browser_current_tab,
+        browser_close_tab,
+        browser_get_links,
+        browser_open_link,
+        browser_scroll,
     )
 
     argument = str(argument or "").strip()
@@ -3070,6 +3082,80 @@ def run_browser_tool(
                     max_matches=payload.get("max_matches", 3),
                 )
             )
+
+    if tool_name == "browser_refresh":
+        return normalize(browser_refresh())
+
+    if tool_name == "browser_forward":
+        return normalize(browser_forward())
+
+    if tool_name == "browser_current_tab":
+        return normalize(browser_current_tab())
+
+    if tool_name == "browser_new_tab":
+        return normalize(browser_new_tab(argument))
+
+    if tool_name == "browser_switch_tab":
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="Browser tab",
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, tool=tool_name, error=str(exc))
+        return normalize(browser_switch_tab(payload.get("index", "current")))
+
+    if tool_name == "browser_close_tab":
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="Browser tab",
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, tool=tool_name, error=str(exc))
+        return normalize(browser_close_tab(payload.get("index", "current")))
+
+    if tool_name == "browser_get_links":
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="Browser links",
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, tool=tool_name, error=str(exc))
+        return normalize(browser_get_links(payload.get("limit", 30)))
+
+    if tool_name == "browser_open_link":
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="Browser link",
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, tool=tool_name, error=str(exc))
+        return normalize(
+            browser_open_link(
+                index=payload.get("index", 1),
+                text=payload.get("text", ""),
+                href=payload.get("href", ""),
+            )
+        )
+
+    if tool_name == "browser_scroll":
+        try:
+            payload = _parse_browser_object_argument(
+                argument,
+                label="Browser scroll",
+            )
+        except ValueError:
+            raw = str(argument or "").strip().lower()
+            return normalize(browser_scroll(raw or "down", 500))
+        return normalize(
+            browser_scroll(
+                payload.get("direction", "down"),
+                payload.get("distance", 500),
+            )
+        )
 
     if tool_name == "browser_page_info":
         return normalize(browser_page_info())

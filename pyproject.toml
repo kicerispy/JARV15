@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "jarvis"
 version = "1.0.0"
 description = "JARVIS - A personal AI assistant"
-readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
@@ -25,14 +24,18 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["jarvis"]
 py-modules = [
     "main", "config", "commands", "code_gen", "context_aware",
     "context_resolver", "conversation", "conversation_handler",
     "file_tools", "jarvis_status", "launcher", "logger", "memory",
     "memory_ai", "mic_test", "mouse_calibration", "planner", "recovery",
     "run_jarvis", "screen_vision", "speech", "state", "summarizer",
-    "tool_executor", "tools", "tts_mic_test", "voice", "wakeword",
+    "tool_executor", "tools", "tool_registry", "tool_result", "task_controller", "task_memory",
+    "agent_core", "agent_loop", "api_tools", "barehands_controller", "barehands_state",
+    "barehands_tools", "browser_agent", "browser_agent_worker", "browser_controller",
+    "capability_runtime", "extended_api_tools", "gods_eye", "model_manager",
+    "product_research", "result_context", "runtime_health", "smart_router",
+    "startup_manager", "tts_mic_test", "typed_input", "voice", "wakeword",
     "web_interface", "web_summary", "web_tools",
 ]
 

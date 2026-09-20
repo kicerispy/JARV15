@@ -1213,6 +1213,153 @@ def _is_specialized_api_request(user_request):
     )
 
 
+def _extract_browser_url(text):
+    match = re.search(
+        r"https?://[^\s<>\"']+|www\.[^\s<>\"']+|"
+        r"\b[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:/[^\s<>\"']*)?",
+        str(text or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    value = match.group(0).rstrip(".,;:!?)]}\"'")
+    if not value:
+        return ""
+    if "://" not in value:
+        value = "https://" + value
+    return value
+
+
+def build_browser_qol_plan(user_request):
+    """Build zero-LLM plans for common browser navigation and maintenance."""
+    text = clean_text(user_request)
+    if not text:
+        return None
+
+    autonomous_browser = (
+        "autonomous browser" in text
+        or "browser agent" in text
+        or "browser use" in text
+    )
+    if autonomous_browser:
+        return None
+
+    if any(term in text for term in (
+        "page title",
+        "title of the page",
+        "title of that page",
+        "read the title",
+        "read the page title",
+    )):
+        url = _extract_browser_url(user_request)
+        steps = []
+        if url:
+            steps.append({"tool": "browser_goto", "argument": url})
+        steps.append({"tool": "browser_page_info", "argument": ""})
+        return {"steps": steps}
+
+    if any(term in text for term in (
+        "current url",
+        "current page url",
+        "what url am i on",
+    )):
+        return {"steps": [{"tool": "browser_page_info", "argument": ""}]}
+
+    if text in {
+        "refresh", "refresh page", "refresh the page",
+        "refresh the browser", "reload", "reload page", "reload the page",
+    }:
+        return {"steps": [{"tool": "browser_refresh", "argument": ""}]}
+
+    if text in {"go forward", "go forward in the browser", "forward"}:
+        return {"steps": [{"tool": "browser_forward", "argument": ""}]}
+
+    if re.match(r"^(?:open|create|start)\s+(?:a\s+)?new\s+tab$", text, re.IGNORECASE):
+        return {"steps": [{"tool": "browser_new_tab", "argument": ""}]}
+
+    new_tab_match = re.match(
+        r"^(?:open|create|start)\s+(?:a\s+)?new\s+tab\s+(?:to|with)\s+(.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if new_tab_match:
+        target = _extract_browser_url(new_tab_match.group(1))
+        if target:
+            return {"steps": [{"tool": "browser_new_tab", "argument": target}]}
+
+    tab_match = re.match(
+        r"^(?:switch|go)\s+(?:to\s+)?tab\s+(\d+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if tab_match:
+        return {
+            "steps": [{
+                "tool": "browser_switch_tab",
+                "argument": json.dumps({"index": int(tab_match.group(1))}),
+            }]
+        }
+
+    if text in {"close this tab", "close the current tab", "close current tab"}:
+        return {
+            "steps": [{
+                "tool": "browser_close_tab",
+                "argument": json.dumps({"index": "current"}),
+            }]
+        }
+
+    if text in {
+        "what links are on this page",
+        "what links are on the page",
+        "show me the links on this page",
+        "list the links on this page",
+        "get the links on this page",
+    }:
+        return {
+            "steps": [{
+                "tool": "browser_get_links",
+                "argument": json.dumps({"limit": 30}),
+            }]
+        }
+
+    open_link_match = re.match(
+        r"^(?:open|click)\s+(?:the\s+)?"
+        r"(first|second|third|fourth|fifth|last)\s+link$",
+        text,
+        re.IGNORECASE,
+    )
+    if open_link_match:
+        ordinal = open_link_match.group(1).lower()
+        ordinal_map = {
+            "first": 1, "second": 2, "third": 3,
+            "fourth": 4, "fifth": 5, "last": "last",
+        }
+        return {
+            "steps": [{
+                "tool": "browser_open_link",
+                "argument": json.dumps({"index": ordinal_map[ordinal]}),
+            }]
+        }
+
+    if text in {"scroll down the page", "scroll down", "scroll the page down"}:
+        return {
+            "steps": [{
+                "tool": "browser_scroll",
+                "argument": json.dumps({"direction": "down", "distance": 600}),
+            }]
+        }
+
+    if text in {"scroll up the page", "scroll up", "scroll the page up"}:
+        return {
+            "steps": [{
+                "tool": "browser_scroll",
+                "argument": json.dumps({"direction": "up", "distance": 600}),
+            }]
+        }
+
+    return None
+
+
 def deterministic_route(user_request):
 
 
@@ -1234,6 +1381,18 @@ def deterministic_route(user_request):
     if navigation_plan:
         print("JARVIS: Direct browser navigation detected.")
         return navigation_plan
+
+    # ==================================================
+    # BROWSER QUALITY-OF-LIFE FAST PATHS
+    # ==================================================
+
+    browser_qol_plan = build_browser_qol_plan(
+        user_request
+    )
+
+    if browser_qol_plan:
+        print("JARVIS: Browser QoL fast path selected.")
+        return browser_qol_plan
 
     # ==================================================
     # Media Controls
@@ -2569,6 +2728,23 @@ def should_resolve_context(text):
         "click that",
         "play that",
         "select that",
+        "tell me more",
+        "tell me more about that",
+        "tell me more about this",
+        "tell me more about it",
+        "what else can you tell me",
+        "give me more details",
+        "expand on that",
+        "what was the first one",
+        "what was the second one",
+        "what was the third one",
+        "what was the last one",
+        "tell me about the first one",
+        "tell me about the second one",
+        "tell me about the third one",
+        "tell me about the last one",
+        "what is the source",
+        "where did you get that",
     )
 
     if (

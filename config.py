@@ -402,6 +402,17 @@ CODING_MODEL_KEEP_ALIVE = os.environ.get(
 ).strip() or "15m"
 
 
+# Delay the optional coding-model warm-up until the runtime has settled.
+# This keeps JARVIS responsive during startup while still warming the model
+# shortly after the assistant becomes idle.
+CODING_MODEL_WARMUP_DELAY_SECONDS = float(
+    os.environ.get(
+        "JARVIS_CODING_MODEL_WARMUP_DELAY_SECONDS",
+        "15",
+    )
+)
+
+
 # ============================================================
 # DEBUG
 # ============================================================

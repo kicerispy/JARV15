@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import config
 from model_manager import ModelManager
 from logger import logger
+from tool_registry import BROWSER_TOOLS, JSON_ARGUMENT_TOOLS
 
 MODEL_MANAGER = ModelManager()
 PLANNER_MODEL = MODEL_MANAGER.planner_model
@@ -24,6 +25,15 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
+    "browser_refresh": "Refresh the current browser tab.",
+    "browser_forward": "Navigate the current browser tab forward.",
+    "browser_new_tab": "Open a new controlled browser tab. Argument is an optional URL.",
+    "browser_switch_tab": "Switch to a browser tab by 1-based index. Argument is JSON.",
+    "browser_current_tab": "Report the active browser tab and all open tabs.",
+    "browser_close_tab": "Close a browser tab while keeping at least one JARVIS tab open. Argument is JSON.",
+    "browser_get_links": "List visible links on the current page. Argument is JSON with optional limit.",
+    "browser_open_link": "Open a visible link by text, href, or 1-based index. Argument is JSON.",
+    "browser_scroll": "Scroll the controlled browser. Argument is JSON with direction and optional distance.",
     "browser_agent_run": "Run an autonomous browser task in the controlled Chrome session. Argument = task text or JSON with task and optional max_steps.",
     "browser_agent_status": "Check whether the optional autonomous browser-agent stack is installed and connected.",
     "holiday_lookup": "Look up public holidays. Argument = ISO country code and optional year, e.g. US 2026.",
@@ -146,20 +156,6 @@ AVAILABLE_TOOLS: Dict[str, str] = {
 
 
 # Browser tools whose arguments are JSON objects encoded as strings.
-JSON_ARGUMENT_TOOLS = {
-    "browser_click_result",
-    "browser_click_first_result",
-    "browser_find_element",
-    "browser_click_element",
-    "browser_fill_element",
-    "browser_press_key",
-    "browser_wait_for_element",
-    "browser_extract_text",
-    "browser_find_text",
-    "product_research",
-    "code_diagnose",
-    "dev_command",
-}
 
 
 # ==========================================================
@@ -527,7 +523,15 @@ Browser workflow:
 9. Use browser_find_text when the user asks to find a phrase or information
    somewhere in the current page's readable content.
 10. Use browser_click_result for second, third, or last search results.
-10. Use browser_back for requests to go back to the previous page.
+11. Use browser_refresh for refresh/reload requests.
+12. Use browser_forward for forward-navigation requests.
+13. Use browser_current_tab when the user asks which tab/page is active.
+14. Use browser_new_tab to open a new tab, especially when the user explicitly says "new tab".
+15. Use browser_switch_tab/browser_close_tab for explicit tab management.
+16. Use browser_get_links when the user asks what links are on the page.
+17. Use browser_open_link when a specific visible link needs to be opened.
+18. Use browser_scroll for page scrolling when DOM scrolling is sufficient.
+19. Use browser_back for requests to go back to the previous page.
 11. When an action fails, use the browser state and observations to
    choose a different strategy during replanning.
 

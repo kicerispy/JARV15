@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from config import (
     CHAT_MODEL,
+    PLANNER_MODEL,
     CODING_MODEL,
     OLLAMA_HOST,
     VERIFY_MODEL,
@@ -85,7 +86,7 @@ def collect_health() -> Dict[str, Any]:
         "barehands": _loaded_module("barehands_tools"),
         "models": {
             "chat": CHAT_MODEL,
-            "planner": CHAT_MODEL,
+            "planner": PLANNER_MODEL,
             "coding": CODING_MODEL,
             "vision": VISION_MODEL,
             "verify": VERIFY_MODEL,
