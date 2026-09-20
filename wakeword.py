@@ -1,4 +1,3 @@
-import os
 import json
 import time
 from collections import deque
@@ -131,39 +130,15 @@ MIN_SOFT_HITS = 2
 # Don't print tiny probabilities.
 DEBUG_PRINT_THRESHOLD = 0.30
 
-# The wake model is considerably more level-sensitive than Whisper's command
-# capture. A bounded software preamp lets naturally spoken wake words remain
-# detectable when the microphone is a little farther away or the input level
-# is modest. This is applied only to the Heed model window; command recording
-# keeps the original microphone samples unchanged.
-WAKE_MODEL_TARGET_RMS = float(
-    os.environ.get(
-        "JARVIS_WAKE_MODEL_TARGET_RMS",
-        "0.030",
-    )
+# The exported Heed model metadata requires peak normalization to -3 dBFS.
+# Keep this preprocessing aligned with the data the model was trained on so
+# microphone distance changes the raw level without changing the model's
+# effective input scale.
+WAKE_PEAK_TARGET_DBFS = -3.0
+WAKE_PEAK_TARGET_AMPLITUDE = float(
+    10.0 ** (WAKE_PEAK_TARGET_DBFS / 20.0)
 )
 
-WAKE_MODEL_MAX_GAIN = float(
-    os.environ.get(
-        "JARVIS_WAKE_MODEL_MAX_GAIN",
-        "2.25",
-    )
-)
-
-WAKE_MODEL_GAIN_WINDOW_SAMPLES = int(
-    os.environ.get(
-        "JARVIS_WAKE_MODEL_GAIN_WINDOW_SAMPLES",
-        "3200",
-    )
-)
-
-WAKE_MODEL_GAIN_DEBUG = (
-    os.environ.get(
-        "JARVIS_WAKE_MODEL_GAIN_DEBUG",
-        "0",
-    ).strip().lower()
-    in {"1", "true", "yes", "on"}
-)
 
 
 # ==================================================
@@ -382,60 +357,36 @@ def append_audio(audio):
 
 def _prepare_model_waveform():
     """
-    Apply a bounded adaptive preamp to the most recent wake-word window.
+    Apply the same peak normalization used when the Heed model was exported.
 
-    The gain is based on recent audio RMS so quiet speech gets lifted while
-    already-strong speech is left alone. The result is clipped only as a
-    safety guard against unexpected over-range input.
+    The energy gate still evaluates the original microphone chunk, so this
+    normalization only affects the model's input waveform.
     """
 
     waveform = audio_buffer.copy()
 
-    window_size = min(
-        WAKE_MODEL_GAIN_WINDOW_SAMPLES,
-        len(waveform),
-    )
-
-    recent = waveform[-window_size:]
-
-    recent_rms = float(
-        np.sqrt(
-            np.mean(
-                np.square(recent)
-            )
+    peak = float(
+        np.max(
+            np.abs(waveform)
         )
     )
 
-    if (
-        recent_rms <= 1e-6
-        or WAKE_MODEL_TARGET_RMS <= 0
-    ):
-        return waveform, 1.0
+    if peak <= 1e-6:
+        return waveform
 
-    gain = max(
-        1.0,
-        WAKE_MODEL_TARGET_RMS / recent_rms,
+    waveform = (
+        waveform
+        * (WAKE_PEAK_TARGET_AMPLITUDE / peak)
     )
 
-    gain = min(
-        gain,
-        WAKE_MODEL_MAX_GAIN,
-    )
-
-    if gain <= 1.0001:
-        return waveform, 1.0
-
-    waveform = np.clip(
-        waveform * gain,
-        -0.999,
-        0.999,
-    )
-
-    return waveform.astype(
+    return np.clip(
+        waveform,
+        -WAKE_PEAK_TARGET_AMPLITUDE,
+        WAKE_PEAK_TARGET_AMPLITUDE,
+    ).astype(
         np.float32,
         copy=False,
-    ), gain
-
+    )
 
 def get_wake_probability():
     """
@@ -446,12 +397,7 @@ def get_wake_probability():
     if samples_seen < AUDIO_WINDOW_SAMPLES:
         return 0.0
 
-    waveform, gain = _prepare_model_waveform()
-
-    if WAKE_MODEL_GAIN_DEBUG:
-        print(
-            f"JARVIS wake input gain: {gain:.2f}x"
-        )
+    waveform = _prepare_model_waveform()
 
     waveform = torch.from_numpy(
         waveform
