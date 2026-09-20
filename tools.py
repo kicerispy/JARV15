@@ -2681,6 +2681,53 @@ API_TOOLS = {
     "elevation_lookup",
 }
 
+EXTENDED_API_TOOLS = {
+    "country_info",
+    "crypto_price",
+    "trivia_question",
+    "joke",
+    "meal_search",
+    "tv_search",
+    "music_search",
+    "musicbrainz_search",
+    "anime_search",
+    "ghibli_search",
+    "openalex_search",
+    "pubchem_lookup",
+    "art_search",
+    "nasa_eonet",
+    "spacex_lookup",
+    "sunrise_sunset",
+    "topo_elevation",
+    "public_ip",
+    "reverse_geocode",
+    "news_search",
+    "cat_fact",
+    "dog_image",
+    "osm_search",
+}
+
+GODS_EYE_TOOLS = {
+    "gods_eye_status",
+    "gods_eye_setup",
+    "gods_eye_start",
+    "gods_eye_open",
+    "gods_eye_stop",
+    "gods_eye_contacts",
+    "gods_eye_launches",
+    "gods_eye_cameras",
+    "gods_eye_radio",
+    "gods_eye_transit",
+}
+
+SCREEN_MEMORY_TOOLS = {
+    "screen_memory_status",
+    "screen_memory_search",
+    "screen_memory_recent",
+}
+
+API_TOOLS = API_TOOLS | EXTENDED_API_TOOLS
+
 
 def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
     """
@@ -3042,6 +3089,30 @@ def _run_tool_raw(
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
+            tool_name,
+            argument,
+        )
+
+    if tool_name in EXTENDED_API_TOOLS:
+        from extended_api_tools import run_extended_api_tool
+
+        return run_extended_api_tool(
+            tool_name,
+            argument,
+        )
+
+    if tool_name in GODS_EYE_TOOLS:
+        from gods_eye import run_gods_eye_tool
+
+        return run_gods_eye_tool(
+            tool_name,
+            argument,
+        )
+
+    if tool_name in SCREEN_MEMORY_TOOLS:
+        from screen_memory import run_screen_memory_tool
+
+        return run_screen_memory_tool(
             tool_name,
             argument,
         )
