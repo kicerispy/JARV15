@@ -3542,7 +3542,8 @@ def _extract_candidate_signals(evidence, budget=None):
         ),
         reverse=True,
     )[:16]
-}
+
+
 def _inject_candidate_products(analysis, evidence, budget):
     if not isinstance(analysis, dict):
         return {}
