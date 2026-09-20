@@ -769,6 +769,7 @@ def update_active_context(
         "browser_extract_text",
         "browser_page_snapshot",
         "search_website",
+        "product_research",
     }
 
     for step in steps:
@@ -863,6 +864,49 @@ def update_active_context(
                 active_context.last_result = (
                     str(result_message)
                 )
+
+            continue
+
+        # ----------------------------------------------------
+        # Structured query/API result context
+        # ----------------------------------------------------
+
+        if tool_name in {
+            "knowledge_lookup",
+            "book_search",
+            "define_word",
+            "research_arxiv",
+            "research_crossref",
+            "holiday_lookup",
+            "vehicle_lookup",
+            "earthquake_search",
+            "api_discover",
+            "currency_convert",
+            "location_lookup",
+            "air_quality",
+            "weather_alerts",
+            "elevation_lookup",
+            "weather",
+            "current_time",
+            "current_date",
+            "product_research",
+        }:
+            active_context.last_tool = tool_name
+            active_context.last_action = tool_name
+
+            if argument:
+                active_context.last_query = argument
+
+            if result_message:
+                active_context.last_result = str(result_message)
+
+            if raw_result is not None:
+                structured_result = _unwrap_result_data(raw_result)
+
+                if structured_result is not None:
+                    active_context.last_result_data = structured_result
+                    active_context.last_result_index = None
+                    active_context.last_selected_result = None
 
             continue
 
@@ -3332,6 +3376,7 @@ def execute_plan(
             plan=plan,
             active_context=active_context,
             result_message=final_tool_message,
+            raw_result=result,
         )
 
         final_tool = executable_steps[-1]
