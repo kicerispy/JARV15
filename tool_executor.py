@@ -2000,6 +2000,34 @@ def _api_spoken_summary(
         "air_quality",
         "weather_alerts",
         "elevation_lookup",
+        "country_info",
+        "crypto_price",
+        "trivia_question",
+        "joke",
+        "meal_search",
+        "tv_search",
+        "music_search",
+        "musicbrainz_search",
+        "anime_search",
+        "ghibli_search",
+        "openalex_search",
+        "pubchem_lookup",
+        "art_search",
+        "nasa_eonet",
+        "spacex_lookup",
+        "sunrise_sunset",
+        "topo_elevation",
+        "public_ip",
+        "reverse_geocode",
+        "news_search",
+        "cat_fact",
+        "dog_image",
+        "osm_search",
+        "pokemon_lookup",
+        "food_product",
+        "cocktail_search",
+        "openverse_search",
+        "iss_location",
     }
 
     if tool not in api_tools:
@@ -2370,8 +2398,8 @@ def _api_spoken_summary(
 
     if tool == "currency_convert":
         amount = data.get("amount")
-        base = clean(data.get("base"), 10)
-        quote = clean(data.get("quote"), 10)
+        base = clean(data.get("base") or data.get("from"), 10)
+        quote = clean(data.get("quote") or data.get("to"), 10)
         converted = data.get("converted")
         rate = data.get("rate")
 
