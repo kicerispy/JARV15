@@ -348,6 +348,109 @@ def route_command(command: str) -> RouteDecision:
     if text in _FAST_EXACT or any(text.startswith(prefix) for prefix in _FAST_PREFIXES):
         return RouteDecision("fast", "deterministic command", 0.99)
 
+    # Tool-backed informational queries must reach the agent even when
+    # they are phrased as ordinary questions. The planner can then select
+    # the appropriate structured API tool instead of answering from model
+    # memory or routing through generic browser search.
+    tool_backed_query_signals = (
+        "public holiday",
+        "public holidays",
+        "holiday",
+        "holidays",
+        "define ",
+        "definition of ",
+        "dictionary",
+        "book ",
+        "books ",
+        "author ",
+        "authors ",
+        "research paper",
+        "research papers",
+        "research article",
+        "research articles",
+        "arxiv",
+        "scholarly",
+        "vin ",
+        "vehicle identification number",
+        "vehicle vin",
+        "earthquake",
+        "earthquakes",
+        "public api",
+        "public apis",
+        "free api",
+        "free apis",
+        "currency",
+        "exchange rate",
+        "exchange rates",
+        "convert usd",
+        "convert eur",
+        "conversion rate",
+        "air quality",
+        "air pollution",
+        "aqi",
+        "pm2.5",
+        "pm10",
+        "weather alert",
+        "weather alerts",
+        "weather warning",
+        "weather warnings",
+        "elevation",
+        "altitude",
+        "geocode",
+        "coordinates",
+    )
+
+    currency_conversion_query = (
+        text.startswith("convert ")
+        and " to " in text
+    )
+
+    if currency_conversion_query:
+        return RouteDecision(
+            "agent",
+            "currency-conversion query",
+            0.94,
+        )
+
+    if any(signal in text for signal in tool_backed_query_signals):
+        return RouteDecision("agent", "tool-backed informational query", 0.94)
+
+    knowledge_identity_exclusions = (
+        "what is your name",
+        "who are you",
+        "what can you do",
+        "what is my name",
+        "who am i",
+    )
+
+    knowledge_query_starts = (
+        "what is ",
+        "what are ",
+        "who is ",
+        "who was ",
+        "tell me about ",
+        "explain ",
+        "how does ",
+        "how do ",
+        "what does ",
+    )
+
+    if (
+        any(
+            text.startswith(prefix)
+            for prefix in knowledge_query_starts
+        )
+        and not any(
+            text.startswith(prefix)
+            for prefix in knowledge_identity_exclusions
+        )
+    ):
+        return RouteDecision(
+            "agent",
+            "knowledge-backed informational query",
+            0.93,
+        )
+
     if (
         any(text.startswith(prefix) for prefix in _CONVERSATION_STARTS)
         and not _contains_action_word(text)

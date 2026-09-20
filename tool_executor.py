@@ -1,3 +1,4 @@
+import re
 """
 JARVIS tool execution engine.
 
@@ -69,6 +70,18 @@ def run_browser_tool(
 # explicitly marks its failure as retryable. Browser actions are excluded
 # because browser_controller.py already owns DOM retry/fallback behavior.
 SAFE_RETRY_TOOLS = {
+    # Read-only public API calls are safe to retry once after
+    # transient network/server failures.
+    "holiday_lookup",
+    "knowledge_lookup",
+    "book_search",
+    "define_word",
+    "research_arxiv",
+    "research_crossref",
+    "vehicle_lookup",
+    "earthquake_search",
+    "api_discover",
+
     "weather",
     "current_time",
     "current_date",
@@ -85,7 +98,12 @@ SAFE_RETRY_TOOLS = {
     "analyze_screen",
     "verify_screen",
     "barehands_board_state",
-}
+
+    "currency_convert",
+    "location_lookup",
+    "air_quality",
+    "weather_alerts",
+    "elevation_lookup",}
 
 
 def _execute_with_safe_retry(
@@ -709,6 +727,7 @@ def update_active_context(
     plan: Dict[str, Any],
     active_context: ActiveContext,
     result_message: str = "",
+    raw_result: Any = None,
 ) -> None:
     """
     Update active context from executed tool steps.
@@ -724,6 +743,33 @@ def update_active_context(
         list,
     ):
         return
+
+    # Only retain structured payloads that are useful for natural
+    # follow-up questions. Do not retain arbitrary desktop action
+    # payloads or large operational state.
+    context_result_tools = {
+        "knowledge_lookup",
+        "book_search",
+        "define_word",
+        "research_arxiv",
+        "research_crossref",
+        "holiday_lookup",
+        "vehicle_lookup",
+        "earthquake_search",
+        "currency_convert",
+        "location_lookup",
+        "air_quality",
+        "weather_alerts",
+        "elevation_lookup",
+        "weather",
+        "current_time",
+        "current_date",
+        "browser_search_google",
+        "browser_search_bing",
+        "browser_extract_text",
+        "browser_page_snapshot",
+        "search_website",
+    }
 
     for step in steps:
 
@@ -748,6 +794,18 @@ def update_active_context(
             )
             or ""
         )
+
+        # Preserve the raw structured payload separately from the
+        # human-readable result string. This gives future follow-up
+        # resolution access to actual result items/fields.
+        if (
+            raw_result is not None
+            and tool_name in context_result_tools
+        ):
+            structured_result = _unwrap_result_data(raw_result)
+
+            if structured_result is not None:
+                active_context.last_result_data = structured_result
 
         # ----------------------------------------------------
         # Website search
@@ -1756,9 +1814,654 @@ def browser_spoken_message(
 
 
 
+def _api_spoken_summary(
+    tool_name: str,
+    result: Any,
+) -> Optional[str]:
+    """
+    Turn structured public-API results into concise JARVIS speech.
+
+    The complete ToolResult remains untouched in task state and execution
+    traces. This function only controls what reaches TTS/chat history.
+    """
+
+    tool = str(tool_name or "").strip().lower()
+
+    api_tools = {
+        "holiday_lookup",
+        "knowledge_lookup",
+        "book_search",
+        "define_word",
+        "research_arxiv",
+        "research_crossref",
+        "vehicle_lookup",
+        "earthquake_search",
+        "api_discover",
+        "currency_convert",
+        "location_lookup",
+        "air_quality",
+        "weather_alerts",
+        "elevation_lookup",
+    }
+
+    if tool not in api_tools:
+        return None
+
+    raw = result.data if isinstance(result, ToolResult) else result
+
+    if not isinstance(raw, dict):
+        return None
+
+    if raw.get("success") is False:
+        return None
+
+    data = raw.get("data")
+
+    if not isinstance(data, dict):
+        return None
+
+    def clean(value: Any, limit: int = 260) -> str:
+        value = str(value or "").strip()
+        value = " ".join(value.split())
+
+        if len(value) > limit:
+            return value[:limit].rstrip() + "..."
+
+        return value
+
+    # --------------------------------------------------------
+    # HOLIDAYS
+    # --------------------------------------------------------
+
+    if tool == "holiday_lookup":
+        country = clean(data.get("country"), 40)
+        year = clean(data.get("year"), 10)
+        holidays = data.get("holidays", [])
+
+        if not isinstance(holidays, list):
+            return None
+
+        count = len(holidays)
+
+        names = []
+        seen = set()
+
+        for item in holidays:
+            if not isinstance(item, dict):
+                continue
+
+            name = clean(item.get("name"), 70)
+
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                names.append(name)
+
+            if len(names) >= 5:
+                break
+
+        prefix = "I found"
+
+        if country and year:
+            prefix += f" {count} holiday entries for {country} in {year}."
+        else:
+            prefix += f" {count} holiday entries."
+
+        if names:
+            spoken_names = names[:2]
+
+            return (
+                prefix
+                + " Key entries include "
+                + " and ".join(spoken_names)
+                + "."
+            )
+
+        return prefix
+
+    # --------------------------------------------------------
+    # KNOWLEDGE
+    # --------------------------------------------------------
+
+    if tool == "knowledge_lookup":
+        title = clean(data.get("title"), 120)
+        summary = clean(data.get("summary"), 1200)
+
+        if title and summary:
+            # Speak only the first complete sentence.
+            # The complete source summary remains available
+            # inside the ToolResult for follow-up questions.
+            sentences = re.split(
+                r"(?<=[.!?])\s+",
+                summary,
+            )
+
+            sentence = next(
+                (
+                    item.strip()
+                    for item in sentences
+                    if item.strip()
+                ),
+                summary,
+            )
+
+            return f"{title}: {sentence}"
+
+        if summary:
+            return summary
+
+        if title:
+            return f"I found information about {title}."
+
+        return None
+
+    if tool == "book_search":
+        books = data.get("books", [])
+
+        if not isinstance(books, list):
+            return None
+
+        titles = []
+
+        for item in books:
+            if not isinstance(item, dict):
+                continue
+
+            title = clean(item.get("title"), 120)
+
+            if title and title not in titles:
+                titles.append(title)
+
+            if len(titles) >= 4:
+                break
+
+        count = (
+            data.get("total_found")
+            if isinstance(data.get("total_found"), int)
+            else len(books)
+        )
+
+        returned_count = len(books)
+
+        if titles:
+            spoken_titles = titles[:2]
+
+            return (
+                f"I found {returned_count} book results, "
+                f"including {' and '.join(spoken_titles)}."
+            )
+
+        return f"I found {returned_count} book results."
+
+    # --------------------------------------------------------
+    # DICTIONARY
+    # --------------------------------------------------------
+
+    if tool == "define_word":
+        word = clean(
+            data.get("word")
+            or data.get("query"),
+            80,
+        )
+
+        definitions = []
+
+        meanings = data.get("meanings", [])
+
+        if isinstance(meanings, list):
+            for meaning in meanings:
+                if not isinstance(meaning, dict):
+                    continue
+
+                meaning_defs = meaning.get("definitions", [])
+
+                if not isinstance(meaning_defs, list):
+                    continue
+
+                for item in meaning_defs:
+                    if not isinstance(item, dict):
+                        continue
+
+                    definition = clean(
+                        item.get("definition"),
+                        280,
+                    )
+
+                    if definition:
+                        definitions.append(definition)
+
+                    if definitions:
+                        break
+
+                if definitions:
+                    break
+
+        if word and definitions:
+            return f"{word} means {definitions[0]}"
+
+        if definitions:
+            return definitions[0]
+
+        return None
+
+    # --------------------------------------------------------
+    # ARXIV
+    # --------------------------------------------------------
+
+    if tool == "research_arxiv":
+        papers = data.get("papers", [])
+
+        if not isinstance(papers, list):
+            return None
+
+        titles = []
+
+        for item in papers:
+            if not isinstance(item, dict):
+                continue
+
+            title = clean(item.get("title"), 140)
+
+            if title:
+                titles.append(title)
+
+            if len(titles) >= 3:
+                break
+
+        if titles:
+            return (
+                f"I found {len(papers)} arXiv papers. "
+                f"The first result is {titles[0]}."
+            )
+
+        return f"I found {len(papers)} arXiv papers."
+
+    # --------------------------------------------------------
+    # CROSSREF
+    # --------------------------------------------------------
+
+    if tool == "research_crossref":
+        results = data.get("results", [])
+
+        if not isinstance(results, list):
+            return None
+
+        titles = []
+
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+
+            title = clean(item.get("title"), 140)
+
+            if title:
+                titles.append(title)
+
+            if len(titles) >= 3:
+                break
+
+        if titles:
+            return (
+                f"I found {len(results)} scholarly results. "
+                f"The first result is {titles[0]}."
+            )
+
+        return f"I found {len(results)} scholarly results."
+
+    # --------------------------------------------------------
+    # VEHICLE / VIN
+    # --------------------------------------------------------
+
+    if tool == "vehicle_lookup":
+        vin = clean(data.get("vin"), 30)
+        vehicle = data.get("vehicle", {})
+
+        if not isinstance(vehicle, dict):
+            return None
+
+        make = clean(vehicle.get("Make"), 60)
+        model = clean(vehicle.get("Model"), 80)
+        year = clean(vehicle.get("ModelYear"), 10)
+        trim = clean(vehicle.get("Trim"), 80)
+
+        vehicle_name = " ".join(
+            value
+            for value in (year, make, model)
+            if value
+        ).strip()
+
+        if vehicle_name:
+            if trim:
+                vehicle_name += f", {trim}"
+
+            if vin:
+                return f"VIN {vin} decodes to a {vehicle_name}."
+
+            return f"The vehicle is a {vehicle_name}."
+
+        return None
+
+    # --------------------------------------------------------
+    # EARTHQUAKES
+    # --------------------------------------------------------
+
+    if tool == "earthquake_search":
+        earthquakes = data.get("earthquakes", [])
+
+        if not isinstance(earthquakes, list):
+            return None
+
+        if not earthquakes:
+            return "No earthquake events were found."
+
+        strongest = None
+        strongest_magnitude = None
+
+        for item in earthquakes:
+            if not isinstance(item, dict):
+                continue
+
+            magnitude = item.get("magnitude")
+
+            try:
+                numeric_magnitude = float(magnitude)
+            except (TypeError, ValueError):
+                continue
+
+            if (
+                strongest_magnitude is None
+                or numeric_magnitude > strongest_magnitude
+            ):
+                strongest_magnitude = numeric_magnitude
+                strongest = item
+
+        if strongest is not None:
+            place = clean(
+                strongest.get("place"),
+                140,
+            )
+
+            if place:
+                return (
+                    f"I found {len(earthquakes)} earthquake events. "
+                    f"The largest listed was magnitude "
+                    f"{strongest_magnitude:g} near {place}."
+                )
+
+            return (
+                f"I found {len(earthquakes)} earthquake events. "
+                f"The largest listed was magnitude "
+                f"{strongest_magnitude:g}."
+            )
+
+        return f"I found {len(earthquakes)} earthquake events."
+
+    # --------------------------------------------------------
+    # --------------------------------------------------------
+    # CURRENCY
+    # --------------------------------------------------------
+
+    if tool == "currency_convert":
+        amount = data.get("amount")
+        base = clean(data.get("base"), 10)
+        quote = clean(data.get("quote"), 10)
+        converted = data.get("converted")
+        rate = data.get("rate")
+
+        if amount is None or not base or not quote:
+            return None
+
+        try:
+            amount_text = f"{float(amount):g}"
+        except (TypeError, ValueError):
+            amount_text = clean(amount, 30)
+
+        try:
+            converted_text = f"{float(converted):.2f}"
+        except (TypeError, ValueError):
+            converted_text = clean(converted, 30)
+
+        if rate is not None:
+            try:
+                rate_text = f"{float(rate):.5f}"
+            except (TypeError, ValueError):
+                rate_text = clean(rate, 30)
+
+            return (
+                f"{amount_text} {base} is "
+                f"{converted_text} {quote}. "
+                f"The exchange rate is {rate_text}."
+            )
+
+        return (
+            f"{amount_text} {base} is "
+            f"{converted_text} {quote}."
+        )
+
+    # --------------------------------------------------------
+    # LOCATION
+    # --------------------------------------------------------
+
+    if tool == "location_lookup":
+        results = data.get("results", [])
+
+        if not isinstance(results, list) or not results:
+            return "I couldn't find that location."
+
+        location = results[0]
+
+        if not isinstance(location, dict):
+            return None
+
+        name = clean(location.get("name"), 80)
+        country = clean(location.get("country"), 80)
+        timezone = clean(location.get("timezone"), 80)
+
+        if name and country:
+            sentence = f"{name} is in {country}."
+        elif name:
+            sentence = f"I found {name}."
+        else:
+            sentence = "I found the requested location."
+
+        if timezone:
+            sentence += f" The timezone is {timezone}."
+
+        return sentence
+
+    # --------------------------------------------------------
+    # AIR QUALITY
+    # --------------------------------------------------------
+
+    if tool == "air_quality":
+        location = data.get("location", {})
+        current = data.get("current", {})
+
+        if not isinstance(location, dict):
+            location = {}
+
+        if not isinstance(current, dict):
+            current = {}
+
+        name = clean(location.get("name"), 80)
+
+        pm25 = current.get("pm2_5")
+        pm10 = current.get("pm10")
+        ozone = current.get("ozone")
+
+        readings = []
+
+        if pm25 is not None:
+            readings.append(
+                f"PM2.5 is {pm25:g} micrograms per cubic meter"
+            )
+
+        if pm10 is not None:
+            readings.append(
+                f"PM10 is {pm10:g} micrograms per cubic meter"
+            )
+
+        if ozone is not None:
+            readings.append(
+                f"ozone is {ozone:g} micrograms per cubic meter"
+            )
+
+        if not readings:
+            return (
+                "I couldn't get the current "
+                "air-quality readings."
+            )
+
+        prefix = f"{name} air quality: " if name else "Air quality: "
+
+        if len(readings) >= 2:
+            return (
+                prefix
+                + readings[0]
+                + " and "
+                + readings[1]
+                + "."
+            )
+
+        return prefix + readings[0] + "."
+
+    # --------------------------------------------------------
+    # WEATHER ALERTS
+    # --------------------------------------------------------
+
+    if tool == "weather_alerts":
+        alerts = data.get("alerts", [])
+
+        if not isinstance(alerts, list):
+            return None
+
+        if not alerts:
+            return "There are no active weather alerts."
+
+        events = []
+        seen = set()
+
+        for alert in alerts:
+            if not isinstance(alert, dict):
+                continue
+
+            event = clean(
+                alert.get("event"),
+                80,
+            )
+
+            if (
+                event
+                and event.lower() not in seen
+            ):
+                seen.add(event.lower())
+                events.append(event)
+
+            if len(events) >= 2:
+                break
+
+        count = len(alerts)
+
+        if count == 1 and events:
+            return (
+                f"There is 1 active weather alert: "
+                f"{events[0]}."
+            )
+
+        if events:
+            return (
+                f"There are {count} active weather alerts. "
+                f"Key alerts include "
+                f"{' and '.join(events)}."
+            )
+
+        return (
+            f"There are {count} active weather alerts."
+        )
+
+    # --------------------------------------------------------
+    # ELEVATION
+    # --------------------------------------------------------
+
+    if tool == "elevation_lookup":
+        location = data.get("location", {})
+
+        if not isinstance(location, dict):
+            location = {}
+
+        name = clean(
+            location.get("name"),
+            80,
+        )
+
+        meters = data.get("elevation_meters")
+        feet = data.get("elevation_feet")
+
+        if meters is None:
+            return None
+
+        try:
+            meters_text = f"{float(meters):,.0f}"
+        except (TypeError, ValueError):
+            meters_text = clean(meters, 30)
+
+        if feet is not None:
+            try:
+                feet_text = f"{float(feet):,.0f}"
+            except (TypeError, ValueError):
+                feet_text = clean(feet, 30)
+
+            prefix = f"{name} is " if name else "The elevation is "
+
+            return (
+                f"{prefix}about {meters_text} meters "
+                f"({feet_text} feet) above sea level."
+            )
+
+        prefix = f"{name} is " if name else "The elevation is "
+
+        return (
+            f"{prefix}{meters_text} meters "
+            f"above sea level."
+        )
+
+    # PUBLIC API DISCOVERY
+    # --------------------------------------------------------
+
+    if tool == "api_discover":
+        apis = data.get("apis", [])
+
+        if not isinstance(apis, list):
+            return None
+
+        names = []
+
+        for item in apis:
+            if not isinstance(item, dict):
+                continue
+
+            name = clean(item.get("name"), 80)
+
+            if name:
+                names.append(name)
+
+            if len(names) >= 5:
+                break
+
+        if names:
+            return (
+                f"I found {len(apis)} no-auth API candidates. "
+                f"Some include {', '.join(names)}."
+            )
+
+        return f"I found {len(apis)} no-auth API candidates."
+
+    return None
+
+
 def _spoken_execution_summary(
     tool_name: str,
     message: str,
+    result: Any = None,
 ) -> str:
     """
     Convert internal tool results into concise, natural JARVIS speech.
@@ -1769,6 +2472,14 @@ def _spoken_execution_summary(
     text = str(message or "").strip()
     tool = str(tool_name or "").strip().lower()
     lowered = text.lower()
+
+    api_summary = _api_spoken_summary(
+        tool,
+        result,
+    )
+
+    if api_summary:
+        return api_summary
 
     # Source/code inspection should stay intentionally brief.
     concise = {
@@ -2473,6 +3184,7 @@ def execute_plan(
                 },
                 active_context=active_context,
                 result_message=message,
+                raw_result=result,
             )
 
             # -------------------------------------------------
@@ -2496,6 +3208,7 @@ def execute_plan(
                 spoken_message = _spoken_execution_summary(
                     tool_name,
                     message,
+                    result,
                 )
 
                 add_assistant_message(
@@ -2636,6 +3349,7 @@ def execute_plan(
             _spoken_execution_summary(
                 final_tool_name,
                 final_tool_message,
+                result,
             )
         )
 

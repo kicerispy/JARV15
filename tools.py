@@ -2660,6 +2660,28 @@ BROWSER_TOOLS = {
 }
 
 
+# ============================================================
+# FREE PUBLIC API TOOLS
+# ============================================================
+
+API_TOOLS = {
+    "holiday_lookup",
+    "knowledge_lookup",
+    "book_search",
+    "define_word",
+    "research_arxiv",
+    "research_crossref",
+    "vehicle_lookup",
+    "earthquake_search",
+    "api_discover",
+    "currency_convert",
+    "location_lookup",
+    "air_quality",
+    "weather_alerts",
+    "elevation_lookup",
+}
+
+
 def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
     """
     Convert an existing raw tool result into the unified ToolResult format.
@@ -3020,6 +3042,19 @@ def _run_tool_raw(
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
+            tool_name,
+            argument,
+        )
+
+
+    # --------------------------------------------------------
+    # FREE PUBLIC API HUB
+    # --------------------------------------------------------
+
+    if tool_name in API_TOOLS:
+        from api_tools import run_api_tool
+
+        return run_api_tool(
             tool_name,
             argument,
         )

@@ -13,6 +13,12 @@ class ActiveContext:
     last_query: Optional[str] = None
     last_tool: Optional[str] = None
     last_result: Optional[str] = None
+
+    # Raw structured result from the most recent useful/query tool.
+    # Kept separate from last_result so existing spoken/planner context
+    # remains lightweight.
+    last_result_data: Any = None
+
     page_url: Optional[str] = None
     page_title: Optional[str] = None
     last_result_title: Optional[str] = None
@@ -26,6 +32,7 @@ class ActiveContext:
         last_query: Optional[str] = None,
         last_tool: Optional[str] = None,
         last_result: Optional[str] = None,
+        last_result_data: Any = None,
         page_url: Optional[str] = None,
         page_title: Optional[str] = None,
         last_result_title: Optional[str] = None,
@@ -42,6 +49,8 @@ class ActiveContext:
             self.last_tool = last_tool
         if last_result is not None:
             self.last_result = last_result
+        if last_result_data is not None:
+            self.last_result_data = last_result_data
         if page_url is not None:
             self.page_url = page_url
         if page_title is not None:
@@ -61,6 +70,7 @@ class ActiveContext:
         self.last_query = None
         self.last_tool = None
         self.last_result = None
+        self.last_result_data = None
         self.page_url = None
         self.page_title = None
         self.last_result_title = None

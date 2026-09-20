@@ -24,6 +24,20 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_click_first_bing_result": "Click the first Bing search result in the controlled browser.",
     "browser_goto": "Navigate the controlled browser to a URL.",
     "browser_page_info": "Read the current browser page title and URL.",
+    "holiday_lookup": "Look up public holidays. Argument = ISO country code and optional year, e.g. US 2026.",
+    "knowledge_lookup": "Look up a concise Wikipedia knowledge summary. Argument = topic.",
+    "book_search": "Search Open Library for books or authors. Argument = title, author, or subject.",
+    "define_word": "Define an English word using a public dictionary. Argument = word.",
+    "research_arxiv": "Search arXiv research papers. Argument = research topic.",
+    "research_crossref": "Search Crossref scholarly metadata. Argument = scholarly query.",
+    "vehicle_lookup": "Decode a vehicle VIN using NHTSA. Argument = 17-character VIN.",
+    "earthquake_search": "Get USGS earthquake information. Argument = day, week, or magnitude such as 4.5.",
+    "api_discover": "Discover free no-auth public APIs. Argument = category or topic.",
+"currency_convert": "Convert currencies using current exchange rates. Argument = 100 USD to EUR, or USD to EUR.",
+"location_lookup": "Resolve a city or place to coordinates, timezone, country, and elevation. Argument = city or place.",
+"air_quality": "Get current air-quality conditions including PM2.5, PM10, ozone, and other pollutants. Argument = city or coordinates.",
+"weather_alerts": "Get active U.S. National Weather Service alerts. Argument = U.S. state, state code, or coordinates.",
+"elevation_lookup": "Look up elevation for a place or coordinates. Argument = city or lat,lon.",
     "browser_page_snapshot": "Read a bounded structured snapshot of the current browser page: title, URL, headings, results, buttons, inputs, links, and cleaned readable text.",
     "browser_click_result": "Click a numbered or last organic Google/YouTube result. Argument is JSON.",
     "browser_back": "Navigate the controlled browser back one page.",
@@ -398,10 +412,37 @@ cheaper/better alternatives, prefer the product_research tool as the primary
 orchestration tool. It searches multiple result sets and source types, gathers
 bounded evidence, and returns separate best-match, value, cheaper-option, and
 better-reviewed outcomes. The argument may be the full user request or JSON
-such as {"item":"wireless headphones","budget":150,"request":"find the best
-one and compare reviews"}. Do not replace it with a long sequence of generic
+such as {{"item":"wireless headphones","budget":150,"request":"find the best
+one and compare reviews"}}. Do not replace it with a long sequence of generic
 browser clicks unless the request specifically asks for a particular website
 workflow.
+
+PUBLIC API RULES:
+
+Use structured public APIs when they are a better source than
+browser automation.
+
+Prefer these tools when the request matches their purpose:
+
+- holiday_lookup for public holiday questions.
+- knowledge_lookup for concise factual topic lookups.
+- book_search for books, authors, editions, and basic book metadata.
+- define_word for dictionary definitions.
+- research_arxiv for scientific and research paper discovery.
+- research_crossref for scholarly publication metadata.
+- vehicle_lookup for VIN decoding.
+- earthquake_search for earthquake information.
+- api_discover when JARVIS needs to find another free/no-auth API.
+
+Do not use these APIs as a replacement for web research when the
+user needs current prices, shopping comparisons, reviews, news,
+or information that requires live web pages.
+
+For product research, continue using the existing product_research
+and browser/web tools.
+
+API arguments should normally be plain strings unless the tool
+description explicitly specifies another format.
 
 GENERIC BROWSER DOM RULES:
 
@@ -1368,6 +1409,175 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
 # Create Plan
 # ==========================================================
 
+
+# ============================================================
+# SPECIALIZED API PLAN REPAIR
+# ============================================================
+#
+# Qwen can occasionally choose search_website for specialized
+# sources even though dedicated API tools are available.
+#
+# Repair those plans after validation so specialized tools
+# remain deterministic while normal web searches are untouched.
+
+_validate_plan_original = validate_plan
+
+
+def _repair_specialized_api_steps(plan):
+    if not isinstance(plan, dict):
+        return plan
+
+    steps = plan.get("steps")
+
+    if not isinstance(steps, list):
+        return plan
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+
+        tool = str(step.get("tool", "")).strip().lower()
+        argument = str(step.get("argument", "")).strip()
+
+        if tool != "search_website":
+            continue
+
+        argument_lower = argument.lower()
+
+        # ----------------------------------------------------
+        # Google Books -> dedicated book search API
+        # ----------------------------------------------------
+        if argument_lower.startswith("google_books|"):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "book_search"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(google_books|...) -> "
+                    f"book_search({query})"
+                )
+
+        # ----------------------------------------------------
+        # arXiv -> dedicated research API
+        # ----------------------------------------------------
+        elif argument_lower.startswith("arxiv|"):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "research_arxiv"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(arxiv|...) -> "
+                    f"research_arxiv({query})"
+                )
+
+        # ----------------------------------------------------
+        # Frankfurter / currency -> currency_convert
+        # ----------------------------------------------------
+        elif (
+            argument_lower.startswith("currency|")
+            or argument_lower.startswith("exchange|")
+            or argument_lower.startswith("frankfurter|")
+        ):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "currency_convert"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(currency|...) -> "
+                    f"currency_convert({query})"
+                )
+
+        # ----------------------------------------------------
+        # Geocoding -> location_lookup
+        # ----------------------------------------------------
+        elif (
+            argument_lower.startswith("geocode|")
+            or argument_lower.startswith("location|")
+            or argument_lower.startswith("open_meteo_geocode|")
+        ):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "location_lookup"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(geocode|...) -> "
+                    f"location_lookup({query})"
+                )
+
+        # ----------------------------------------------------
+        # Air quality -> air_quality
+        # ----------------------------------------------------
+        elif (
+            argument_lower.startswith("air_quality|")
+            or argument_lower.startswith("aqi|")
+        ):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "air_quality"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(air_quality|...) -> "
+                    f"air_quality({query})"
+                )
+
+        # ----------------------------------------------------
+        # NWS alerts -> weather_alerts
+        # ----------------------------------------------------
+        elif (
+            argument_lower.startswith("nws_alerts|")
+            or argument_lower.startswith("weather_alerts|")
+        ):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "weather_alerts"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(weather_alerts|...) -> "
+                    f"weather_alerts({query})"
+                )
+
+        # ----------------------------------------------------
+        # Elevation -> elevation_lookup
+        # ----------------------------------------------------
+        elif argument_lower.startswith("elevation|"):
+            query = argument.split("|", 1)[1].strip()
+
+            if query:
+                step["tool"] = "elevation_lookup"
+                step["argument"] = query
+
+                print(
+                    "JARVIS DEBUG: repaired planner route "
+                    "search_website(elevation|...) -> "
+                    f"elevation_lookup({query})"
+                )
+
+    return plan
+
+
+def validate_plan(*args, **kwargs):
+    plan = _validate_plan_original(*args, **kwargs)
+    return _repair_specialized_api_steps(plan)
+
+
 def create_plan(
     user_command: str,
     active_context: Optional[Dict[str, Any]] = None,
@@ -2174,4 +2384,276 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
     )
 
     return validated
+
+
+# ============================================================
+# KNOWLEDGE PLAN REPAIR
+# ============================================================
+#
+# Qwen can occasionally understand a factual question but return
+# an empty step list. When the smart router already classified the
+# request as a knowledge query, an empty plan is not useful.
+#
+# Preserve normal model planning, but repair empty knowledge plans
+# into the dedicated knowledge_lookup tool.
+
+_create_plan_original_knowledge_repair = create_plan
+
+
+_KNOWLEDGE_IDENTITY_EXCLUSIONS = (
+    "what is your name",
+    "who are you",
+    "what can you do",
+    "what is my name",
+    "who am i",
+)
+
+
+_KNOWLEDGE_PREFIXES = (
+    "what is ",
+    "what are ",
+    "who is ",
+    "who was ",
+    "tell me about ",
+    "explain ",
+)
+
+
+def _knowledge_argument_from_query(query):
+    text = str(query or "").strip()
+
+    text = re.sub(
+        r"[?!.]+$",
+        "",
+        text,
+    ).strip()
+
+    lowered = text.lower()
+
+    for prefix in _KNOWLEDGE_PREFIXES:
+        if lowered.startswith(prefix):
+            argument = text[len(prefix):].strip()
+
+            if argument:
+                return argument
+
+    return None
+
+
+def create_plan(command, *args, **kwargs):
+    plan = _create_plan_original_knowledge_repair(
+        command,
+        *args,
+        **kwargs,
+    )
+
+    query = str(command or "").strip().lower()
+
+    if any(
+        query.startswith(prefix)
+        for prefix in _KNOWLEDGE_IDENTITY_EXCLUSIONS
+    ):
+        return plan
+
+    knowledge_argument = _knowledge_argument_from_query(
+        command
+    )
+
+    if not knowledge_argument:
+        return plan
+
+    if not isinstance(plan, dict):
+        return plan
+
+    steps = plan.get("steps")
+
+    if isinstance(steps, list) and steps:
+        return plan
+
+    repaired = dict(plan)
+
+    repaired["steps"] = [
+        {
+            "tool": "knowledge_lookup",
+            "argument": knowledge_argument,
+        }
+    ]
+
+    print(
+        "JARVIS DEBUG: repaired empty knowledge plan -> "
+        f"knowledge_lookup({knowledge_argument})"
+    )
+
+    return repaired
+
+
+# ============================================================
+# SPECIALIZED API PLANNER PREFLIGHT
+# ============================================================
+#
+# Obvious structured API requests should not depend on the LLM
+# selecting the correct specialized tool. Preserve normal model
+# planning for everything else.
+
+_create_plan_original_specialized_api = create_plan
+
+
+def _clean_specialized_api_location(command):
+    text = str(command or "").strip()
+
+    for marker in (
+        " in ",
+        " near ",
+        " at ",
+    ):
+        position = text.lower().find(marker)
+
+        if position != -1:
+            location = text[position + len(marker):].strip()
+            location = location.rstrip("?.!,")
+            if location:
+                return location
+
+    return None
+
+
+def _specialized_api_plan(command):
+    text = str(command or "").strip()
+    lowered = text.lower()
+
+    if not lowered:
+        return None
+
+    # --------------------------------------------------------
+    # Currency
+    # --------------------------------------------------------
+
+    if (
+        lowered.startswith("convert ")
+        and " to " in lowered
+    ):
+        return {
+            "goal": "convert currency",
+            "steps": [
+                {
+                    "tool": "currency_convert",
+                    "argument": text.rstrip("?.!,"),
+                }
+            ],
+        }
+
+    # --------------------------------------------------------
+    # Air quality
+    # --------------------------------------------------------
+
+    if any(
+        phrase in lowered
+        for phrase in (
+            "air quality",
+            "air pollution",
+            "air pollutants",
+            "aqi",
+            "pm2.5",
+            "pm10",
+        )
+    ):
+        location = _clean_specialized_api_location(command)
+
+        if location:
+            return {
+                "goal": "check air quality",
+                "steps": [
+                    {
+                        "tool": "air_quality",
+                        "argument": location,
+                    }
+                ],
+            }
+
+    # --------------------------------------------------------
+    # Weather alerts / warnings
+    # --------------------------------------------------------
+
+    if any(
+        phrase in lowered
+        for phrase in (
+            "weather alert",
+            "weather alerts",
+            "weather warning",
+            "weather warnings",
+            "severe weather alert",
+            "severe weather alerts",
+        )
+    ):
+        location = _clean_specialized_api_location(command)
+
+        if location:
+            return {
+                "goal": "check weather alerts",
+                "steps": [
+                    {
+                        "tool": "weather_alerts",
+                        "argument": location,
+                    }
+                ],
+            }
+
+    # --------------------------------------------------------
+    # Elevation / altitude
+    # --------------------------------------------------------
+
+    if (
+        "elevation of " in lowered
+        or "altitude of " in lowered
+        or "elevation in " in lowered
+        or "altitude in " in lowered
+    ):
+        location = None
+
+        for marker in (
+            " elevation of ",
+            " altitude of ",
+            " elevation in ",
+            " altitude in ",
+        ):
+            position = lowered.find(marker)
+
+            if position != -1:
+                location = text[
+                    position + len(marker):
+                ].strip().rstrip("?.!,")
+                break
+
+        if location:
+            return {
+                "goal": "find elevation",
+                "steps": [
+                    {
+                        "tool": "elevation_lookup",
+                        "argument": location,
+                    }
+                ],
+            }
+
+    return None
+
+
+def create_plan(command, *args, **kwargs):
+    specialized = _specialized_api_plan(command)
+
+    if specialized is not None:
+        print(
+            "JARVIS DEBUG: deterministic specialized API plan -> "
+            f"{specialized['steps'][0]['tool']}("
+            f"{specialized['steps'][0]['argument']})"
+        )
+
+        return specialized
+
+    return _create_plan_original_specialized_api(
+        command,
+        *args,
+        **kwargs,
+    )
+
 
