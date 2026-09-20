@@ -276,6 +276,52 @@ def check_speech_summaries() -> list[str]:
         },
     }
 
+    field_cases = [
+        (
+            "currency_convert",
+            "What was the exchange rate?",
+            {
+                "from": "USD",
+                "to": "EUR",
+                "rate": 0.87,
+            },
+        ),
+        (
+            "weather_alerts",
+            "How many weather alerts were there?",
+            {
+                "count": 3,
+                "alerts": [],
+            },
+        ),
+    ]
+
+    for tool, query, data in field_cases:
+        try:
+            from result_context import resolve_result_followup
+
+            result = resolve_result_followup(
+                query,
+                {
+                    "last_tool": tool,
+                    "last_result_data": data,
+                },
+            )
+
+            if not result:
+                raise AssertionError("empty field follow-up")
+
+            print(
+                f"[PASS] field follow-up: {tool}"
+            )
+        except Exception as exc:
+            failures.append(
+                f"field follow-up {tool}: {exc}"
+            )
+            print(
+                f"[FAIL] field follow-up: {tool} -> {exc}"
+            )
+
     for tool, data in cases.items():
         try:
             summary = _api_spoken_summary(
