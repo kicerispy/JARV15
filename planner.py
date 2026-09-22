@@ -369,6 +369,44 @@ def _deterministic_roblox_plan(
             "resolved_command": user_command,
         }
 
+    diagnostic_signals = (
+        "error",
+        "errors",
+        "broken",
+        "bug",
+        "bugs",
+        "diagnose",
+        "diagnostic",
+        "debug",
+        "investigate",
+        "not working",
+        "wrong",
+    )
+
+    if any(signal in normalized for signal in diagnostic_signals):
+        return {
+            "goal": "inspect Roblox Studio project for problems",
+            "steps": [
+                {
+                    "tool": "roblox__get_place_info",
+                    "argument": "{}",
+                },
+                {
+                    "tool": "roblox__get_project_structure",
+                    "argument": "{}",
+                },
+                {
+                    "tool": "roblox__search_files",
+                    "argument": '{"query":"Script","searchType":"type"}',
+                },
+                {
+                    "tool": "roblox__get_output_log",
+                    "argument": "{}",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
     inspection_signals = (
         "inspect",
         "inspection",
@@ -390,6 +428,51 @@ def _deterministic_roblox_plan(
                 {
                     "tool": "roblox__get_project_structure",
                     "argument": "{}",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
+    return None
+
+
+def _deterministic_roblox_context_plan(
+    user_command: str,
+    active_context: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Handle common Roblox follow-ups without losing the Studio domain."""
+    if not isinstance(active_context, dict):
+        return None
+
+    site = str(
+        active_context.get("site", "") or ""
+    ).strip().lower()
+
+    last_tool = str(
+        active_context.get("last_tool", "") or ""
+    ).strip().lower()
+
+    if site != "roblox" and not last_tool.startswith(ROBLOX_TOOL_PREFIX):
+        return None
+
+    normalized = _normalized_words(user_command)
+
+    if not normalized:
+        return None
+
+    if (
+        "find the scripts" in normalized
+        or "find scripts" in normalized
+        or "find the script" in normalized
+        or "find scripts that" in normalized
+        or "find the scripts that" in normalized
+    ):
+        return {
+            "goal": "find Roblox gameplay scripts",
+            "steps": [
+                {
+                    "tool": "roblox__search_files",
+                    "argument": '{"query":"Script","searchType":"type"}',
                 },
             ],
             "resolved_command": user_command,
@@ -421,6 +504,7 @@ def _roblox_safe_fallback_plan(
 
 def _planner_tool_scope(
     user_command: str,
+    active_context: Optional[Dict[str, Any]] = None,
 ) -> Optional[set[str]]:
     """Return a narrow planner tool scope for clearly typed task domains."""
     text = str(user_command or "").strip().lower()
@@ -432,6 +516,51 @@ def _planner_tool_scope(
         roblox_tools = set(get_roblox_planner_tools().keys())
         roblox_tools.add("roblox_mcp_status")
         return roblox_tools
+
+    # Preserve Roblox domain context across natural follow-up commands.
+    # After JARVIS has inspected a Studio place, requests such as
+    # "find the scripts that control the core gameplay systems" do not need
+    # to repeat the word "Roblox" to remain in the Roblox tool scope.
+    context_site = ""
+    context_tool = ""
+    if isinstance(active_context, dict):
+        context_site = str(
+            active_context.get("site", "") or ""
+        ).strip().lower()
+        context_tool = str(
+            active_context.get("last_tool", "") or ""
+        ).strip().lower()
+
+    if (
+        context_site == "roblox"
+        or context_tool.startswith(ROBLOX_TOOL_PREFIX)
+    ):
+        roblox_followup_signals = (
+            "game",
+            "script",
+            "scripts",
+            "module",
+            "modules",
+            "gameplay",
+            "system",
+            "systems",
+            "studio",
+            "place",
+            "instance",
+            "output",
+            "error",
+            "bug",
+            "broken",
+            "inspect",
+            "find",
+            "search",
+            "structure",
+        )
+
+        if any(signal in text for signal in roblox_followup_signals):
+            roblox_tools = set(get_roblox_planner_tools().keys())
+            roblox_tools.add("roblox_mcp_status")
+            return roblox_tools
 
     code_signals = (
         "code",
@@ -1083,6 +1212,40 @@ def is_explicit_self_repair_request(text: str) -> bool:
     return self_directed and repair_requested
 
 
+def is_observation_only_request(text: str) -> bool:
+    """Return True when a request explicitly forbids modifications."""
+    normalized = _normalized_words(text)
+
+    if not normalized:
+        return False
+
+    return any(
+        phrase in normalized
+        for phrase in (
+            "before changing anything",
+            "before making any changes",
+            "before changing the game",
+            "before modifying anything",
+            "before making modifications",
+            "without changing anything",
+            "without making changes",
+            "without modifying anything",
+            "without modifying the game",
+            "without editing anything",
+            "do not change anything",
+            "don't change anything",
+            "do not modify anything",
+            "don't modify anything",
+            "do not edit anything",
+            "don't edit anything",
+            "no changes yet",
+            "no modifications yet",
+            "read only",
+            "read-only",
+        )
+    )
+
+
 def is_software_repair_request(text: str) -> bool:
     normalized = _normalized_words(text)
 
@@ -1230,8 +1393,9 @@ def assess_plan(
         return []
 
     if require_modification is None:
-        require_modification = is_software_repair_request(
-            user_command
+        require_modification = (
+            is_software_repair_request(user_command)
+            and not is_observation_only_request(user_command)
         )
 
     tool_names = [
@@ -1998,6 +2162,19 @@ def create_plan(
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
 
+    # Preserve Roblox domain context for follow-up requests that omit the
+    # word "Roblox", such as "find the scripts that control gameplay".
+    deterministic_roblox_context = _deterministic_roblox_context_plan(
+        user_command,
+        active_context=active_context,
+    )
+
+    if deterministic_roblox_context is not None:
+        logger.info(
+            "JARVIS planner: deterministic Roblox context route selected."
+        )
+        return validate_plan(deterministic_roblox_context)
+
     # Obvious Roblox Studio requests should not depend on Qwen's ability
     # to understand local-machine access. The MCP adapter is the actual
     # authority for these operations, so keep these routes model-free.
@@ -2727,7 +2904,10 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 """
 
     else:
-        planner_scope = _planner_tool_scope(user_command)
+        planner_scope = _planner_tool_scope(
+            user_command,
+            active_context=active_context,
+        )
 
         system_content = (
             _planner_prompt(planner_scope)
