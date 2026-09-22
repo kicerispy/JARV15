@@ -3181,6 +3181,25 @@ def _run_tool_raw(
     """
 
     # --------------------------------------------------------
+    # ROBLOX STUDIO MCP
+    # --------------------------------------------------------
+
+    if tool_name == "roblox_mcp_status":
+        from roblox_mcp import roblox_mcp_status
+
+        return roblox_mcp_status(
+            argument
+        )
+
+    if tool_name.startswith("roblox__"):
+        from roblox_mcp import run_roblox_tool
+
+        return run_roblox_tool(
+            tool_name[len("roblox__"):],
+            argument,
+        )
+
+    # --------------------------------------------------------
     # BROWSER / CDP
     # --------------------------------------------------------
 
