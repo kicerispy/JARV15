@@ -1482,6 +1482,41 @@ def deterministic_route(user_request, active_context=None):
     ):
         return None
 
+    # Preserve an established Roblox Studio domain for natural follow-ups.
+    # Also protect the browser fast path from obvious software/gameplay
+    # requests that omit the word Roblox.
+    if _should_preserve_roblox_context(
+        user_request,
+        active_context,
+    ):
+        print("JARVIS: Preserving active Roblox context for follow-up request.")
+        return None
+
+    software_like_find = (
+        text.startswith("find ")
+        and any(
+            phrase in text
+            for phrase in (
+                "the scripts",
+                "scripts that",
+                "script that",
+                "gameplay systems",
+                "gameplay system",
+                "module scripts",
+                "modulescripts",
+                "remote events",
+                "remote functions",
+                "server scripts",
+                "local scripts",
+            )
+        )
+    )
+
+    if software_like_find:
+        print("JARVIS: Software/gameplay follow-up detected.")
+        return None
+
+
     # Direct Browser Navigation
     # ==================================================
 
@@ -2579,14 +2614,17 @@ For normal conversation:
 # Fast command compatibility API
 # ==================================================
 
-def get_fast_command(user_request):
-    try:
-        return deterministic_route(user_request)
-    except Exception as e:
-        print(f"JARVIS: Fast command lookup error: {e}")
-        return None
-
-
+def get_fast_command(user_request, active_context=None):
+    try:
+        return deterministic_route(
+            user_request,
+            active_context=active_context,
+        )
+    except Exception as e:
+        print(f"JARVIS: Fast command lookup error: {e}")
+        return None
+
+
 # ==================================================
 # Public planner
 # ==================================================
