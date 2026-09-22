@@ -3105,6 +3105,19 @@ def execute_plan(
         plan.get("jarvis_internal_phase")
     )
 
+    # Evidence-seeking tasks defer user-facing narration to Agent Core so
+    # the final response can be grounded in the complete result set.
+    try:
+        from intent_resolver import needs_evidence_answer
+
+        answer_required = needs_evidence_answer(
+            planning_input,
+            plan=plan,
+            active_context=active_context,
+        )
+    except Exception:
+        answer_required = False
+
     # Directly constructed plans may not contain a task-level
     # resolved_command or goal. Use the first executable step's
     # description as a safe fallback for task state.
@@ -3619,6 +3632,9 @@ def execute_plan(
                     task_state.finish()
                     return "done"
 
+                if answer_required:
+                    task_state.finish()
+                    return "done"
                 # Inspection tools can return large source/results. Keep
                 # those details in execution state, not in TTS or chat history.
                 spoken_message = _spoken_execution_summary(
@@ -3763,6 +3779,9 @@ def execute_plan(
             or ""
         ).strip()
 
+        if answer_required:
+            task_state.finish()
+            return "done"
         # Keep raw inspection output in execution state only.
         add_assistant_message(
             _spoken_execution_summary(
