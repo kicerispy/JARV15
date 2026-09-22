@@ -369,6 +369,44 @@ def _deterministic_roblox_plan(
             "resolved_command": user_command,
         }
 
+    diagnostic_signals = (
+        "error",
+        "errors",
+        "broken",
+        "bug",
+        "bugs",
+        "diagnose",
+        "diagnostic",
+        "debug",
+        "investigate",
+        "not working",
+        "wrong",
+    )
+
+    if any(signal in normalized for signal in diagnostic_signals):
+        return {
+            "goal": "inspect Roblox Studio project for problems",
+            "steps": [
+                {
+                    "tool": "roblox__get_place_info",
+                    "argument": "{}",
+                },
+                {
+                    "tool": "roblox__get_project_structure",
+                    "argument": "{}",
+                },
+                {
+                    "tool": "roblox__search_files",
+                    "argument": '{"query":"Script","searchType":"type"}',
+                },
+                {
+                    "tool": "roblox__get_output_log",
+                    "argument": "{}",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
     inspection_signals = (
         "inspect",
         "inspection",
@@ -390,6 +428,51 @@ def _deterministic_roblox_plan(
                 {
                     "tool": "roblox__get_project_structure",
                     "argument": "{}",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
+    return None
+
+
+def _deterministic_roblox_context_plan(
+    user_command: str,
+    active_context: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Handle common Roblox follow-ups without losing the Studio domain."""
+    if not isinstance(active_context, dict):
+        return None
+
+    site = str(
+        active_context.get("site", "") or ""
+    ).strip().lower()
+
+    last_tool = str(
+        active_context.get("last_tool", "") or ""
+    ).strip().lower()
+
+    if site != "roblox" and not last_tool.startswith(ROBLOX_TOOL_PREFIX):
+        return None
+
+    normalized = _normalized_words(user_command)
+
+    if not normalized:
+        return None
+
+    if (
+        "find the scripts" in normalized
+        or "find scripts" in normalized
+        or "find the script" in normalized
+        or "find scripts that" in normalized
+        or "find the scripts that" in normalized
+    ):
+        return {
+            "goal": "find Roblox gameplay scripts",
+            "steps": [
+                {
+                    "tool": "roblox__search_files",
+                    "argument": '{"query":"Script","searchType":"type"}',
                 },
             ],
             "resolved_command": user_command,
@@ -2078,6 +2161,19 @@ def create_plan(
     """
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
+
+    # Preserve Roblox domain context for follow-up requests that omit the
+    # word "Roblox", such as "find the scripts that control gameplay".
+    deterministic_roblox_context = _deterministic_roblox_context_plan(
+        user_command,
+        active_context=active_context,
+    )
+
+    if deterministic_roblox_context is not None:
+        logger.info(
+            "JARVIS planner: deterministic Roblox context route selected."
+        )
+        return validate_plan(deterministic_roblox_context)
 
     # Obvious Roblox Studio requests should not depend on Qwen's ability
     # to understand local-machine access. The MCP adapter is the actual
