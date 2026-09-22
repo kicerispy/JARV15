@@ -48,6 +48,10 @@ from planner import (
     is_software_change_request,
     is_software_diagnostic_request,
     is_software_repair_request,
+    is_roblox_mutation_tool,
+    is_roblox_request,
+    ROBLOX_INSPECTION_TOOLS,
+    ROBLOX_TEST_TOOLS,
     validate_plan,
 )
 from tool_executor import execute_plan
@@ -365,12 +369,17 @@ class JarvisAgent:
             return False
 
         return any(
-            str(step.get("tool", "") or "").strip()
-            in {
-                "write_file",
-                "edit_file",
-                "delete_file",
-            }
+            (
+                str(step.get("tool", "") or "").strip()
+                in {
+                    "write_file",
+                    "edit_file",
+                    "delete_file",
+                }
+                or is_roblox_mutation_tool(
+                    str(step.get("tool", "") or "").strip()
+                )
+            )
             for step in plan.get("steps", [])
             if isinstance(step, dict)
         )
@@ -1387,8 +1396,13 @@ class JarvisAgent:
                 return task
 
             candidate_has_mutation = any(
-                str(step.get("tool", "") or "").strip()
-                in {"write_file", "edit_file", "delete_file"}
+                (
+                    str(step.get("tool", "") or "").strip()
+                    in {"write_file", "edit_file", "delete_file"}
+                    or is_roblox_mutation_tool(
+                        str(step.get("tool", "") or "").strip()
+                    )
+                )
                 for step in plan.get("steps", [])
                 if isinstance(step, dict)
             )
@@ -1683,6 +1697,34 @@ class JarvisAgent:
             )
 
         return task
+
+    def _build_roblox_repair_request(
+        self,
+        task: AgentTask,
+    ) -> str:
+        lines = [
+            "The previous Roblox Studio investigation has completed successfully.",
+            "Use the verified Studio evidence below to produce the smallest safe game repair.",
+            "",
+            f"Original request: {task.request}",
+            f"Goal: {task.goal}",
+            "",
+            self._build_evidence_packet(task),
+            "",
+            "ROBLOX REPAIR RULES:",
+            "1. Do not use JARVIS filesystem tools for Roblox Studio code.",
+            "2. Use exact instance paths returned by verified Roblox evidence.",
+            "3. Read the relevant Luau source before modifying it.",
+            "4. Prefer edit_script_lines for a targeted fix.",
+            "5. After the mutation, start a playtest and inspect playtest/output-log evidence.",
+            "6. Iterate from real Roblox errors instead of inventing failures.",
+            "7. Do not claim success until the Roblox behavior is verified.",
+            "",
+            "Return ONLY JSON.",
+        ]
+
+        return "\n".join(lines)
+
 
     def _build_repair_request_after_discovery(
         self,
@@ -2746,13 +2788,33 @@ class JarvisAgent:
                     return task
 
                 # Repair requests can legitimately begin with discovery.
-                # After successful discovery, force a repair/test planning phase.
+                # Roblox Studio uses its own inspection/test loop and must not
+                # fall into JARVIS's Python-file phase fallback.
                 if (
                     is_software_repair_request(task.request)
                     and not self._plan_has_mutation(
                         task.planner_result
                     )
                 ):
+
+                    if is_roblox_request(task.request):
+                        replanned = self.plan_task(
+                            task,
+                            history_text=history_text,
+                            planning_request=self._build_roblox_repair_request(task),
+                            require_repair_plan=True,
+                            require_code_read=False,
+                            require_code_test=False,
+                            require_code_diagnose=False,
+                        )
+
+                        if replanned.status in {
+                            "conversation",
+                            "failed",
+                        }:
+                            return replanned
+
+                        continue
 
                     has_source_read = (
                         self._has_verified_evidence(
@@ -2896,9 +2958,21 @@ class JarvisAgent:
                 if (
                     is_software_change_request(task.request)
                     and self._plan_has_mutation(task.planner_result)
-                    and not self._has_verified_evidence(
-                        task,
-                        {"code_test", "code_diagnose"},
+                    and (
+                        (
+                            is_roblox_request(task.request)
+                            and not self._has_verified_evidence(
+                                task,
+                                ROBLOX_TEST_TOOLS,
+                            )
+                        )
+                        or (
+                            not is_roblox_request(task.request)
+                            and not self._has_verified_evidence(
+                                task,
+                                {"code_test", "code_diagnose"},
+                            )
+                        )
                     )
                 ):
                     logger.info(
@@ -2906,29 +2980,54 @@ class JarvisAgent:
                         "validation evidence; planning validation phase."
                     )
 
-                    validation_request = "\n".join([
-                        "The implementation phase completed successfully.",
-                        "Now validate the changed software before reporting completion.",
-                        "",
-                        f"Original request: {task.request}",
-                        "",
-                        self._build_evidence_packet(task),
-                        "",
-                        "Validation rules:",
-                        "1. Validate the actual changed implementation.",
-                        "2. Use code_test for focused validation or code_diagnose for broader validation.",
-                        "3. Treat failures as evidence for the next repair attempt.",
-                        "4. Do not claim completion until validation succeeds.",
-                        "",
-                        "Return ONLY JSON.",
-                    ])
+                    if is_roblox_request(task.request):
+                        validation_request = "\n".join([
+                            "The Roblox Studio implementation phase completed successfully.",
+                            "Now validate the changed game behavior before reporting completion.",
+                            "",
+                            f"Original request: {task.request}",
+                            "",
+                            self._build_evidence_packet(task),
+                            "",
+                            "Roblox validation rules:",
+                            "1. Start a playtest when one is not already running.",
+                            "2. Inspect get_playtest_output and/or get_output_log for errors or expected behavior.",
+                            "3. Treat output failures as evidence for the next repair attempt.",
+                            "4. Do not claim completion until the Roblox behavior is verified.",
+                            "",
+                            "Return ONLY JSON.",
+                        ])
 
-                    replanned = self.plan_task(
-                        task,
-                        history_text=history_text,
-                        planning_request=validation_request,
-                        require_code_test=True,
-                    )
+                        replanned = self.plan_task(
+                            task,
+                            history_text=history_text,
+                            planning_request=validation_request,
+                            require_code_test=False,
+                        )
+                    else:
+                        validation_request = "\n".join([
+                            "The implementation phase completed successfully.",
+                            "Now validate the changed software before reporting completion.",
+                            "",
+                            f"Original request: {task.request}",
+                            "",
+                            self._build_evidence_packet(task),
+                            "",
+                            "Validation rules:",
+                            "1. Validate the actual changed implementation.",
+                            "2. Use code_test for focused validation or code_diagnose for broader validation.",
+                            "3. Treat failures as evidence for the next repair attempt.",
+                            "4. Do not claim completion until validation succeeds.",
+                            "",
+                            "Return ONLY JSON.",
+                        ])
+
+                        replanned = self.plan_task(
+                            task,
+                            history_text=history_text,
+                            planning_request=validation_request,
+                            require_code_test=True,
+                        )
 
                     if replanned.status in {
                         "conversation",
