@@ -1,0 +1,189 @@
+import unittest
+from types import SimpleNamespace
+
+from answer_composer import compose_task_answer
+from intent_resolver import needs_evidence_answer, resolve_intent
+from postcondition_verifier import verify_postcondition
+
+
+def _task(request, evidence, plan=None):
+    return SimpleNamespace(
+        request=request,
+        planner_result=plan or {"goal": request, "steps": []},
+        evidence=evidence,
+    )
+
+
+class AutonomyKernelV2Tests(unittest.TestCase):
+
+    def test_intent_resolver_understands_roblox_followup_as_evidence_task(self):
+        intent = resolve_intent(
+            "find the scripts that control the core gameplay systems",
+            active_context={"site": "roblox"},
+        )
+
+        self.assertEqual(intent["domain"], "roblox")
+        self.assertEqual(intent["intent"], "inspect")
+        self.assertEqual(intent["mode"], "answer")
+        self.assertEqual(intent["entities"]["artifact"], "script")
+        self.assertEqual(intent["entities"]["system"], "gameplay")
+
+    def test_intent_resolver_keeps_google_search_as_action(self):
+        intent = resolve_intent(
+            "search Google for wifi skeleton",
+            active_context={"site": "roblox"},
+        )
+
+        self.assertEqual(intent["domain"], "browser")
+        self.assertEqual(intent["intent"], "search")
+        self.assertEqual(intent["mode"], "action")
+        self.assertEqual(intent["entities"]["site"], "google")
+
+    def test_intent_resolver_handles_search_and_report(self):
+        intent = resolve_intent(
+            "search Google for wifi skeleton and tell me what you find"
+        )
+
+        self.assertEqual(intent["mode"], "answer")
+
+    def test_postcondition_rejects_generic_completion_for_info_request(self):
+        task = _task(
+            "find the scripts that control the core gameplay systems",
+            [
+                {
+                    "tool": "roblox__search_files",
+                    "success": True,
+                    "verified": True,
+                    "detail": "Tool completed.",
+                }
+            ],
+        )
+
+        result = verify_postcondition(task.request, task)
+
+        self.assertTrue(result["requires_answer"])
+        self.assertFalse(result["ready"])
+
+    def test_postcondition_accepts_structured_evidence(self):
+        task = _task(
+            "find the scripts that control the core gameplay systems",
+            [
+                {
+                    "tool": "roblox__search_files",
+                    "success": True,
+                    "verified": True,
+                    "detail": "Tool completed.",
+                    "data": {
+                        "matches": [
+                            {
+                                "name": "CombatController",
+                                "className": "ModuleScript",
+                            }
+                        ]
+                    },
+                }
+            ],
+        )
+
+        result = verify_postcondition(task.request, task)
+
+        self.assertTrue(result["requires_answer"])
+        self.assertTrue(result["ready"])
+
+    def test_roblox_answer_uses_place_and_script_evidence(self):
+        task = _task(
+            "inspect my Roblox game and tell me how the project is structured",
+            [
+                {
+                    "tool": "roblox__get_place_info",
+                    "success": True,
+                    "verified": True,
+                    "detail": "Tool completed.",
+                    "data": {
+                        "name": "Test Place",
+                        "placeId": 123,
+                        "gameId": 456,
+                    },
+                },
+                {
+                    "tool": "roblox__get_project_structure",
+                    "success": True,
+                    "verified": True,
+                    "detail": "Tool completed.",
+                    "data": {
+                        "children": [
+                            {
+                                "name": "ServerScriptService",
+                                "className": "ServerScriptService",
+                            },
+                            {
+                                "name": "ReplicatedStorage",
+                                "className": "ReplicatedStorage",
+                            },
+                            {
+                                "name": "CombatController",
+                                "className": "ModuleScript",
+                            },
+                            {
+                                "name": "RoundManager",
+                                "className": "Script",
+                            },
+                        ]
+                    },
+                },
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("Test Place", answer)
+        self.assertIn("123", answer)
+        self.assertIn("456", answer)
+        self.assertIn("CombatController", answer)
+        self.assertIn("RoundManager", answer)
+
+    def test_roblox_mcp_text_payload_is_decoded(self):
+        task = _task(
+            "find the scripts that control the core gameplay systems",
+            [
+                {
+                    "tool": "roblox__search_files",
+                    "success": True,
+                    "verified": True,
+                    "detail": "Tool completed.",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{\"matches\":[{\"name\":\"CombatService\",\"className\":\"Script\"}]}"
+                            }
+                        ]
+                    },
+                }
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("CombatService", answer)
+
+    def test_needs_evidence_answer_distinguishes_action_and_information(self):
+        self.assertTrue(
+            needs_evidence_answer(
+                "inspect my Roblox game and tell me how the project is structured"
+            )
+        )
+        self.assertTrue(
+            needs_evidence_answer(
+                "find the scripts that control the core gameplay systems"
+            )
+        )
+        self.assertFalse(
+            needs_evidence_answer(
+                "search Google for wifi skeleton"
+            )
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
