@@ -2803,6 +2803,23 @@ Last tool: {active_context.get('last_tool', 'none')}
         except Exception:
             pass
 
+    learned_hints = active_context.get("learned_hints")
+    if isinstance(learned_hints, list) and learned_hints:
+        cleaned_hints = [
+            str(item).strip()
+            for item in learned_hints[:3]
+            if str(item).strip()
+        ]
+        if cleaned_hints:
+            context_str += (
+                "\nLessons from previous JARVIS task attempts:\n"
+                + "\n".join(
+                    f"- {item}"
+                    for item in cleaned_hints
+                )
+                + "\n"
+            )
+
     history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
 
     # --------------------------------------------------------
