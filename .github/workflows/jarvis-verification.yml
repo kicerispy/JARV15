@@ -33,4 +33,4 @@ jobs:
 
       - name: Run focused regression tests
         run: |
-          python -m pytest             tests/test_roblox_mcp.py             tests/test_browser_agent.py             tests/test_browser_qol_push.py             tests/test_commands.py             tests/test_qol_runtime.py             tests/test_smart_router.py             tests/test_task_controller.py             -q
+          python -m pytest             tests/test_roblox_mcp.py             tests/test_roblox_planner_routes.py             tests/test_roblox_routing_regressions.py             tests/test_roblox_routing_followup.py             tests/test_browser_agent.py             tests/test_browser_qol_push.py             tests/test_commands.py             tests/test_qol_runtime.py             tests/test_smart_router.py             tests/test_task_controller.py             -q
