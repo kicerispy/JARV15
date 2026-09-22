@@ -806,6 +806,33 @@ def update_active_context(
                 active_context.last_result_data = structured_result
 
         # ----------------------------------------------------
+        # Roblox Studio context
+        # ----------------------------------------------------
+        if (
+            tool_name == "roblox_mcp_status"
+            or tool_name.startswith("roblox__")
+        ):
+            active_context.site = "roblox"
+            active_context.last_tool = tool_name
+            active_context.last_action = tool_name
+
+            if argument:
+                active_context.last_query = argument
+
+            if result_message:
+                active_context.last_result = str(result_message)
+
+            if raw_result is not None:
+                structured_result = _unwrap_result_data(raw_result)
+
+                if structured_result is not None:
+                    active_context.last_result_data = structured_result
+                    active_context.last_result_index = None
+                    active_context.last_selected_result = None
+
+            continue
+
+        # ----------------------------------------------------
         # Website search
         # ----------------------------------------------------
 
