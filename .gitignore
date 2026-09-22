@@ -27,6 +27,9 @@ se-framework/
 profile.json
 voice_model/
 
+# Active Agent Core experience memory
+.jarvis_autonomy/
+
 # Runtime/generated data
 task_memory.json
 *.wav
