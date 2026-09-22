@@ -469,6 +469,106 @@ def split_search_and_first_result(
     }
 
 
+def _active_context_value(active_context, key, default=None):
+    """Read an ActiveContext field from either an object or dictionary."""
+    if active_context is None:
+        return default
+
+    if isinstance(active_context, dict):
+        return active_context.get(key, default)
+
+    return getattr(active_context, key, default)
+
+
+_ROBLOX_CONTEXT_TERMS = (
+    "roblox",
+    "roblox studio",
+    "luau",
+    "script",
+    "scripts",
+    "localscript",
+    "localscripts",
+    "modulescript",
+    "modulescripts",
+    "module script",
+    "module scripts",
+    "remoteevent",
+    "remoteevents",
+    "remotefunction",
+    "remotefunctions",
+    "gameplay",
+    "datamodel",
+    "server script",
+    "server scripts",
+    "starter player",
+    "replicatedstorage",
+    "server storage",
+    "workspace",
+    "playtest",
+    "studio output",
+)
+
+
+def _should_preserve_roblox_context(user_request, active_context=None):
+    """Prevent generic browser shortcuts from stealing Roblox follow-ups."""
+    site = str(
+        _active_context_value(active_context, "site", "") or ""
+    ).strip().lower()
+
+    if site != "roblox":
+        return False
+
+    text = clean_text(user_request)
+    if not text:
+        return False
+
+    browser_escape_terms = (
+        "browser",
+        "chrome",
+        "google",
+        "bing",
+        "youtube",
+        "amazon",
+        "reddit",
+        "web page",
+        "website",
+        "web site",
+        "current page",
+    )
+
+    if any(term in text for term in browser_escape_terms):
+        return False
+
+    if any(term in text for term in _ROBLOX_CONTEXT_TERMS):
+        return True
+
+    action_starts = (
+        "find ",
+        "locate ",
+        "inspect ",
+        "check ",
+        "analyze ",
+        "analyse ",
+        "list ",
+        "show ",
+        "read ",
+        "search ",
+        "trace ",
+        "map ",
+        "identify ",
+        "explain ",
+        "tell me ",
+        "look for ",
+        "look at ",
+        "review ",
+        "diagnose ",
+        "debug ",
+        "investigate ",
+    )
+
+    return text.startswith(action_starts)
+
+
 def browser_requested(text):
 
     lowered = clean_text(text)
@@ -1360,7 +1460,7 @@ def build_browser_qol_plan(user_request):
     return None
 
 
-def deterministic_route(user_request):
+def deterministic_route(user_request, active_context=None):
 
 
     if _is_specialized_api_request(user_request):
