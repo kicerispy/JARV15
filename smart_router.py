@@ -145,6 +145,25 @@ _ACTION_WORDS = {
     "configure",
 }
 
+# Natural spoken commands that imply an action without using the exact
+# canonical verb. Keeping these model-free makes common voice requests
+# faster while still escalating the actual task to Agent Core.
+_ACTION_PHRASES = (
+    "look at ",
+    "look for ",
+    "take a look ",
+    "take a look at ",
+    "check out ",
+    "check this ",
+    "check that ",
+    "go ahead and ",
+    "figure out ",
+    "find out ",
+    "work on ",
+    "have a look at ",
+    "have a look ",
+)
+
 _CONVERSATION_STARTS = (
     "hello",
     "hi",
@@ -184,7 +203,13 @@ def _normalize(text: str) -> str:
 
 
 def _contains_action_word(text: str) -> bool:
-    """Return True for action verbs, including common spoken inflections."""
+    """Return True for action verbs and common natural-language action phrases."""
+    if any(
+        phrase in text
+        for phrase in _ACTION_PHRASES
+    ):
+        return True
+
     words = set(re.findall(r"[a-z']+", text))
 
     for word in words:

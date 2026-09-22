@@ -1193,6 +1193,12 @@ def is_explicit_self_repair_request(text: str) -> bool:
             "diagnose yourself",
             "self diagnose",
             "self-diagnose",
+            "improve yourself",
+            "upgrade yourself",
+            "make yourself better",
+            "make yourself smarter",
+            "improve your own code",
+            "upgrade your own code",
             "run a full diagnostic on yourself",
             "run a full diagnostic on your own code",
             "audit yourself",
@@ -1204,9 +1210,22 @@ def is_explicit_self_repair_request(text: str) -> bool:
         )
     )
 
-    repair_requested = any(
-        term in normalized
-        for term in CODE_REPAIR_TERMS
+    repair_requested = (
+        any(
+            term in normalized
+            for term in CODE_REPAIR_TERMS
+        )
+        or any(
+            phrase in normalized
+            for phrase in (
+                "improve yourself",
+                "upgrade yourself",
+                "make yourself better",
+                "make yourself smarter",
+                "improve your own code",
+                "upgrade your own code",
+            )
+        )
     )
 
     return self_directed and repair_requested
@@ -1254,6 +1273,12 @@ def is_software_repair_request(text: str) -> bool:
         for phrase in (
             "fix yourself",
             "repair yourself",
+            "improve yourself",
+            "upgrade yourself",
+            "make yourself better",
+            "make yourself smarter",
+            "improve your own code",
+            "upgrade your own code",
             "self diagnose and fix",
             "self-diagnose and fix",
             "diagnose yourself and fix",
@@ -2271,7 +2296,8 @@ def create_plan(
             from commands import deterministic_route
 
             deterministic_plan = deterministic_route(
-                user_command
+                user_command,
+                active_context=active_context,
             )
 
         if deterministic_plan:
@@ -2801,6 +2827,23 @@ Last tool: {active_context.get('last_tool', 'none')}
                 )
         except Exception:
             pass
+
+    learned_hints = active_context.get("learned_hints")
+    if isinstance(learned_hints, list) and learned_hints:
+        cleaned_hints = [
+            str(item).strip()
+            for item in learned_hints[:3]
+            if str(item).strip()
+        ]
+        if cleaned_hints:
+            context_str += (
+                "\nLessons from previous JARVIS task attempts:\n"
+                + "\n".join(
+                    f"- {item}"
+                    for item in cleaned_hints
+                )
+                + "\n"
+            )
 
     history_str = f"\nRecent conversation:\n{history_text}" if history_text else ""
 

@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from logger import logger
+from autonomy_memory import get_failure_hints, record_episode
 from planner import (
     assess_plan,
     create_plan,
@@ -227,6 +228,59 @@ class JarvisAgent:
         }
 
     # ======================================================
+    # Experience Memory
+    # ======================================================
+
+    @staticmethod
+    def _record_autonomy_episode(task: AgentTask) -> None:
+        """Persist a compact outcome so future plans can learn from it."""
+        if task is None:
+            return
+
+        try:
+            start = task.started_at or task.created_at
+            end = task.completed_at or time.time()
+            tools = [
+                step.tool
+                for step in task.steps
+                if step.tool
+            ]
+
+            context_site = str(
+                task.active_context.get("site", "") or ""
+            ).strip().lower()
+
+            domain = context_site
+            if not domain:
+                request_lower = str(task.request or "").lower()
+                if "roblox" in request_lower or "luau" in request_lower:
+                    domain = "roblox"
+                elif any(
+                    term in request_lower
+                    for term in ("browser", "chrome", "website", "google", "youtube")
+                ):
+                    domain = "browser"
+                elif any(
+                    term in request_lower
+                    for term in ("code", "python", "repository", "git", "fix", "repair")
+                ):
+                    domain = "code"
+
+            record_episode(
+                task.request,
+                task.status,
+                tools,
+                replans=task.replan_count,
+                duration_seconds=max(0.0, end - start),
+                error=task.error or "",
+                domain=domain,
+            )
+        except Exception as exc:
+            logger.debug(
+                f"JARVIS AGENT: experience-memory write skipped: {exc}"
+            )
+
+    # ======================================================
     # Create Task
     # ======================================================
 
@@ -260,6 +314,25 @@ class JarvisAgent:
             task.max_replans = 3
 
         self.current_task = task
+
+        # Reuse bounded lessons from earlier failures that overlap this request.
+        # These hints guide the planner but never mutate source code.
+        try:
+            learned_hints = get_failure_hints(
+                normalized_request,
+                limit=3,
+            )
+        except Exception as exc:
+            learned_hints = []
+            logger.debug(
+                f"JARVIS AGENT: experience-memory lookup skipped: {exc}"
+            )
+
+        if learned_hints:
+            task.active_context["learned_hints"] = learned_hints
+            task.observations.append(
+                f"Loaded {len(learned_hints)} relevant prior failure lesson(s)."
+            )
 
         self.state[
             "last_request"
@@ -2784,6 +2857,7 @@ class JarvisAgent:
                             speak_callback,
                         )
 
+                    self._record_autonomy_episode(task)
                     task_state.set_progress_callback(None)
                     return task
 
@@ -2887,6 +2961,7 @@ class JarvisAgent:
                                     speak_callback,
                                 )
 
+                            self._record_autonomy_episode(task)
                             task_state.set_progress_callback(None)
                             return task
 
@@ -3104,6 +3179,7 @@ class JarvisAgent:
                         speak_callback,
                     )
 
+                self._record_autonomy_episode(task)
                 task_state.set_progress_callback(None)
                 return task
 
@@ -3139,6 +3215,7 @@ class JarvisAgent:
                         "outer execution loop; skipping replan."
                     )
 
+                    self._record_autonomy_episode(task)
                     task_state.set_progress_callback(None)
                     return task
 
@@ -3242,6 +3319,7 @@ class JarvisAgent:
                         speak_callback,
                     )
 
+                    self._record_autonomy_episode(task)
                     task_state.set_progress_callback(None)
                     return task
 
@@ -3289,6 +3367,7 @@ class JarvisAgent:
                     "failed",
                 }:
 
+                    self._record_autonomy_episode(replanned)
                     return replanned
 
                 continue
