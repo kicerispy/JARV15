@@ -36,6 +36,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_scroll": "Scroll the controlled browser. Argument is JSON with direction and optional distance.",
     "browser_agent_run": "Run an autonomous browser task in the controlled Chrome session. Argument = task text or JSON with task and optional max_steps.",
     "browser_agent_status": "Check whether the optional autonomous browser-agent stack is installed and connected.",
+    "roblox_mcp_status": "Report whether the local Roblox Studio MCP server and Studio plugin are connected.",
     "holiday_lookup": "Look up public holidays. Argument = ISO country code and optional year, e.g. US 2026.",
     "knowledge_lookup": "Look up a concise Wikipedia knowledge summary. Argument = topic.",
     "book_search": "Search Open Library for books or authors. Argument = title, author, or subject.",
@@ -195,6 +196,148 @@ _CODE_PLANNER_TOOLS = {
     "find_file",
 }
 
+
+ROBLOX_TOOL_PREFIX = "roblox__"
+
+ROBLOX_FALLBACK_TOOL_DESCRIPTIONS = {
+    "roblox__get_project_structure": "Get the Roblox Studio game hierarchy.",
+    "roblox__search_files": "Search Roblox instances or script content.",
+    "roblox__grep_scripts": "Search all Roblox script sources with line context.",
+    "roblox__get_script_source": "Read a Roblox script source.",
+    "roblox__edit_script_lines": "Make a targeted exact-text edit in a Roblox script.",
+    "roblox__insert_script_lines": "Insert Luau into a Roblox script after a line.",
+    "roblox__delete_script_lines": "Delete a range of lines from a Roblox script.",
+    "roblox__execute_luau": "Execute Luau in Roblox Studio edit/plugin context.",
+    "roblox__start_playtest": "Start a Roblox Studio playtest.",
+    "roblox__get_playtest_output": "Read captured Roblox playtest output.",
+    "roblox__stop_playtest": "Stop the active Roblox playtest.",
+    "roblox__get_output_log": "Read Roblox Studio output log history.",
+    "roblox__capture_screenshot": "Capture the Roblox Studio viewport.",
+    "roblox__get_selection": "Read the currently selected Roblox Studio instances.",
+    "roblox__set_property": "Set an instance property in Roblox Studio.",
+    "roblox__create_object": "Create an instance in Roblox Studio.",
+    "roblox__delete_object": "Delete an instance in Roblox Studio.",
+}
+
+ROBLOX_INSPECTION_TOOLS = frozenset({
+    "roblox__get_file_tree",
+    "roblox__search_files",
+    "roblox__get_place_info",
+    "roblox__get_services",
+    "roblox__search_objects",
+    "roblox__get_instance_properties",
+    "roblox__get_instance_children",
+    "roblox__search_by_property",
+    "roblox__get_class_info",
+    "roblox__get_project_structure",
+    "roblox__mass_get_property",
+    "roblox__get_script_source",
+    "roblox__get_attributes",
+    "roblox__get_tags",
+    "roblox__get_tagged",
+    "roblox__get_selection",
+    "roblox__get_playtest_output",
+    "roblox__get_connected_instances",
+    "roblox__list_library",
+    "roblox__search_materials",
+    "roblox__get_build",
+    "roblox__get_asset_details",
+    "roblox__get_asset_thumbnail",
+    "roblox__preview_asset",
+    "roblox__get_descendants",
+    "roblox__compare_instances",
+    "roblox__get_output_log",
+    "roblox__capture_screenshot",
+    "roblox__grep_scripts",
+})
+
+ROBLOX_MUTATION_TOOLS = frozenset({
+    "roblox__set_property",
+    "roblox__mass_set_property",
+    "roblox__set_properties",
+    "roblox__create_object",
+    "roblox__mass_create_objects",
+    "roblox__delete_object",
+    "roblox__smart_duplicate",
+    "roblox__mass_duplicate",
+    "roblox__clone_object",
+    "roblox__set_script_source",
+    "roblox__edit_script_lines",
+    "roblox__insert_script_lines",
+    "roblox__delete_script_lines",
+    "roblox__set_attribute",
+    "roblox__delete_attribute",
+    "roblox__add_tag",
+    "roblox__remove_tag",
+    "roblox__execute_luau",
+    "roblox__start_playtest",
+    "roblox__stop_playtest",
+    "roblox__create_build",
+    "roblox__generate_build",
+    "roblox__import_build",
+    "roblox__import_scene",
+    "roblox__insert_asset",
+    "roblox__upload_asset",
+    "roblox__simulate_mouse_input",
+    "roblox__simulate_keyboard_input",
+    "roblox__character_navigation",
+    "roblox__undo",
+    "roblox__redo",
+    "roblox__bulk_set_attributes",
+    "roblox__find_and_replace_in_scripts",
+})
+
+ROBLOX_TEST_TOOLS = frozenset({
+    "roblox__start_playtest",
+    "roblox__get_playtest_output",
+    "roblox__stop_playtest",
+    "roblox__get_output_log",
+})
+
+def is_roblox_tool_name(tool_name: str) -> bool:
+    return str(tool_name or "").strip().startswith(ROBLOX_TOOL_PREFIX)
+
+
+def is_roblox_request(text: str) -> bool:
+    normalized = _normalized_words(text)
+
+    if not normalized:
+        return False
+
+    signals = (
+        "roblox",
+        "roblox studio",
+        "luau",
+        "localscript",
+        "modulescript",
+        "playtest",
+        "datamodel",
+        "studio output",
+    )
+
+    return any(signal in normalized for signal in signals)
+
+
+def is_roblox_mutation_tool(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in ROBLOX_MUTATION_TOOLS
+
+
+def get_roblox_planner_tools() -> Dict[str, str]:
+    try:
+        from roblox_mcp import get_roblox_planner_tool_descriptions
+
+        live = get_roblox_planner_tool_descriptions()
+
+        if live:
+            return live
+    except Exception as exc:
+        logger.debug(
+            f"JARVIS planner: Roblox MCP tool discovery unavailable: {exc}"
+        )
+
+    return dict(ROBLOX_FALLBACK_TOOL_DESCRIPTIONS)
+
+
 def _planner_tool_scope(
     user_command: str,
 ) -> Optional[set[str]]:
@@ -203,6 +346,11 @@ def _planner_tool_scope(
 
     if not text:
         return None
+
+    if is_roblox_request(text):
+        roblox_tools = set(get_roblox_planner_tools().keys())
+        roblox_tools.add("roblox_mcp_status")
+        return roblox_tools
 
     code_signals = (
         "code",
@@ -309,15 +457,26 @@ def _planner_prompt(
     tool_names: Optional[set[str]] = None,
 ) -> str:
     """Build the planner prompt with available tools."""
-    selected_tools = (
-        AVAILABLE_TOOLS
-        if not tool_names
-        else {
+    if not tool_names:
+        selected_tools = dict(AVAILABLE_TOOLS)
+    else:
+        selected_tools = {
             name: AVAILABLE_TOOLS[name]
             for name in AVAILABLE_TOOLS
             if name in tool_names
         }
-    )
+
+        if any(
+            str(name).startswith(ROBLOX_TOOL_PREFIX)
+            for name in tool_names
+        ):
+            selected_tools.update(
+                {
+                    name: description
+                    for name, description in get_roblox_planner_tools().items()
+                    if name in tool_names
+                }
+            )
 
     tool_list = "\n".join(
         f"{name}: {desc}"
@@ -359,6 +518,19 @@ BAREHANDS TOOL SELECTION:
   on the Barehands display or glass board, use barehands_present.
 - A request to display JARVIS status on Barehands is a display request,
   not a jarvis_status query; use barehands_present rather than jarvis_status.
+
+ROBLOX STUDIO MCP RULES:
+
+When the request targets Roblox Studio, use the roblox__ tools instead of JARVIS filesystem tools.
+- Use the live Roblox MCP tool names and their JSON schemas exactly.
+- Discover the game structure or search scripts before making a Roblox code change.
+- Read the exact Luau source with roblox__get_script_source before editing it.
+- Prefer roblox__edit_script_lines for small targeted changes; use insert/delete line tools when appropriate.
+- Do not replace an entire script with roblox__set_script_source unless the change genuinely requires it.
+- After a code or gameplay change, start a playtest and inspect roblox__get_playtest_output and/or roblox__get_output_log.
+- When a playtest reports an error, use that output as evidence for the next repair.
+- Do not invent Roblox instance paths. Reuse exact paths returned by previous Roblox MCP observations.
+- Keep Roblox MCP arguments as JSON objects.
 
 CODE REPAIR RULES:
 
@@ -765,6 +937,10 @@ SOFTWARE_DOMAIN_TERMS = (
     "application",
     "website",
     "game",
+    "roblox",
+    "luau",
+    "roblox studio",
+    "playtest",
     ".py",
     ".js",
 )
@@ -988,6 +1164,23 @@ def assess_plan(
 
     issues: List[str] = []
 
+    roblox_request = is_roblox_request(user_command)
+    roblox_inspection_indices = [
+        index
+        for index, tool in enumerate(tool_names)
+        if tool in ROBLOX_INSPECTION_TOOLS
+    ]
+    roblox_mutation_indices = [
+        index
+        for index, tool in enumerate(tool_names)
+        if is_roblox_mutation_tool(tool)
+    ]
+    roblox_test_indices = [
+        index
+        for index, tool in enumerate(tool_names)
+        if tool in ROBLOX_TEST_TOOLS
+    ]
+
     inspection_index = next(
         (
             index
@@ -1148,6 +1341,7 @@ def assess_plan(
     # another inspection tool here would reject the diagnostic plan itself.
     if (
         inspection_index is None
+        and not roblox_request
         and not allow_prior_evidence
         and not require_code_test
     ):
@@ -1171,13 +1365,13 @@ def assess_plan(
             "source file with read_file before choosing a code change."
         )
 
-    if require_code_test and not test_indices:
+    if require_code_test and not test_indices and not roblox_request:
         issues.append(
             "The next diagnostic phase must run code_test so the "
             "implementation can be validated before deciding whether to edit."
         )
 
-    if require_code_diagnose:
+    if require_code_diagnose and not roblox_request:
         diagnose_indices = [
             index
             for index, tool in enumerate(tool_names)
@@ -1233,42 +1427,76 @@ def assess_plan(
 
     requires_modification = bool(require_modification)
 
-    if requires_modification and not mutation_indices:
+    if roblox_request:
+        if (
+            is_software_diagnostic_request(user_command)
+            and not roblox_inspection_indices
+        ):
+            issues.append(
+                "A Roblox diagnostic plan must inspect Studio structure, script source, or output before reporting a diagnosis."
+            )
+
+        if requires_modification and not roblox_mutation_indices:
+            issues.append(
+                "This Roblox change request must include an appropriate roblox__ mutation tool."
+            )
+
+        if roblox_mutation_indices:
+            first_roblox_mutation = min(roblox_mutation_indices)
+
+            if (
+                not roblox_inspection_indices
+                or min(roblox_inspection_indices) > first_roblox_mutation
+            ):
+                issues.append(
+                    "Roblox inspection must occur before the first Studio mutation."
+                )
+
+            if (
+                not roblox_test_indices
+                or max(roblox_test_indices) < max(roblox_mutation_indices)
+            ):
+                issues.append(
+                    "Roblox changes must be followed by playtest/output validation."
+                )
+
+    elif requires_modification and not mutation_indices:
         issues.append(
             "This request explicitly asks for a fix or code change. "
             "The plan must include an appropriate file modification step."
         )
 
-    if mutation_indices:
-        first_mutation = min(mutation_indices)
+    if not roblox_request:
+        if mutation_indices:
+            first_mutation = min(mutation_indices)
 
-        if (
-            not allow_prior_evidence
-            and (
-                inspection_index is None
-                or inspection_index > first_mutation
-            )
-        ):
-            issues.append(
-                "Inspection must occur before the first file modification."
-            )
+            if (
+                not allow_prior_evidence
+                and (
+                    inspection_index is None
+                    or inspection_index > first_mutation
+                )
+            ):
+                issues.append(
+                    "Inspection must occur before the first file modification."
+                )
 
-        if checkpoint_index is None or checkpoint_index > first_mutation:
-            issues.append(
-                "A code_checkpoint must occur before autonomous "
-                "file modification work."
-            )
+            if checkpoint_index is None or checkpoint_index > first_mutation:
+                issues.append(
+                    "A code_checkpoint must occur before autonomous "
+                    "file modification work."
+                )
 
-        if not test_indices or max(test_indices) < max(mutation_indices):
+            if not test_indices or max(test_indices) < max(mutation_indices):
+                issues.append(
+                    "The repair plan must run code_test after the final file "
+                    "modification."
+                )
+        elif requires_modification and not test_indices:
             issues.append(
-                "The repair plan must run code_test after the final file "
-                "modification."
+                "A software repair plan must include code_test so the result "
+                "can be validated."
             )
-    elif requires_modification and not test_indices:
-        issues.append(
-            "A software repair plan must include code_test so the result "
-            "can be validated."
-        )
 
     return issues
 
@@ -1374,9 +1602,28 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
         tool = step.get("tool")
         argument = step.get("argument", "")
 
-        if tool not in AVAILABLE_TOOLS:
+        is_dynamic_roblox_tool = is_roblox_tool_name(tool)
+
+        if tool not in AVAILABLE_TOOLS and not is_dynamic_roblox_tool:
             logger.warning(f"Rejected unknown tool: {tool}")
             continue
+
+        if is_dynamic_roblox_tool:
+            try:
+                from roblox_mcp import is_known_roblox_tool
+
+                remote_tool = tool[len(ROBLOX_TOOL_PREFIX):]
+
+                if not is_known_roblox_tool(remote_tool):
+                    logger.warning(
+                        f"Rejected unknown Roblox MCP tool: {remote_tool}"
+                    )
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    f"Roblox MCP tool validation unavailable: {exc}"
+                )
+                continue
 
         normalized_argument = (
             str(argument) if argument is not None else ""
@@ -1386,7 +1633,10 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
         # {'role': 'button'} instead of strict JSON. Canonicalize browser
         # object arguments at the planner boundary so every downstream
         # browser dispatcher receives one stable JSON representation.
-        if tool in JSON_ARGUMENT_TOOLS and normalized_argument.strip():
+        if (
+            (tool in JSON_ARGUMENT_TOOLS or is_roblox_tool_name(tool))
+            and normalized_argument.strip()
+        ):
             raw_argument = normalized_argument.strip()
             try:
                 payload = json.loads(raw_argument)
