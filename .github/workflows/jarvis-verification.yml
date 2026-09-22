@@ -29,8 +29,8 @@ jobs:
 
       - name: Compile active JARVIS modules
         run: |
-          python -m py_compile             browser_agent.py             browser_agent_worker.py             browser_controller.py             commands.py             config.py             main.py             planner.py             runtime_health.py             smart_router.py             state.py             task_controller.py             tool_executor.py             tool_registry.py             tools.py             run_jarvis.py
+          python -m py_compile             browser_agent.py             browser_agent_worker.py             browser_controller.py             roblox_mcp.py             commands.py             config.py             main.py             planner.py             runtime_health.py             smart_router.py             state.py             task_controller.py             tool_executor.py             tool_registry.py             tools.py             run_jarvis.py
 
       - name: Run focused regression tests
         run: |
-          python -m pytest             tests/test_browser_agent.py             tests/test_browser_qol_push.py             tests/test_commands.py             tests/test_qol_runtime.py             tests/test_smart_router.py             tests/test_task_controller.py             -q
+          python -m pytest             tests/test_roblox_mcp.py             tests/test_browser_agent.py             tests/test_browser_qol_push.py             tests/test_commands.py             tests/test_qol_runtime.py             tests/test_smart_router.py             tests/test_task_controller.py             -q
