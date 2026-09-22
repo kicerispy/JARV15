@@ -3113,7 +3113,7 @@ def execute_plan(
         answer_required = needs_evidence_answer(
             planning_input,
             plan=plan,
-            active_context=active_context,
+            active_context=(active_context.to_dict() if hasattr(active_context, "to_dict") else active_context),
         )
     except Exception:
         answer_required = False
