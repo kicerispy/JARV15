@@ -2271,7 +2271,8 @@ def create_plan(
             from commands import deterministic_route
 
             deterministic_plan = deterministic_route(
-                user_command
+                user_command,
+                active_context=active_context,
             )
 
         if deterministic_plan:
