@@ -2828,6 +2828,25 @@ Last tool: {active_context.get('last_tool', 'none')}
         except Exception:
             pass
 
+    # Cheap intent/entity resolution gives the LLM planner a stable semantic
+    # interpretation without requiring another model call.
+    try:
+        from intent_resolver import resolve_intent
+
+        intent_hints = resolve_intent(
+            user_command,
+            active_context=active_context,
+        )
+        context_str += (
+            "\nDeterministic intent hints:\n"
+            + str(intent_hints)
+            + "\n"
+        )
+    except Exception as exc:
+        logger.debug(
+            f"JARVIS planner: intent resolution skipped: {exc}"
+        )
+
     learned_hints = active_context.get("learned_hints")
     if isinstance(learned_hints, list) and learned_hints:
         cleaned_hints = [
