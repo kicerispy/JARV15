@@ -1193,6 +1193,12 @@ def is_explicit_self_repair_request(text: str) -> bool:
             "diagnose yourself",
             "self diagnose",
             "self-diagnose",
+            "improve yourself",
+            "upgrade yourself",
+            "make yourself better",
+            "make yourself smarter",
+            "improve your own code",
+            "upgrade your own code",
             "run a full diagnostic on yourself",
             "run a full diagnostic on your own code",
             "audit yourself",
@@ -1204,9 +1210,22 @@ def is_explicit_self_repair_request(text: str) -> bool:
         )
     )
 
-    repair_requested = any(
-        term in normalized
-        for term in CODE_REPAIR_TERMS
+    repair_requested = (
+        any(
+            term in normalized
+            for term in CODE_REPAIR_TERMS
+        )
+        or any(
+            phrase in normalized
+            for phrase in (
+                "improve yourself",
+                "upgrade yourself",
+                "make yourself better",
+                "make yourself smarter",
+                "improve your own code",
+                "upgrade your own code",
+            )
+        )
     )
 
     return self_directed and repair_requested
@@ -1254,6 +1273,12 @@ def is_software_repair_request(text: str) -> bool:
         for phrase in (
             "fix yourself",
             "repair yourself",
+            "improve yourself",
+            "upgrade yourself",
+            "make yourself better",
+            "make yourself smarter",
+            "improve your own code",
+            "upgrade your own code",
             "self diagnose and fix",
             "self-diagnose and fix",
             "diagnose yourself and fix",
