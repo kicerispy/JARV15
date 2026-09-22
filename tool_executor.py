@@ -1741,6 +1741,39 @@ def normalize_tool_result(
         "Code validation failed.",
     )
 
+    # Legacy tools sometimes return a bare error string instead of ToolResult.
+    # Treat explicit failure language as a failed action so the agent can replan
+    # instead of announcing a false completion.
+    failure_markers = (
+        "error:",
+        "failed:",
+        "failure:",
+        "failed to ",
+        "couldn't ",
+        "could not ",
+        "unable to ",
+        "was not found",
+        "were not found",
+        "not found.",
+        "not found:",
+        "refused:",
+        "timed out",
+        "timeout:",
+        "unsupported:",
+        "invalid ",
+        "does not exist",
+        "i don't know how to ",
+        "i do not know how to ",
+    )
+
+    lowered_text = text.lower()
+    if any(marker in lowered_text for marker in failure_markers):
+        return (
+            False,
+            False,
+            text,
+        )
+
     if text.startswith(code_test_errors):
         return (
             False,
