@@ -1614,7 +1614,10 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
 
                 remote_tool = tool[len(ROBLOX_TOOL_PREFIX):]
 
-                if not is_known_roblox_tool(remote_tool):
+                if (
+                    not is_known_roblox_tool(remote_tool)
+                    and tool not in ROBLOX_FALLBACK_TOOL_DESCRIPTIONS
+                ):
                     logger.warning(
                         f"Rejected unknown Roblox MCP tool: {remote_tool}"
                     )
