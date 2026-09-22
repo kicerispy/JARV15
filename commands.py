@@ -1371,6 +1371,17 @@ def deterministic_route(user_request):
     )
 
     # ==================================================
+    # Roblox Studio requests must never be intercepted by the generic
+    # browser DOM/search shortcuts. The Roblox MCP planner owns these tasks.
+    if (
+        "roblox" in text
+        or "luau" in text
+        or "localscript" in text
+        or "modulescript" in text
+        or "playtest" in text
+    ):
+        return None
+
     # Direct Browser Navigation
     # ==================================================
 
