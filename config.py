@@ -96,6 +96,29 @@ OLLAMA_GENERATION_RETRY_DELAY = float(
 
 
 # ============================================================
+# ROBLOX MCP
+# ============================================================
+
+ROBLOX_MCP_URL = os.environ.get(
+    "JARVIS_ROBLOX_MCP_URL",
+    "http://127.0.0.1:58741",
+).rstrip("/")
+
+ROBLOX_MCP_DISCOVERY_TTL = float(
+    os.environ.get(
+        "JARVIS_ROBLOX_MCP_DISCOVERY_TTL",
+        "60",
+    )
+)
+
+ROBLOX_MCP_TIMEOUT = float(
+    os.environ.get(
+        "JARVIS_ROBLOX_MCP_TIMEOUT",
+        "60",
+    )
+)
+
+# ============================================================
 # TEXT INPUT
 # ============================================================
 
