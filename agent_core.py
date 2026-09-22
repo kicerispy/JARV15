@@ -2236,6 +2236,26 @@ class JarvisAgent:
                     limit=1600,
                 )
 
+            # Preserve bounded structured result data for Autonomy Kernel v2.
+            # Concise messages are useful for logs, but information-seeking
+            # answers need the actual tool payload as evidence.
+            if data is not None:
+                try:
+                    serialized = json.dumps(
+                        data,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                except Exception:
+                    serialized = str(data)
+
+                if len(serialized) <= 9000:
+                    evidence["data"] = data
+                else:
+                    evidence["data"] = (
+                        serialized[:9000]
+                        + "\n... [structured evidence truncated by JARVIS] ..."
+                    )
             task.evidence.append(evidence)
 
         # Capture actual browser state.
