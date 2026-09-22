@@ -68,6 +68,40 @@ class SmartRouterTests(unittest.TestCase):
         self.assertEqual(decision.kind, "agent")
 
 
+    def test_roblox_studio_requests_route_agent(self):
+        from smart_router import route_command
+
+        for command in (
+            "Check my Roblox Studio connection",
+            "Inspect my Roblox game",
+            "inspects my Roblox game",
+            "Check my Roblox game for errors",
+        ):
+            decision = route_command(command)
+            self.assertEqual(
+                decision.kind,
+                "agent",
+                command,
+            )
+
+
+    def test_action_verb_inflections_are_recognized(self):
+        from smart_router import route_command
+
+        for command in (
+            "Inspects the current page",
+            "Checks the system",
+            "Fixes the bug",
+            "Tests the project",
+        ):
+            decision = route_command(command)
+            self.assertEqual(
+                decision.kind,
+                "agent",
+                command,
+            )
+
+
     def test_ordinal_result_followups_route_contextual(self):
         from smart_router import route_command
 

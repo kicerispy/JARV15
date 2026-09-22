@@ -200,6 +200,7 @@ _CODE_PLANNER_TOOLS = {
 ROBLOX_TOOL_PREFIX = "roblox__"
 
 ROBLOX_FALLBACK_TOOL_DESCRIPTIONS = {
+    "roblox__get_place_info": "Get the active Roblox place and Studio instance information.",
     "roblox__get_project_structure": "Get the Roblox Studio game hierarchy.",
     "roblox__search_files": "Search Roblox instances or script content.",
     "roblox__grep_scripts": "Search all Roblox script sources with line context.",
@@ -336,6 +337,86 @@ def get_roblox_planner_tools() -> Dict[str, str]:
         )
 
     return dict(ROBLOX_FALLBACK_TOOL_DESCRIPTIONS)
+
+
+def _deterministic_roblox_plan(
+    user_command: str,
+) -> Optional[Dict[str, Any]]:
+    """Handle obvious Roblox Studio requests without relying on the LLM."""
+    normalized = _normalized_words(user_command)
+
+    if not normalized or not is_roblox_request(normalized):
+        return None
+
+    connection_signals = (
+        "connection",
+        "connected",
+        "connectivity",
+        "status",
+        "available",
+        "online",
+    )
+
+    if any(signal in normalized for signal in connection_signals):
+        return {
+            "goal": "check Roblox Studio MCP connection",
+            "steps": [
+                {
+                    "tool": "roblox_mcp_status",
+                    "argument": "",
+                }
+            ],
+            "resolved_command": user_command,
+        }
+
+    inspection_signals = (
+        "inspect",
+        "inspection",
+        "explore",
+        "look at",
+        "view",
+        "show",
+        "check",
+    )
+
+    if any(signal in normalized for signal in inspection_signals):
+        return {
+            "goal": "inspect Roblox Studio project",
+            "steps": [
+                {
+                    "tool": "roblox__get_place_info",
+                    "argument": "{}",
+                },
+                {
+                    "tool": "roblox__get_project_structure",
+                    "argument": "{}",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
+    return None
+
+
+def _roblox_safe_fallback_plan(
+    user_command: str,
+) -> Dict[str, Any]:
+    """Return a read-only Roblox plan when the model cannot produce one."""
+    deterministic = _deterministic_roblox_plan(user_command)
+
+    if deterministic is not None:
+        return deterministic
+
+    return {
+        "goal": "inspect Roblox Studio project",
+        "steps": [
+            {
+                "tool": "roblox__get_project_structure",
+                "argument": "{}",
+            },
+        ],
+        "resolved_command": user_command,
+    }
 
 
 def _planner_tool_scope(
@@ -1917,6 +1998,17 @@ def create_plan(
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
 
+    # Obvious Roblox Studio requests should not depend on Qwen's ability
+    # to understand local-machine access. The MCP adapter is the actual
+    # authority for these operations, so keep these routes model-free.
+    deterministic_roblox = _deterministic_roblox_plan(user_command)
+
+    if deterministic_roblox is not None:
+        logger.info(
+            "JARVIS planner: deterministic Roblox route selected."
+        )
+        return validate_plan(deterministic_roblox)
+
     # Use the canonical command router as the first safety boundary.
     # Agent Core may call this planner directly, bypassing main.py's
     # fast-command lookup, so simple actions must still stay model-free.
@@ -2814,6 +2906,15 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
     if not data:
         logger.warning(f"Planner returned invalid JSON: {content[:200]}")
 
+        if is_roblox_request(user_command) and not is_repair_phase:
+            fallback = _roblox_safe_fallback_plan(user_command)
+            validated_fallback = validate_plan(fallback)
+            if validated_fallback.get("steps"):
+                logger.info(
+                    "JARVIS planner: recovered with deterministic Roblox fallback."
+                )
+                return validated_fallback
+
         if is_repair_phase:
             fallback_model = MODEL_MANAGER.coding_fallback_model
             if fallback_model and fallback_model != planner_model:
@@ -2859,6 +2960,20 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
     print("JARVIS DEBUG: calling validate_plan()", flush=True)
 
     validated = validate_plan(data)
+
+    if (
+        is_roblox_request(user_command)
+        and not is_repair_phase
+        and not validated.get("steps")
+    ):
+        fallback = _roblox_safe_fallback_plan(user_command)
+        validated_fallback = validate_plan(fallback)
+        if validated_fallback.get("steps"):
+            logger.info(
+                "JARVIS planner: model produced no usable Roblox steps; "
+                "using deterministic fallback."
+            )
+            validated = validated_fallback
 
     print(
         f"JARVIS DEBUG: validate_plan returned "

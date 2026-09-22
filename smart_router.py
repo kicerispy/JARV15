@@ -184,8 +184,21 @@ def _normalize(text: str) -> str:
 
 
 def _contains_action_word(text: str) -> bool:
+    """Return True for action verbs, including common spoken inflections."""
     words = set(re.findall(r"[a-z']+", text))
-    return bool(words & _ACTION_WORDS)
+
+    for word in words:
+        if word in _ACTION_WORDS:
+            return True
+
+        for base in _ACTION_WORDS:
+            if re.fullmatch(
+                rf"{re.escape(base)}(?:s|es|ed|ing)?",
+                word,
+            ):
+                return True
+
+    return False
 
 
 def _looks_direct_browser_navigation(text: str) -> bool:
@@ -327,6 +340,30 @@ def route_command(command: str) -> RouteDecision:
             "agent",
             "product research request",
             0.97,
+        )
+
+    # Roblox Studio is a local tool-backed domain. Route it to Agent Core
+    # before generic conversation handling, including common spoken verb
+    # inflections such as "inspects" or "checks".
+    roblox_request = (
+        "roblox studio" in text
+        or "roblox game" in text
+        or "roblox project" in text
+        or "localscript" in text
+        or "modulescript" in text
+        or "luau" in text
+        or "playtest" in text
+        or (
+            "roblox" in text
+            and _contains_action_word(text)
+        )
+    )
+
+    if roblox_request:
+        return RouteDecision(
+            "agent",
+            "Roblox Studio MCP request",
+            0.99,
         )
 
     if _looks_direct_browser_navigation(text):
