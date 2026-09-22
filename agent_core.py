@@ -2857,6 +2857,7 @@ class JarvisAgent:
                             speak_callback,
                         )
 
+                    self._record_autonomy_episode(task)
                     task_state.set_progress_callback(None)
                     return task
 
@@ -2960,6 +2961,7 @@ class JarvisAgent:
                                     speak_callback,
                                 )
 
+                            self._record_autonomy_episode(task)
                             task_state.set_progress_callback(None)
                             return task
 
@@ -3177,6 +3179,7 @@ class JarvisAgent:
                         speak_callback,
                     )
 
+                self._record_autonomy_episode(task)
                 task_state.set_progress_callback(None)
                 return task
 
@@ -3212,6 +3215,7 @@ class JarvisAgent:
                         "outer execution loop; skipping replan."
                     )
 
+                    self._record_autonomy_episode(task)
                     task_state.set_progress_callback(None)
                     return task
 
@@ -3315,6 +3319,7 @@ class JarvisAgent:
                         speak_callback,
                     )
 
+                    self._record_autonomy_episode(task)
                     task_state.set_progress_callback(None)
                     return task
 
@@ -3362,6 +3367,7 @@ class JarvisAgent:
                     "failed",
                 }:
 
+                    self._record_autonomy_episode(replanned)
                     return replanned
 
                 continue
