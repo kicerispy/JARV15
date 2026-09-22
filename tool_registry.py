@@ -8,6 +8,13 @@ introducing import cycles.
 from __future__ import annotations
 
 
+ROBLOX_TOOL_PREFIX = "roblox__"
+
+
+def is_roblox_tool_name(name) -> bool:
+    return str(name or "").startswith(ROBLOX_TOOL_PREFIX)
+
+
 BROWSER_TOOLS = frozenset(
     {
         "browser_connect",
@@ -74,4 +81,5 @@ def validate_known_tools(tool_names) -> list[str]:
         for name in tool_names
         if str(name) not in BROWSER_TOOLS
         and str(name) not in JSON_ARGUMENT_TOOLS
+        and not is_roblox_tool_name(name)
     )
