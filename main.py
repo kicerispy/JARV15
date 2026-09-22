@@ -951,7 +951,15 @@ def process_command(
     fast_start = perf_now()
 
     fast_command = get_fast_command(
-        user_input
+        user_input,
+        active_context=(
+            state.active_context.to_dict()
+            if hasattr(
+                state.active_context,
+                "to_dict",
+            )
+            else state.active_context
+        ),
     )
 
     logger.info(
