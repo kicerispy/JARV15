@@ -401,20 +401,36 @@ def run_roblox_tool(
             if not message:
                 message = response.text.strip()
 
+            full_error = (
+                f"Roblox MCP HTTP {response.status_code}"
+                + (f": {message}" if message else "")
+            )
+
+            # A Studio plugin connection timeout is an infrastructure
+            # precondition failure, not a planner strategy failure. Retrying
+            # or asking the LLM to replan only repeats the same unavailable
+            # dependency and wastes the recovery budget.
+            plugin_connection_failure = (
+                "studio plugin connection timeout" in full_error.lower()
+                or "plugin connection timeout" in full_error.lower()
+                or "studio plugin" in full_error.lower()
+                and "not connected" in full_error.lower()
+            )
+
             return ToolResult(
                 success=False,
                 tool=qualified_name,
                 data=data,
-                error=(
-                    f"Roblox MCP HTTP {response.status_code}"
-                    + (f": {message}" if message else "")
-                ),
+                error=full_error,
                 retryable=(
-                    response.status_code in {
-                        408,
-                        429,
-                    }
-                    or response.status_code >= 500
+                    not plugin_connection_failure
+                    and (
+                        response.status_code in {
+                            408,
+                            429,
+                        }
+                        or response.status_code >= 500
+                    )
                 ),
                 observation=_extract_observation(data),
             )
