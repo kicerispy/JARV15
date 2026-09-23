@@ -193,6 +193,24 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertIn("129980665337091", answer)
         self.assertIn("10767662715", answer)
 
+    def test_deterministic_roblox_identifier_plan_avoids_llm(self):
+        from planner import _deterministic_roblox_plan
+
+        plan = _deterministic_roblox_plan(
+            "What are the Roblox place ID and game ID?"
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(
+            plan["steps"],
+            [
+                {
+                    "tool": "roblox__get_place_info",
+                    "argument": "{}",
+                }
+            ],
+        )
+
     def test_roblox_mcp_text_payload_is_decoded(self):
         task = _task(
             "find the scripts that control the core gameplay systems",
