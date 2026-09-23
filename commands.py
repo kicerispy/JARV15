@@ -321,6 +321,26 @@ def extract_search_query(text, site):
     if not query:
         return None
 
+    # Reporting language belongs to JARVIS's response mode, not the
+    # search query. Strip it before handing the query to the browser so a
+    # request such as "search Google for X and tell me what you find" searches
+    # only for X.
+    trailing_report_patterns = [
+        r"\s+(?:and|then)\s+(?:tell|show)\s+me\s+(?:what|the)\b.*$",
+        r"\s+(?:and|then)\s+(?:tell|show)\s+me\s+.*$",
+        r"\s+(?:and|then)\s+(?:give|read)\s+me\s+(?:the\s+)?(?:results|answer|findings)\b.*$",
+        r"\s+(?:and|then)\s+summari[sz]e\s+.*$",
+        r"\s+(?:and|then)\s+report\s+(?:the\s+)?results\b.*$",
+    ]
+
+    for pattern in trailing_report_patterns:
+        query = re.sub(
+            pattern,
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip()
+
     trailing_action_patterns = [
         r"\s+(?:and|then|,\s*)+\s+"
         r"(?:click|open|play|select)\s+"
