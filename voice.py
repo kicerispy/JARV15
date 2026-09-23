@@ -55,6 +55,18 @@ from scipy import signal
 
 from piper import PiperVoice, SynthesisConfig
 
+from config import (
+    OUTPUT_GAIN as CONFIG_OUTPUT_GAIN,
+    PITCH_RATIO as CONFIG_PITCH_RATIO,
+    TTS_LENGTH_SCALE,
+    TTS_NOISE_SCALE,
+    TTS_NOISE_W,
+    VOICE_MODEL_PATH,
+    HIGH_GAIN_DB as CONFIG_HIGH_GAIN_DB,
+    LOW_SHELF_GAIN_DB as CONFIG_LOW_SHELF_GAIN_DB,
+    PRESENCE_GAIN_DB as CONFIG_PRESENCE_GAIN_DB,
+)
+
 from echo_canceller import create_echo_canceller
 
 
@@ -68,9 +80,7 @@ MIC_DEVICE = 1
 SAMPLE_RATE = 16000
 
 
-VOICE_MODEL = os.path.expanduser(
-    r"~/.heed/voices/en_GB-alan-medium.onnx"
-)
+VOICE_MODEL = os.path.expanduser(str(VOICE_MODEL_PATH))
 
 
 # ============================================================
@@ -79,11 +89,11 @@ VOICE_MODEL = os.path.expanduser(
 
 # Higher = slower.
 
-LENGTH_SCALE = 1.05
+LENGTH_SCALE = TTS_LENGTH_SCALE
 
-NOISE_SCALE = 0.45
+NOISE_SCALE = TTS_NOISE_SCALE
 
-NOISE_W_SCALE = 0.60
+NOISE_W_SCALE = TTS_NOISE_W
 
 
 # ============================================================
@@ -92,22 +102,22 @@ NOISE_W_SCALE = 0.60
 
 # Slightly lower pitch.
 
-PITCH_RATIO = 0.94
+PITCH_RATIO = CONFIG_PITCH_RATIO
 
 
 # Warm low frequencies.
 
-LOW_SHELF_GAIN_DB = 3.0
+LOW_SHELF_GAIN_DB = CONFIG_LOW_SHELF_GAIN_DB
 
 
 # Slightly reduce upper-mid harshness.
 
-PRESENCE_GAIN_DB = -1.5
+PRESENCE_GAIN_DB = CONFIG_PRESENCE_GAIN_DB
 
 
 # Slightly soften highs.
 
-HIGH_GAIN_DB = -1.5
+HIGH_GAIN_DB = CONFIG_HIGH_GAIN_DB
 
 
 # Gentle compression.
@@ -119,7 +129,7 @@ COMP_RATIO = 2.2
 
 # Final volume.
 
-OUTPUT_GAIN = 0.30
+OUTPUT_GAIN = CONFIG_OUTPUT_GAIN
 
 
 # ============================================================
