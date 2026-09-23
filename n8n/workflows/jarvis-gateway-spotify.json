@@ -1,0 +1,163 @@
+{
+  "name": "JARVIS Gateway - Spotify Liked Songs",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "jarvis-gateway",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "2d1d8f5e-0f22-4d7d-9a3f-8f73d2e9b3a1",
+      "name": "JARVIS Gateway Webhook",
+      "webhookId": "e8eaf93a-0f5a-44a8-9b2c-3a8c8d1f9d22"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7f3dc3df-7b9c-4d14-a9bb-3b36f2b92312",
+              "leftValue": "={{ String($json.request || '').toLowerCase().includes('spotify') && String($json.request || '').toLowerCase().includes('liked') }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "4f9f6bb1-1b30-4ff3-a6c2-6c0f1eabf3d8",
+      "name": "Spotify Liked Songs?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/v1/jarvis/action",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"action\":\"spotify_play_liked_songs\",\"arguments\":{}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        -80
+      ],
+      "id": "f7cb7d7b-77ef-4fd0-bb70-2e3121fa03de",
+      "name": "JARVIS Spotify Action"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        780,
+        -80
+      ],
+      "id": "fefc5b8f-4c7a-4c33-9fa9-5f1e0b7a9d51",
+      "name": "Return Spotify Result"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"accepted\":false,\"success\":false,\"verified\":false,\"message\":\"JARVIS n8n gateway received the request, but no matching workflow is configured for it yet.\"}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        520,
+        120
+      ],
+      "id": "2c85d0fd-58e1-4c90-b6e4-b0e13c8b65fb",
+      "name": "Unsupported Workflow"
+    }
+  ],
+  "connections": {
+    "JARVIS Gateway Webhook": {
+      "main": [
+        [
+          {
+            "node": "Spotify Liked Songs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spotify Liked Songs?": {
+      "main": [
+        [
+          {
+            "node": "JARVIS Spotify Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unsupported Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JARVIS Spotify Action": {
+      "main": [
+        [
+          {
+            "node": "Return Spotify Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Spotify Result": {
+      "main": [
+        []
+      ]
+    },
+    "Unsupported Workflow": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0fce12d4-10e4-4d03-aef5-5b5c8b7e3b30",
+  "meta": {},
+  "id": "JARVIS-SPOTIFY-GATEWAY",
+  "tags": []
+}

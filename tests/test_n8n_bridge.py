@@ -29,6 +29,7 @@ class N8nBridgeTests(unittest.TestCase):
             "Monitor GitHub and notify me when CI fails": "monitor",
             "Email me the GitHub report": "integration",
             "Automate this across multiple services": "orchestration",
+            "Open Spotify and play my liked songs": "integration",
         }
 
         for request, expected in cases.items():
@@ -59,6 +60,15 @@ class N8nBridgeTests(unittest.TestCase):
             n8n_bridge.classify_n8n_request(
                 "Search Google for wifi skeleton"
             )
+        )
+
+
+    def test_classifier_routes_spotify_desktop_automation(self):
+        self.assertEqual(
+            n8n_bridge.classify_n8n_request(
+                "Open Spotify and play my liked songs"
+            ),
+            "integration",
         )
 
     def test_dispatch_is_disabled_by_default(self):
