@@ -305,7 +305,7 @@ def resolve_intent(
     entities: Dict[str, Any] = {}
 
     quoted = re.findall(
-        r"["']([^"']+)["']",
+        r'''["']([^"']+)["']''',
         request,
     )
     if quoted:
