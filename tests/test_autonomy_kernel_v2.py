@@ -344,9 +344,9 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertIn("2 script-related item(s)", answer)
         self.assertIn("ServerMain", answer)
         self.assertIn("ClientMain", answer)
-        self.assertIn("The project uses: ServerScriptService.", answer)
+        self.assertIn("ServerScriptService", answer)
+        self.assertNotIn("The project is organized around game.", answer)
         self.assertNotIn("The project uses: ScriptService", answer)
-        self.assertNotIn("Examples: ScriptService", answer)
 
     def test_roblox_gameplay_answer_stays_compact(self):
         task = _task(
@@ -386,11 +386,12 @@ class AutonomyKernelV2Tests(unittest.TestCase):
 
         answer = compose_task_answer(task.request, task)
 
-        self.assertIn("likely core gameplay entry point(s)", answer)
+        self.assertIn("likely core gameplay scripts", answer)
         self.assertIn("ServerMain", answer)
         self.assertIn("ClientMain", answer)
         self.assertNotIn("Script Context", answer)
-        self.assertLess(len(answer), 700)
+        self.assertNotIn("ClickTrigger.Script", answer)
+        self.assertLess(len(answer), 500)
 
     def test_browser_search_answer_uses_structured_result_titles(self):
         task = _task(

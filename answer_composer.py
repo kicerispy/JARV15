@@ -322,9 +322,27 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
                 service_names.append(name)
 
     if service_names:
-        preview = ", ".join(service_names[:10])
-        suffix = "…" if len(service_names) > 10 else ""
-        lines.append(f"The project uses: {preview}{suffix}.")
+        # Use service class names for speech instead of full game.X paths.
+        # The full instance paths remain available in structured evidence.
+        service_preview: List[str] = []
+        for name, cls in _classes_from(structure):
+            service = cls if cls in known_services else ""
+            if not service:
+                lowered_name = str(name).strip().lower()
+                for candidate in known_services:
+                    if lowered_name == candidate.lower() or lowered_name.endswith("." + candidate.lower()):
+                        service = candidate
+                        break
+            if service and service not in service_preview:
+                service_preview.append(service)
+
+        if service_preview:
+            # Keep the spoken structure summary intentionally small.
+            preview = ", ".join(service_preview[:6])
+            suffix = " and other standard services" if len(service_preview) > 6 else ""
+            lines.append(
+                f"The project is organized around {preview}{suffix}."
+            )
 
     names: List[str] = list(script_names)
     for source in scripts:
@@ -349,36 +367,52 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     )
 
     if core_focus:
-        # Prefer server/client entry points that are structurally closer to
-        # gameplay execution. This is a location-based shortlist, not a claim
-        # that these scripts are definitely responsible for every game system.
+        # Prefer server/client gameplay locations. Workspace scripts are often
+        # attached to individual props/NPCs and are not enough evidence to call
+        # them core gameplay systems.
         preferred = []
+        preferred_markers = (
+            "serverscriptservice",
+            "starterplayer.starterplayerscripts",
+            "replicatedstorage",
+            "serverstorage",
+        )
         for name in unique_names:
             lowered = name.lower()
-            if any(
-                marker in lowered
-                for marker in (
-                    "serverscriptservice",
-                    "starterplayer.starterplayerscripts",
-                )
-            ):
+            if any(marker in lowered for marker in preferred_markers):
                 preferred.append(name)
 
-        ordered = preferred + [
-            name for name in unique_names if name not in preferred
-        ]
-        unique_names = ordered[:5]
+        candidate_names = preferred
+        if not candidate_names:
+            candidate_names = [
+                name for name in unique_names
+                if "workspace." not in name.lower()
+            ]
 
-        if unique_names:
+        candidate_names = candidate_names[:4]
+
+        def _spoken_script_name(name: str) -> str:
+            # Keep speech natural while retaining the exact path in evidence.
+            return str(name).rsplit(".", 1)[-1].strip() or str(name).strip()
+
+        spoken_names = []
+        for name in candidate_names:
+            short_name = _spoken_script_name(name)
+            if short_name and short_name not in spoken_names:
+                spoken_names.append(short_name)
+
+        if spoken_names:
+            count = len(spoken_names)
+            noun = "script" if count == 1 else "scripts"
             lines.append(
-                f"I found {len(unique_names)} likely core gameplay entry point(s): "
-                + ", ".join(unique_names)
+                f"I found {count} likely core gameplay {noun}: "
+                + ", ".join(spoken_names)
                 + "."
             )
         elif scripts:
             lines.append(
                 "I found script evidence, but none was clearly located in a "
-                "server/client gameplay entry point."
+                "core server or client gameplay area."
             )
     elif unique_names:
         preview = ", ".join(unique_names[:6])
@@ -394,7 +428,9 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
             "did not contain enough structured detail for a reliable summary."
         )
 
-    return "\n".join(lines)[:900]
+    # Evidence can remain richer than spoken output, but Roblox answers
+    # should still be compact enough for natural TTS.
+    return "\n".join(lines)[:650]
 
 def _browser_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     """Summarize structured browser search evidence without reading raw metadata."""
