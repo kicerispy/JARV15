@@ -36,6 +36,13 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
+def n8n_log_path() -> Path:
+    """Return the ignored local log path for hidden n8n startup."""
+    path = Path(config.BASE_DIR) / ".jarvis_runtime" / "n8n-autostart.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _launch_process() -> subprocess.Popen | None:
     script = n8n_start_script()
     if not script.exists():
@@ -59,7 +66,9 @@ def _launch_process() -> subprocess.Popen | None:
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
     try:
-        return subprocess.Popen(
+        log_file = n8n_log_path().open("a", encoding="utf-8")
+        try:
+            return subprocess.Popen(
             [
                 powershell,
                 "-NoProfile",
@@ -72,13 +81,16 @@ def _launch_process() -> subprocess.Popen | None:
                 str(script),
             ],
             cwd=str(config.BASE_DIR),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            startupinfo=startupinfo,
-            creationflags=flags,
-            close_fds=True,
-        )
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
+                startupinfo=startupinfo,
+                creationflags=flags,
+                close_fds=True,
+            )
+        except Exception:
+            log_file.close()
+            raise
     except Exception as exc:
         logger.warning(f"JARVIS: n8n autostart launch failed: {exc}")
         return None
@@ -137,7 +149,10 @@ def ensure_n8n_started(*, timeout: float | None = None, poll_interval: float | N
         name="JARVIS-n8n-autostart-monitor",
         daemon=True,
     ).start()
-    logger.info("JARVIS: n8n autostart launched in the background.")
+    logger.info(
+        "JARVIS: n8n autostart launched in the background. "
+        f"Startup log: {n8n_log_path()}"
+    )
     return {
         "success": True,
         "enabled": True,
