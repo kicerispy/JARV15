@@ -19,6 +19,8 @@ PLANNER_MODEL = MODEL_MANAGER.planner_model
 # ==========================================================
 
 AVAILABLE_TOOLS: Dict[str, str] = {
+    "n8n_status": "Check whether the configured n8n workflow orchestrator is enabled and reachable.",
+    "n8n_run_workflow": "Delegate a workflow-class task to n8n. Argument is JSON with request, workflow_class, and optional context.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -339,6 +341,74 @@ def get_roblox_planner_tools() -> Dict[str, str]:
     return dict(ROBLOX_FALLBACK_TOOL_DESCRIPTIONS)
 
 
+def _deterministic_n8n_plan(
+    user_command: str,
+) -> Optional[Dict[str, Any]]:
+    """Route workflow-class requests directly to n8n without an LLM plan."""
+    normalized = _normalized_words(user_command)
+
+    if not normalized:
+        return None
+
+    # Explicit n8n status requests are observational and never delegated as a
+    # workflow execution.
+    if (
+        "n8n" in normalized
+        and any(
+            phrase in normalized
+            for phrase in (
+                "status",
+                "running",
+                "reachable",
+                "online",
+                "connected",
+                "connection",
+                "available",
+                "installed",
+            )
+        )
+    ):
+        return {
+            "goal": "check n8n workflow orchestrator status",
+            "steps": [
+                {
+                    "tool": "n8n_status",
+                    "argument": "",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
+    try:
+        from n8n_bridge import classify_n8n_request
+        workflow_class = classify_n8n_request(normalized)
+    except Exception:
+        workflow_class = None
+
+    if workflow_class is None:
+        return None
+
+    return {
+        "goal": f"delegate {workflow_class} workflow to n8n",
+        "steps": [
+            {
+                "tool": "n8n_run_workflow",
+                "argument": json.dumps(
+                    {
+                        "request": str(user_command).strip(),
+                        "workflow_class": workflow_class,
+                        "context": {},
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        "resolved_command": user_command,
+        "execution_owner": "n8n",
+        "workflow_class": workflow_class,
+    }
+
+
 def _deterministic_roblox_plan(
     user_command: str,
 ) -> Optional[Dict[str, Any]]:
@@ -560,6 +630,29 @@ def _planner_tool_scope(
     if not text:
         return None
 
+    try:
+        from n8n_bridge import classify_n8n_request
+        if classify_n8n_request(text) is not None or (
+            "n8n" in text
+            and any(
+                phrase in text
+                for phrase in (
+                    "status",
+                    "running",
+                    "reachable",
+                    "online",
+                    "connected",
+                    "connection",
+                )
+            )
+        ):
+            return {
+                "n8n_status",
+                "n8n_run_workflow",
+            }
+    except Exception:
+        pass
+
     if is_roblox_request(text):
         roblox_tools = set(get_roblox_planner_tools().keys())
         roblox_tools.add("roblox_mcp_status")
@@ -776,6 +869,17 @@ BAREHANDS TOOL SELECTION:
   on the Barehands display or glass board, use barehands_present.
 - A request to display JARVIS status on Barehands is a display request,
   not a jarvis_status query; use barehands_present rather than jarvis_status.
+
+N8N WORKFLOW ORCHESTRATION RULES:
+
+When a request is about scheduling, recurring work, persistent monitoring,
+conditional notifications, external-service integrations, or explicit workflow
+orchestration, prefer n8n as the execution owner.
+- Use n8n_run_workflow with JSON containing request, workflow_class, and context.
+- Do not replace an n8n workflow with local wait loops or ad-hoc JARVIS code.
+- n8n owns workflow retries, waiting, branching, and external-service state.
+- JARVIS owns the real-time voice, browser, Roblox, computer-control, and code-repair loops.
+- If n8n is unavailable, report the n8n failure instead of silently executing a different workflow.
 
 ROBLOX STUDIO MCP RULES:
 
@@ -2234,6 +2338,17 @@ def create_plan(
     """
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
+
+    # Workflow-class requests belong to n8n because it is better at
+    # persistent state, schedules, retries, branching, and external-service
+    # orchestration than JARVIS's real-time task loop.
+    deterministic_n8n = _deterministic_n8n_plan(user_command)
+
+    if deterministic_n8n is not None:
+        logger.info(
+            "JARVIS planner: n8n workflow route selected."
+        )
+        return validate_plan(deterministic_n8n)
 
     # Preserve Roblox domain context for follow-up requests that omit the
     # word "Roblox", such as "find the scripts that control gameplay".
