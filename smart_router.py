@@ -261,16 +261,34 @@ def route_command(command: str) -> RouteDecision:
     """Classify a user request without calling Ollama.
 
     Routing order is deliberate:
-    1. deterministic one-shot commands
-    2. active browser/context follow-ups
-    3. explicit multi-step/action requests for Agent Core
-    4. clearly conversational requests
-    5. conservative agent fallback for action-oriented text
+    1. deterministic workflow delegation candidates
+    2. deterministic one-shot commands
+    3. active browser/context follow-ups
+    4. explicit multi-step/action requests for Agent Core
+    5. clearly conversational requests
+    6. conservative agent fallback for action-oriented text
     """
     text = _normalize(command)
 
     if not text:
         return RouteDecision("conversation", "empty request", 0.50)
+
+    # Workflow orchestration belongs to n8n when the request
+    # requires persistence, scheduling, monitoring, notifications,
+    # multi-service integrations, or explicit workflow semantics.
+    try:
+        from n8n_bridge import classify_n8n_request
+
+        n8n_workflow = classify_n8n_request(text)
+    except Exception:
+        n8n_workflow = None
+
+    if n8n_workflow is not None:
+        return RouteDecision(
+            "agent",
+            f"n8n workflow request ({n8n_workflow})",
+            0.99,
+        )
 
     research_hints = (
         "reviews",
