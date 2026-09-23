@@ -3590,6 +3590,18 @@ def execute_plan(
                             active_context.page_title = page_info.get("title")
                     except Exception:
                         pass
+                elif (
+                    tool_name == "roblox_mcp_status"
+                    or tool_name.startswith("roblox__")
+                ):
+                    # A failed Roblox MCP call still establishes the intended
+                    # domain. Retain that context so a natural follow-up can
+                    # continue in Roblox instead of falling through to browser
+                    # or generic code planning.
+                    active_context.site = "roblox"
+                    active_context.last_tool = tool_name
+                    active_context.last_action = f"failed:{tool_name}"
+                    active_context.last_result = str(message)
                 else:
                     active_context.clear()
 
