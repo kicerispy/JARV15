@@ -272,6 +272,101 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertEqual(spoken, [])
         self.assertEqual(active_context.site, "roblox")
 
+    def test_roblox_answer_does_not_count_services_as_scripts(self):
+        task = _task(
+            "inspect my Roblox game and tell me how the project is structured",
+            [
+                {
+                    "tool": "roblox__get_place_info",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "name": "Baddies",
+                        "placeId": 129980665337091,
+                        "gameId": 10767662715,
+                    },
+                },
+                {
+                    "tool": "roblox__get_project_structure",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "children": [
+                            {
+                                "name": "ServerScriptService",
+                                "className": "ServerScriptService",
+                            },
+                            {
+                                "name": "ScriptService",
+                                "className": "ScriptService",
+                            },
+                            {
+                                "name": "ServerMain",
+                                "className": "Script",
+                                "fullName": "game.ServerScriptService.ServerMain",
+                            },
+                            {
+                                "name": "ClientMain",
+                                "className": "LocalScript",
+                                "fullName": "game.StarterPlayer.StarterPlayerScripts.ClientMain",
+                            },
+                        ]
+                    },
+                },
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("2 script-related item(s)", answer)
+        self.assertIn("ServerMain", answer)
+        self.assertIn("ClientMain", answer)
+        self.assertNotIn("ScriptService", answer)
+
+    def test_roblox_gameplay_answer_stays_compact(self):
+        task = _task(
+            "find the scripts that control the core gameplay systems",
+            [
+                {
+                    "tool": "roblox__search_files",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "matches": [
+                            {
+                                "name": "ServerMain",
+                                "className": "Script",
+                                "fullName": "game.ServerScriptService.ServerMain",
+                            },
+                            {
+                                "name": "ClientMain",
+                                "className": "LocalScript",
+                                "fullName": "game.StarterPlayer.StarterPlayerScripts.ClientMain",
+                            },
+                            {
+                                "name": "ScriptService",
+                                "className": "ScriptService",
+                                "fullName": "game.ScriptService",
+                            },
+                            {
+                                "name": "Script Context",
+                                "className": "ScriptContext",
+                                "fullName": "game.Script Context",
+                            },
+                        ]
+                    },
+                }
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("likely core gameplay entry point(s)", answer)
+        self.assertIn("ServerMain", answer)
+        self.assertIn("ClientMain", answer)
+        self.assertNotIn("Script Context", answer)
+        self.assertLess(len(answer), 700)
+
     def test_browser_search_answer_uses_structured_result_titles(self):
         task = _task(
             "search Google for wifi skeleton and tell me what you find",
