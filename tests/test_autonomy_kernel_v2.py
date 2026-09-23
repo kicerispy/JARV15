@@ -222,6 +222,26 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         )
         self.assertIn("connection timeout", context.last_result.lower())
 
+    def test_task_state_start_preserves_background_speech_ownership(self):
+        from state import TaskState
+
+        state = TaskState()
+        state.prepare(
+            description="background task",
+            total_steps=1,
+        )
+
+        self.assertTrue(state.is_background_speech_owned())
+
+        self.assertTrue(
+            state.start(
+                description="background task",
+                total_steps=1,
+            )
+        )
+
+        self.assertTrue(state.is_background_speech_owned())
+
     def test_executor_defers_answer_bearing_task_to_agent_core(self):
         from unittest.mock import patch
 
