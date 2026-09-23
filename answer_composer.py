@@ -258,6 +258,25 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     for source in structure:
         pair_data.extend(_classes_from(source))
 
+    known_services = {
+        "Workspace",
+        "Players",
+        "Lighting",
+        "ReplicatedFirst",
+        "ReplicatedStorage",
+        "ServerScriptService",
+        "ServerStorage",
+        "StarterGui",
+        "StarterPack",
+        "StarterPlayer",
+        "Teams",
+        "SoundService",
+        "TextChatService",
+        "Chat",
+        "MaterialService",
+        "TestService",
+    }
+
     service_names = []
     script_names = []
     for name, cls in pair_data:
@@ -265,12 +284,7 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         if "script" in lowered:
             if name not in script_names:
                 script_names.append(name)
-        elif cls in {
-            "Folder",
-            "Model",
-            "Service",
-            "DataModel",
-        }:
+        elif cls in known_services or name in known_services:
             if name not in service_names:
                 service_names.append(name)
 
@@ -296,8 +310,14 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
 
         preview = ", ".join(unique[:15])
         suffix = "…" if len(unique) > 15 else ""
+        count_text = (
+            f"{len(unique)} script-related items were found. "
+            if len(unique) > 1
+            else "One script-related item was found. "
+        )
         lines.append(
-            "I found script-related items including: "
+            count_text
+            + "Examples include: "
             + preview
             + suffix
             + "."
