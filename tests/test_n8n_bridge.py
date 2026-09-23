@@ -38,6 +38,17 @@ class N8nBridgeTests(unittest.TestCase):
                 request,
             )
 
+    def test_classifier_does_not_steal_n8n_explanations(self):
+        self.assertIsNone(
+            n8n_bridge.classify_n8n_request("What is n8n?")
+        )
+        self.assertIsNone(
+            n8n_bridge.classify_n8n_request(
+                "Explain how n8n workflows work"
+            )
+        )
+
+
     def test_classifier_does_not_steal_immediate_local_work(self):
         self.assertIsNone(
             n8n_bridge.classify_n8n_request(
