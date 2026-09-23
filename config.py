@@ -538,3 +538,23 @@ N8N_LOCAL_ACTION_PORT = int(
         "8765",
     )
 )
+
+
+N8N_AUTOSTART = os.environ.get(
+    "JARVIS_N8N_AUTOSTART",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+N8N_AUTOSTART_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_AUTOSTART_TIMEOUT_SECONDS",
+        "15",
+    )
+)
+
+N8N_AUTOSTART_POLL_INTERVAL_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_AUTOSTART_POLL_INTERVAL_SECONDS",
+        "0.5",
+    )
+)
