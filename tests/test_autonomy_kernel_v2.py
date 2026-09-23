@@ -211,6 +211,22 @@ class AutonomyKernelV2Tests(unittest.TestCase):
             ],
         )
 
+    def test_deterministic_n8n_plan_owns_workflow_request(self):
+        from planner import _deterministic_n8n_plan
+
+        plan = _deterministic_n8n_plan(
+            "Monitor GitHub and notify me when CI fails"
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["execution_owner"], "n8n")
+        self.assertEqual(plan["workflow_class"], "monitor")
+        self.assertEqual(
+            plan["steps"][0]["tool"],
+            "n8n_run_workflow",
+        )
+
+
     def test_roblox_mcp_text_payload_is_decoded(self):
         task = _task(
             "find the scripts that control the core gameplay systems",
