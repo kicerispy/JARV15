@@ -531,3 +531,10 @@ N8N_TIMEOUT_SECONDS = float(
         "15",
     )
 )
+
+N8N_LOCAL_ACTION_PORT = int(
+    os.environ.get(
+        "JARVIS_N8N_LOCAL_ACTION_PORT",
+        "8765",
+    )
+)
