@@ -879,7 +879,10 @@ N8N WORKFLOW ORCHESTRATION RULES:
 
 When a request is about scheduling, recurring work, persistent monitoring,
 conditional notifications, external-service integrations, or explicit workflow
-orchestration, prefer n8n as the execution owner.
+orchestration, prefer n8n as the execution owner. External-service actions are
+n8n-first even when they are a single action (for example, sending an email,
+creating a GitHub issue, updating a calendar, or controlling a supported media
+service). JARVIS should not recreate an integration locally when n8n can own it.
 - Use n8n_run_workflow with JSON containing request, workflow_class, and context.
 - Do not replace an n8n workflow with local wait loops or ad-hoc JARVIS code.
 - n8n owns workflow retries, waiting, branching, and external-service state.
