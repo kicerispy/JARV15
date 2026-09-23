@@ -32,6 +32,10 @@ def _powershell_path() -> str:
     windir = os.environ.get("WINDIR", r"C:\Windows")
     return str(Path(windir) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def _launch_process() -> subprocess.Popen | None:
     script = n8n_start_script()
     if not script.exists():
