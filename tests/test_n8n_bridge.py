@@ -93,6 +93,18 @@ class N8nBridgeTests(unittest.TestCase):
                 request,
             )
 
+    def test_classifier_keeps_read_only_service_queries_fast(self):
+        self.assertIsNone(
+            n8n_bridge.classify_n8n_request(
+                "Search GitHub for the JARV3 repository"
+            )
+        )
+        self.assertIsNone(
+            n8n_bridge.classify_n8n_request(
+                "Find a Spotify song by Daft Punk"
+            )
+        )
+
     def test_dispatch_is_disabled_by_default(self):
         with patch.object(n8n_bridge, "N8N_ENABLED", False):
             result = n8n_bridge.run_n8n_workflow(
