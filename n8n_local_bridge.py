@@ -157,6 +157,7 @@ def _spotify_play_liked_songs() -> dict[str, Any]:
                 "stage": "locate_liked_songs",
                 "details": liked_state,
             }
+        liked_state = {**clicked, "success": True, "verified": bool(clicked.get("verified", True))}
         time.sleep(0.8)
 
     playing_state = screen_vision.verify_screen_state(
