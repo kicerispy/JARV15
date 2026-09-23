@@ -165,6 +165,8 @@ def classify_n8n_request(request: str) -> Optional[str]:
         return "integration"
 
     # Explicit workflow/orchestration requests and multi-service pipelines.
+    # Mentioning "n8n" alone is not enough: informational questions about n8n
+    # should remain normal JARVIS conversations.
     if any(
         phrase in text
         for phrase in (
@@ -172,6 +174,13 @@ def classify_n8n_request(request: str) -> Optional[str]:
             "run the workflow",
             "workflow for ",
             "create a workflow",
+            "create an n8n workflow",
+            "use n8n",
+            "run in n8n",
+            "delegate to n8n",
+            "with n8n",
+            "n8n workflow",
+            "n8n automation",
             "automate this",
             "automate that",
             "set up an automation",
@@ -191,7 +200,6 @@ def classify_n8n_request(request: str) -> Optional[str]:
             "multi service workflow",
             "long-running workflow",
             "background workflow",
-            "n8n",
         )
     ):
         return "orchestration"
@@ -471,6 +479,20 @@ def run_n8n_workflow(
                 result.update(payload)
             elif payload:
                 result["response"] = payload
+
+            if (
+                result.get("success") is False
+                or result.get("accepted") is False
+            ):
+                result["success"] = False
+                result["verified"] = False
+                result["accepted"] = False
+                result["message"] = str(
+                    result.get("message")
+                    or result.get("error")
+                    or f"n8n rejected the {normalized_class} workflow."
+                )
+                return result
 
             if not result.get("message"):
                 result["message"] = (
