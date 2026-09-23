@@ -42,6 +42,8 @@ from typing import Any, Dict, List, Optional
 
 from logger import logger
 from autonomy_memory import get_failure_hints, record_episode
+from answer_composer import compose_task_answer
+from postcondition_verifier import verify_postcondition
 from planner import (
     assess_plan,
     create_plan,
@@ -2234,6 +2236,26 @@ class JarvisAgent:
                     limit=1600,
                 )
 
+            # Preserve bounded structured result data for Autonomy Kernel v2.
+            # Concise messages are useful for logs, but information-seeking
+            # answers need the actual tool payload as evidence.
+            if data is not None:
+                try:
+                    serialized = json.dumps(
+                        data,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                except Exception:
+                    serialized = str(data)
+
+                if len(serialized) <= 9000:
+                    evidence["data"] = data
+                else:
+                    evidence["data"] = (
+                        serialized[:9000]
+                        + "\n... [structured evidence truncated by JARVIS] ..."
+                    )
             task.evidence.append(evidence)
 
         # Capture actual browser state.
@@ -3139,6 +3161,139 @@ class JarvisAgent:
                     f"after {task.replan_count} replan(s)."
                 )
 
+                # Autonomy Kernel v2: informational tasks are not complete
+                # until JARVIS has verified that concrete evidence exists and
+                # converted that evidence into an actual answer.
+                try:
+                    postcondition = verify_postcondition(
+                        task.request,
+                        task,
+                        active_context=(
+                            active_context.to_dict()
+                            if hasattr(active_context, "to_dict")
+                            else active_context
+                        ),
+                    )
+                except Exception as exc:
+                    postcondition = {
+                        "ready": False,
+                        "requires_answer": False,
+                        "reason": f"postcondition check failed: {exc}",
+                    }
+                    logger.warning(
+                        "JARVIS AGENT: Postcondition verification error: "
+                        f"{exc}"
+                    )
+
+                if postcondition.get("requires_answer"):
+                    if postcondition.get("ready"):
+                        try:
+                            composed_answer = compose_task_answer(
+                                task.request,
+                                task,
+                                active_context=(
+                                    active_context.to_dict()
+                                    if hasattr(active_context, "to_dict")
+                                    else active_context
+                                ),
+                            )
+                        except Exception as exc:
+                            composed_answer = ""
+                            logger.warning(
+                                "JARVIS AGENT: Answer composition failed: "
+                                f"{exc}"
+                            )
+
+                        if composed_answer.strip():
+                            task.execution_result = composed_answer
+                            self.state["last_result"] = composed_answer
+                            self.state["last_error"] = None
+
+                            try:
+                                from tool_executor import add_assistant_message
+                                add_assistant_message(composed_answer)
+                            except Exception as exc:
+                                logger.debug(
+                                    "JARVIS AGENT: Conversation answer write skipped: "
+                                    f"{exc}"
+                                )
+
+                            try:
+                                background_owned = (
+                                    task_state.is_background_speech_owned()
+                                    if hasattr(
+                                        task_state,
+                                        "is_background_speech_owned",
+                                    )
+                                    else False
+                                )
+                            except Exception:
+                                background_owned = False
+
+                            if background_owned:
+                                task_state.set_final_speech(composed_answer)
+                            else:
+                                interrupted = bool(
+                                    speak_callback(composed_answer)
+                                )
+                                if not interrupted and hasattr(
+                                    task_state,
+                                    "mark_completion_spoken",
+                                ):
+                                    task_state.mark_completion_spoken()
+
+                            logger.info(
+                                "JARVIS AGENT: Autonomy Kernel v2 answer "
+                                "composer selected evidence-grounded response."
+                            )
+                        else:
+                            task.error = (
+                                "Answer composer produced no safe response "
+                                "from verified evidence."
+                            )
+                            task.status = "failed"
+                            task.completed_at = time.time()
+                            self.state["last_result"] = None
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = task.error
+
+                            self._announce(
+                                "I found the requested information, but I could not safely turn the verified evidence into an answer.",
+                                speak_callback,
+                            )
+
+                            logger.warning(
+                                "JARVIS AGENT: answer composer produced no safe response; failing task."
+                            )
+                            self._record_autonomy_episode(task)
+                            task_state.set_progress_callback(None)
+                            return task
+                    else:
+                        # Never announce false completion for a data-seeking
+                        # task when postcondition evidence is missing.
+                        reason = str(
+                            postcondition.get(
+                                "reason",
+                                "Required evidence was not available.",
+                            )
+                        )
+                        task.error = reason
+                        self.state["last_result"] = None
+                        self.state["last_status"] = "failed"
+                        self.state["last_error"] = reason
+                        task.status = "failed"
+                        task.completed_at = time.time()
+
+                        if report_progress:
+                            self._announce(
+                                "I completed the checks, but I don't have enough verified evidence to give you a reliable answer.",
+                                speak_callback,
+                            )
+
+                        self._record_autonomy_episode(task)
+                        task_state.set_progress_callback(None)
+                        return task
+
                 if report_progress:
                     completion_spoken = False
                     pending_final_speech = False
@@ -3148,7 +3303,14 @@ class JarvisAgent:
                     except Exception:
                         pass
 
-                    if not completion_spoken and not pending_final_speech:
+                    if (
+                        not completion_spoken
+                        and not pending_final_speech
+                        and not (
+                            postcondition.get("requires_answer")
+                            and postcondition.get("ready")
+                        )
+                    ):
                         self._announce(
                             "The task is complete.",
                             speak_callback,
