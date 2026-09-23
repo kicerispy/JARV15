@@ -98,6 +98,18 @@ def classify_n8n_request(request: str) -> Optional[str]:
     ):
         return "monitor"
 
+    # Local Spotify automation is delegated to n8n so workflow orchestration
+    # owns the request while JARVIS retains the actual Windows control.
+    if (
+        ("spotify" in text and any(phrase in text for phrase in (
+            "play",
+            "liked songs",
+            "open spotify",
+            "start spotify",
+        )))
+    ):
+        return "integration"
+
     # External-service workflows are better represented as n8n integrations
     # than as one-off JARVIS Python branches.
     if any(
