@@ -15,6 +15,7 @@ The bridge is intentionally dependency-free and fail-closed:
 from __future__ import annotations
 
 import json
+import re
 import socket
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
@@ -125,6 +126,53 @@ def classify_n8n_request(request: str) -> Optional[str]:
         )))
     ):
         return "integration"
+
+    # External-service mutations and integrations are n8n-first. Read-only
+    # search/lookup questions stay on the fast JARVIS/web path unless the user
+    # explicitly asks for a workflow.
+    external_services = (
+        "email", "gmail", "outlook", "calendar", "google calendar",
+        "google sheets", "google drive", "drive", "sheets", "slack",
+        "discord", "telegram", "notion", "github", "gitlab", "jira",
+        "linear", "trello", "todoist", "dropbox", "onedrive", "spotify",
+        "twilio", "stripe", "salesforce", "hubspot", "wordpress", "reddit",
+        "linkedin", "webhook", "rss",
+    )
+    external_actions = (
+        "send ", "post ", "create ", "add ", "update ", "save ", "sync ",
+        "forward ", "share ", "upload ", "download ", "notify ", "message ",
+        "schedule ",
+    )
+    if any(service in text for service in external_services) and any(
+        action in text for action in external_actions
+    ):
+        return "integration"
+
+    # Desktop/media control can still be n8n-first when the request is about
+    # an external service that benefits from orchestration (Spotify is the
+    # initial example implemented by the JARVIS local-action gateway).
+    media_services = ("spotify", "plex", "youtube music", "apple music")
+    media_actions = ("play ", "open ", "start ", "stop ", "pause ", "resume ")
+    if any(service in text for service in media_services) and any(
+        action in text for action in media_actions
+    ):
+        return "integration"
+
+    # Service-to-service language is workflow-shaped even when the user does
+    # not explicitly say "workflow" or "automation".
+    if any(
+        re.search(pattern, text)
+        for pattern in (
+            r"\bsync\b.+\bwith\b",
+            r"\bcopy\b.+\bto\b",
+            r"\bsend\b.+\bto\b",
+            r"\bfrom\b.+\bto\b",
+            r"\bbetween\b.+\band\b",
+            r"\bwhen\b.+\bthen\b",
+            r"\bafter\b.+,?\s+then\b",
+        )
+    ):
+        return "orchestration"
 
     # External-service workflows are better represented as n8n integrations
     # than as one-off JARVIS Python branches.
