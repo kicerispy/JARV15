@@ -309,7 +309,10 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
             + "."
         )
 
-    names = []
+    # Project structure payloads already contain class metadata for Script and
+    # ModuleScript instances. Preserve those names alongside explicit script
+    # search results instead of throwing the structure-level script_names away.
+    names = list(script_names)
     for source in scripts:
         names.extend(_script_like_names(source))
 

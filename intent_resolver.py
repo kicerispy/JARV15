@@ -272,15 +272,34 @@ def resolve_intent(
     evidence_request = any(text.startswith(prefix) for prefix in evidence_verbs)
     action_request = any(text.startswith(prefix) for prefix in _ACTION_STARTS)
 
+    # A search can be both an action and an information request. Phrases such
+    # as "tell me what you find" explicitly require JARVIS to return findings.
+    report_request = any(
+        marker in text
+        for marker in (
+            "tell me what you find",
+            "tell me what you found",
+            "what did you find",
+            "what are the results",
+            "show me the results",
+            "show me what you found",
+            "summarize",
+            "explain what",
+            "report the results",
+        )
+    )
+
     answer_mode = (
         plan_mode == "answer"
         or explicit_answer
         or evidence_request
+        or report_request
     )
 
     # Common browser actions are not informational by themselves.
     if domain == "browser" and action_request and not (
         explicit_answer
+        or report_request
         or any(
             marker in text
             for marker in (
@@ -297,7 +316,7 @@ def resolve_intent(
     ):
         answer_mode = False
 
-    if plan_mode in {"action", "execute"} and not explicit_answer:
+    if plan_mode in {"action", "execute"} and not explicit_answer and not report_request:
         answer_mode = False
 
     mode = "answer" if answer_mode else "action"
