@@ -127,9 +127,9 @@ def classify_n8n_request(request: str) -> Optional[str]:
     ):
         return "integration"
 
-    # External-service work is n8n-first even when it is a single action.
-    # n8n can use a dedicated integration node or its generic HTTP Request node;
-    # JARVIS remains responsible for local UI/computer execution when needed.
+    # External-service mutations and integrations are n8n-first. Read-only
+    # search/lookup questions stay on the fast JARVIS/web path unless the user
+    # explicitly asks for a workflow.
     external_services = (
         "email", "gmail", "outlook", "calendar", "google calendar",
         "google sheets", "google drive", "drive", "sheets", "slack",
@@ -141,11 +141,20 @@ def classify_n8n_request(request: str) -> Optional[str]:
     external_actions = (
         "send ", "post ", "create ", "add ", "update ", "save ", "sync ",
         "forward ", "share ", "upload ", "download ", "notify ", "message ",
-        "schedule ", "play ", "open ", "start ", "stop ", "pause ", "resume ",
-        "search ", "find ", "get ", "fetch ", "list ",
+        "schedule ",
     )
     if any(service in text for service in external_services) and any(
         action in text for action in external_actions
+    ):
+        return "integration"
+
+    # Desktop/media control can still be n8n-first when the request is about
+    # an external service that benefits from orchestration (Spotify is the
+    # initial example implemented by the JARVIS local-action gateway).
+    media_services = ("spotify", "plex", "youtube music", "apple music")
+    media_actions = ("play ", "open ", "start ", "stop ", "pause ", "resume ")
+    if any(service in text for service in media_services) and any(
+        action in text for action in media_actions
     ):
         return "integration"
 
