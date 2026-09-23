@@ -275,7 +275,7 @@ def route_command(command: str) -> RouteDecision:
 
     # Workflow orchestration belongs to n8n when the request
     # requires persistence, scheduling, monitoring, notifications,
-    # multi-service integrations, or explicit workflow semantics.
+    # external-service work, multi-service integrations, or explicit workflow semantics.
     try:
         from n8n_bridge import classify_n8n_request
 
