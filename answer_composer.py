@@ -150,23 +150,47 @@ def _classes_from(value: Any) -> List[Tuple[str, str]]:
 
 
 def _script_like_names(value: Any) -> List[str]:
-    script_terms = (
-        "script",
-        "module",
-        ".lua",
-        ".luau",
-    )
+    """Extract actual Script/LocalScript/ModuleScript instances, not services."""
     names: List[str] = []
+    exact_classes = {"Script", "LocalScript", "ModuleScript"}
 
-    for item in _names_from(value):
-        lowered = item.lower()
-        if any(term in lowered for term in script_terms):
-            if item not in names:
-                names.append(item)
+    for item in _iter_dicts(value):
+        name = ""
+        for key in (
+            "fullName",
+            "full_name",
+            "path",
+            "filePath",
+            "file_path",
+            "name",
+            "displayName",
+            "display_name",
+        ):
+            raw = item.get(key)
+            if isinstance(raw, str) and raw.strip():
+                name = raw.strip()
+                break
 
-    for name, cls in _classes_from(value):
-        lowered_cls = cls.lower()
-        if "script" in lowered_cls and name not in names:
+        cls = ""
+        for key in ("className", "class_name", "type", "instanceType"):
+            raw = item.get(key)
+            if raw:
+                cls = str(raw).strip()
+                break
+
+        lowered = name.lower()
+        is_source_file = lowered.endswith((".lua", ".luau"))
+        is_script_name = lowered.endswith((
+            ".script",
+            ".localscript",
+            ".modulescript",
+        ))
+
+        if (
+            name
+            and (cls in exact_classes or is_source_file or is_script_name)
+            and name not in names
+        ):
             names.append(name)
 
     return names
