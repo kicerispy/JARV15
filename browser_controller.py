@@ -2837,8 +2837,34 @@ def cleanup_browser():
                 await asyncio.sleep(0)
 
             loop_to_close.run_until_complete(_close())
-    except Exception as exc:
-        logging.debug(f"Browser cleanup exception: {exc}")
+
+            # Do not leave Playwright's internal connection task (or any
+            # controller-owned async task) alive when the loop is closed.
+            # Explicit cancellation here prevents Python 3.12's Windows
+            # Proactor cleanup from reporting "Task was destroyed while it is
+            # pending" during interpreter shutdown.
+            pending = [
+                task
+                for task in asyncio.all_tasks(loop=loop_to_close)
+                if not task.done()
+            ]
+
+            if pending:
+                for task in pending:
+                    task.cancel()
+
+                loop_to_close.run_until_complete(
+                    asyncio.gather(
+                        *pending,
+                        return_exceptions=True,
+                    )
+                )
+
+            loop_to_close.run_until_complete(
+                loop_to_close.shutdown_asyncgens()
+            )
+            loop_to_close.close()
+
     finally:
         _playwright = None
         _context = None
