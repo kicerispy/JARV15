@@ -239,31 +239,72 @@ WAKE_CHUNK_SIZE = 1280
 # TTS
 # ============================================================
 
-VOICE_MODEL_PATH = (
-    BASE_DIR
-    / "voice_model"
-    / "en_US-lessac-medium.onnx"
+# Keep the active Piper voice configurable without changing the working
+# local voice path. Environment variables allow fast tuning without code edits.
+VOICE_MODEL_PATH = Path(
+    os.path.expanduser(
+        os.environ.get(
+            "JARVIS_TTS_VOICE_MODEL",
+            "~/.heed/voices/en_GB-alan-medium.onnx",
+        )
+    )
 )
 
-TTS_LENGTH_SCALE = 1.0
+TTS_LENGTH_SCALE = float(
+    os.environ.get(
+        "JARVIS_TTS_LENGTH_SCALE",
+        "0.85",
+    )
+)
 
-TTS_NOISE_SCALE = 0.667
+TTS_NOISE_SCALE = float(
+    os.environ.get(
+        "JARVIS_TTS_NOISE_SCALE",
+        "0.45",
+    )
+)
 
-TTS_NOISE_W = 0.8
+TTS_NOISE_W = float(
+    os.environ.get(
+        "JARVIS_TTS_NOISE_W",
+        "0.60",
+    )
+)
 
-PITCH_RATIO = 1.0
+PITCH_RATIO = float(
+    os.environ.get(
+        "JARVIS_TTS_PITCH_RATIO",
+        "0.94",
+    )
+)
 
-LOW_SHELF_GAIN_DB = 0.0
+LOW_SHELF_GAIN_DB = float(
+    os.environ.get(
+        "JARVIS_TTS_LOW_SHELF_GAIN_DB",
+        "3.0",
+    )
+)
 
-PRESENCE_GAIN_DB = 0.0
+PRESENCE_GAIN_DB = float(
+    os.environ.get(
+        "JARVIS_TTS_PRESENCE_GAIN_DB",
+        "-1.5",
+    )
+)
 
-HIGH_GAIN_DB = 0.0
+HIGH_GAIN_DB = float(
+    os.environ.get(
+        "JARVIS_TTS_HIGH_GAIN_DB",
+        "-1.5",
+    )
+)
 
-COMP_THRESHOLD = -20.0
-
-COMP_RATIO = 2.0
-
-OUTPUT_GAIN = 0.35
+OUTPUT_GAIN = float(
+    os.environ.get(
+        "JARVIS_TTS_OUTPUT_GAIN",
+        "0.30",
+    )
+)
 
 
 # ============================================================
