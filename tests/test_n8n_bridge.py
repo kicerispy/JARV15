@@ -76,6 +76,23 @@ class N8nBridgeTests(unittest.TestCase):
             "integration",
         )
 
+    def test_classifier_prefers_n8n_for_single_service_actions(self):
+        cases = {
+            "Send an email to my inbox": "integration",
+            "Create a GitHub issue for this bug": "integration",
+            "Add an event to Google Calendar": "integration",
+            "Update my Notion page": "integration",
+            "Open Spotify and play my liked songs": "integration",
+            "Sync Google Sheets with Airtable": "orchestration",
+        }
+
+        for request, expected in cases.items():
+            self.assertEqual(
+                n8n_bridge.classify_n8n_request(request),
+                expected,
+                request,
+            )
+
     def test_dispatch_is_disabled_by_default(self):
         with patch.object(n8n_bridge, "N8N_ENABLED", False):
             result = n8n_bridge.run_n8n_workflow(
