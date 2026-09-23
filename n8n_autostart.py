@@ -45,6 +45,7 @@ def n8n_log_path() -> Path:
 
 def _launch_process() -> subprocess.Popen | None:
     script = n8n_start_script()
+
     if not script.exists():
         logger.warning(f"JARVIS: n8n autostart script not found: {script}")
         return None
@@ -69,18 +70,18 @@ def _launch_process() -> subprocess.Popen | None:
         log_file = n8n_log_path().open("a", encoding="utf-8")
         try:
             return subprocess.Popen(
-            [
-                powershell,
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-WindowStyle",
-                "Hidden",
-                "-File",
-                str(script),
-            ],
-            cwd=str(config.BASE_DIR),
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    str(script),
+                ],
+                cwd=str(config.BASE_DIR),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=log_file,
