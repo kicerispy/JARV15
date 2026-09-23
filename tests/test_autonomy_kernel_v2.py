@@ -195,6 +195,33 @@ class AutonomyKernelV2Tests(unittest.TestCase):
 
         self.assertIn("CombatService", answer)
 
+    def test_failed_roblox_tool_preserves_domain_context(self):
+        from state import ActiveContext
+        from tool_executor import update_active_context
+
+        context = ActiveContext()
+        context.site = "google"
+
+        update_active_context(
+            {
+                "steps": [
+                    {
+                        "tool": "roblox__get_project_structure",
+                        "argument": "{}",
+                    }
+                ]
+            },
+            context,
+            result_message="Roblox MCP HTTP 500: Studio plugin connection timeout.",
+        )
+
+        self.assertEqual(context.site, "roblox")
+        self.assertEqual(
+            context.last_tool,
+            "roblox__get_project_structure",
+        )
+        self.assertIn("connection timeout", context.last_result.lower())
+
     def test_executor_defers_answer_bearing_task_to_agent_core(self):
         from unittest.mock import patch
 
