@@ -68,6 +68,20 @@ class SmartRouterTests(unittest.TestCase):
         self.assertEqual(decision.kind, "agent")
 
 
+    def test_workflow_requests_route_to_agent_for_n8n(self):
+        from smart_router import route_command
+
+        for command in (
+            "Remind me tomorrow to test the Roblox game",
+            "Monitor GitHub and notify me when CI fails",
+            "Email me the report",
+            "Automate this across multiple services",
+        ):
+            decision = route_command(command)
+            self.assertEqual(decision.kind, "agent", command)
+            self.assertIn("n8n workflow request", decision.reason)
+
+
     def test_roblox_studio_requests_route_agent(self):
         from smart_router import route_command
 

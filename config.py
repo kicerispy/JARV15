@@ -490,3 +490,44 @@ DEBUG = os.environ.get(
     "yes",
     "on",
 }
+
+
+# ============================================================
+# N8N WORKFLOW ORCHESTRATION
+# ============================================================
+#
+# n8n is optional. When enabled, workflow-class tasks such as
+# schedules, persistent monitoring, notifications, and external
+# service orchestration are delegated to n8n rather than handled
+# by JARVIS's local task planner.
+N8N_ENABLED = os.environ.get(
+    "JARVIS_N8N_ENABLED",
+    "0",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+N8N_BASE_URL = os.environ.get(
+    "JARVIS_N8N_BASE_URL",
+    "http://127.0.0.1:5678",
+).strip().rstrip("/")
+
+N8N_WEBHOOK_PATH = os.environ.get(
+    "JARVIS_N8N_WEBHOOK_PATH",
+    "webhook/jarvis-gateway",
+).strip().strip("/")
+
+N8N_WEBHOOK_TOKEN = os.environ.get(
+    "JARVIS_N8N_WEBHOOK_TOKEN",
+    "",
+).strip()
+
+N8N_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_TIMEOUT_SECONDS",
+        "15",
+    )
+)

@@ -1,0 +1,511 @@
+"""n8n workflow delegation bridge for JARVIS.
+
+n8n owns workflow-class tasks that benefit from persistent workflow state,
+schedules, retries, branching, and external-service integrations. JARVIS
+delegates through a local webhook and keeps real-time computer/game/browser
+control in Python.
+
+The bridge is intentionally dependency-free and fail-closed:
+- n8n is opt-in via JARVIS_N8N_ENABLED.
+- remote n8n endpoints require a webhook token.
+- workflow dispatches are not automatically retried by JARVIS because n8n
+  should own workflow retry semantics and duplicate-side-effect prevention.
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+from typing import Any, Dict, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+
+from config import (
+    N8N_BASE_URL,
+    N8N_ENABLED,
+    N8N_TIMEOUT_SECONDS,
+    N8N_WEBHOOK_PATH,
+    N8N_WEBHOOK_TOKEN,
+)
+
+
+MAX_N8N_PAYLOAD_CHARS = 12000
+MAX_N8N_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+def _normalize(text: Any) -> str:
+    return " ".join(
+        str(text or "").strip().lower().split()
+    )
+
+
+def classify_n8n_request(request: str) -> Optional[str]:
+    """Classify workflow tasks where n8n has an architectural advantage."""
+    text = _normalize(request)
+    if not text:
+        return None
+
+    # Scheduling / recurring work.
+    if any(
+        phrase in text
+        for phrase in (
+            "remind me",
+            "set a reminder",
+            "schedule ",
+            "scheduled ",
+            "schedule this",
+            "every day",
+            "every weekday",
+            "every week",
+            "every month",
+            "every hour",
+            "every minute",
+            "daily ",
+            "weekly ",
+            "monthly ",
+            "recurring",
+            "recurring task",
+            "in 5 minutes",
+            "in 10 minutes",
+            "in 15 minutes",
+            "in 30 minutes",
+            "in an hour",
+            "tomorrow at ",
+            "tonight at ",
+        )
+    ):
+        return "schedule"
+
+    # Persistent monitoring / conditional notification.
+    if any(
+        phrase in text
+        for phrase in (
+            "monitor ",
+            "monitoring ",
+            "keep monitoring ",
+            "watch ",
+            "keep an eye on ",
+            "alert me when ",
+            "notify me when ",
+            "tell me when ",
+            "let me know when ",
+            "until ",
+            "when this happens",
+            "when it happens",
+        )
+    ):
+        return "monitor"
+
+    # External-service workflows are better represented as n8n integrations
+    # than as one-off JARVIS Python branches.
+    if any(
+        phrase in text
+        for phrase in (
+            "send an email",
+            "send email",
+            "email me",
+            "email the",
+            "send a message",
+            "send this to discord",
+            "send to discord",
+            "send to slack",
+            "send to telegram",
+            "post to discord",
+            "post to slack",
+            "post to telegram",
+            "google calendar",
+            "calendar event",
+            "google sheets",
+            "add to sheets",
+            "save to notion",
+            "create a github issue",
+            "create a github pr",
+            "create a github pull request",
+            "webhook",
+            "external service",
+            "third-party service",
+        )
+    ):
+        return "integration"
+
+    # Explicit workflow/orchestration requests and multi-service pipelines.
+    # Mentioning "n8n" alone is not enough: informational questions about n8n
+    # should remain normal JARVIS conversations.
+    if any(
+        phrase in text
+        for phrase in (
+            "run a workflow",
+            "run the workflow",
+            "workflow for ",
+            "create a workflow",
+            "create an n8n workflow",
+            "use n8n",
+            "run in n8n",
+            "delegate to n8n",
+            "with n8n",
+            "n8n workflow",
+            "n8n automation",
+            "automate this",
+            "automate that",
+            "set up an automation",
+            "setup an automation",
+            "build an automation",
+            "automation that ",
+            "automate ",
+            "when ... then",
+            "when this happens, ",
+            "after that, ",
+            "then send ",
+            "then notify ",
+            "then email ",
+            "across multiple services",
+            "across multiple apps",
+            "multi-step workflow",
+            "multi service workflow",
+            "long-running workflow",
+            "background workflow",
+        )
+    ):
+        return "orchestration"
+
+    return None
+
+
+def n8n_status() -> Dict[str, Any]:
+    """Return configuration and reachability information without side effects."""
+    parsed = urlparse(N8N_BASE_URL)
+
+    enabled = N8N_ENABLED
+    configured = bool(
+        N8N_BASE_URL
+        and N8N_WEBHOOK_PATH
+    )
+
+    host = (parsed.hostname or "").strip().lower()
+    local_host = host in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }
+
+    token_required = not local_host
+    token_present = bool(N8N_WEBHOOK_TOKEN)
+
+    result: Dict[str, Any] = {
+        "success": False,
+        "verified": False,
+        "enabled": enabled,
+        "configured": configured,
+        "reachable": False,
+        "base_url": N8N_BASE_URL,
+        "webhook_path": N8N_WEBHOOK_PATH,
+        "execution_owner": "n8n",
+        "local_only": local_host,
+    }
+
+    if not enabled:
+        result["message"] = (
+            "n8n delegation is disabled. "
+            "Set JARVIS_N8N_ENABLED=1 to enable it."
+        )
+        return result
+
+    if not configured:
+        result["message"] = "n8n delegation is enabled but not configured."
+        return result
+
+    if token_required and not token_present:
+        result["message"] = (
+            "Remote n8n endpoint refused because "
+            "JARVIS_N8N_WEBHOOK_TOKEN is not configured."
+        )
+        return result
+
+    try:
+        request = Request(
+            N8N_BASE_URL + "/",
+            headers={
+                "Accept": "text/html,application/json",
+                "User-Agent": "JARVIS-n8n-bridge/1.0",
+            },
+            method="GET",
+        )
+        with urlopen(
+            request,
+            timeout=min(N8N_TIMEOUT_SECONDS, 3.0),
+        ) as response:
+            status = int(getattr(response, "status", 200) or 200)
+
+        result.update(
+            {
+                "success": 200 <= status < 400,
+                "verified": 200 <= status < 400,
+                "reachable": True,
+                "http_status": status,
+                "message": (
+                    "n8n is reachable."
+                    if 200 <= status < 400
+                    else f"n8n responded with HTTP {status}."
+                ),
+            }
+        )
+        return result
+
+    except HTTPError as exc:
+        reachable = int(exc.code) < 500
+        result.update(
+            {
+                "reachable": reachable,
+                "http_status": int(exc.code),
+                "message": (
+                    f"n8n is reachable but returned HTTP {exc.code}."
+                    if reachable
+                    else f"n8n returned HTTP {exc.code}."
+                ),
+            }
+        )
+        return result
+    except (URLError, TimeoutError, OSError) as exc:
+        result["message"] = f"n8n is unreachable: {exc}"
+        return result
+    except Exception as exc:
+        result["message"] = f"n8n status check failed: {exc}"
+        return result
+
+
+def run_n8n_workflow(
+    request: str,
+    workflow_class: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Delegate one workflow-class task to the configured n8n gateway."""
+    normalized_request = " ".join(
+        str(request or "").strip().split()
+    )
+
+    normalized_class = _normalize(workflow_class)
+
+    if not N8N_ENABLED:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "message": (
+                "n8n workflow delegation is disabled. "
+                "Enable it with JARVIS_N8N_ENABLED=1."
+            ),
+        }
+
+    if not normalized_request:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "message": "The n8n workflow request was empty.",
+        }
+
+    if normalized_class not in {
+        "schedule",
+        "monitor",
+        "integration",
+        "orchestration",
+    }:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "message": f"Unsupported n8n workflow class: {normalized_class}.",
+        }
+
+    parsed = urlparse(N8N_BASE_URL)
+    host = (parsed.hostname or "").strip().lower()
+    local_host = host in {"127.0.0.1", "localhost", "::1"}
+
+    if not local_host and not N8N_WEBHOOK_TOKEN:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "message": (
+                "Remote n8n dispatch requires "
+                "JARVIS_N8N_WEBHOOK_TOKEN."
+            ),
+        }
+
+    gateway_url = (
+        N8N_BASE_URL
+        + "/"
+        + N8N_WEBHOOK_PATH
+    )
+
+    bounded_context = context if isinstance(context, dict) else {}
+
+    body: Dict[str, Any] = {
+        "protocol_version": "1",
+        "source": "JARVIS",
+        "request": normalized_request,
+        "workflow_class": normalized_class,
+        "context": bounded_context,
+        "execution_policy": {
+            "owner": "n8n",
+            "allow_local_fallback": False,
+            "retry_owner": "n8n",
+        },
+    }
+
+    serialized = json.dumps(
+        body,
+        ensure_ascii=False,
+        default=str,
+    )
+
+    if len(serialized) > MAX_N8N_PAYLOAD_CHARS:
+        # Keep the user request and workflow metadata, but bound contextual
+        # state so a large JARVIS observation cannot become an n8n flood.
+        body["context"] = {}
+        body["context_truncated"] = True
+        serialized = json.dumps(
+            body,
+            ensure_ascii=False,
+            default=str,
+        )
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "JARVIS-n8n-bridge/1.0",
+    }
+
+    if N8N_WEBHOOK_TOKEN:
+        headers["X-JARVIS-N8N-TOKEN"] = N8N_WEBHOOK_TOKEN
+
+    http_request = Request(
+        gateway_url,
+        data=serialized.encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urlopen(
+            http_request,
+            timeout=N8N_TIMEOUT_SECONDS,
+        ) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            raw = response.read(MAX_N8N_RESPONSE_BYTES + 1)
+
+        if len(raw) > MAX_N8N_RESPONSE_BYTES:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "workflow_class": normalized_class,
+                "message": "n8n returned an oversized response.",
+            }
+
+        text = raw.decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+
+        try:
+            payload: Any = json.loads(text) if text else {}
+        except (TypeError, ValueError):
+            payload = {"message": text}
+
+        if 200 <= status < 300:
+            result: Dict[str, Any] = {
+                "success": True,
+                "verified": True,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "workflow_class": normalized_class,
+                "http_status": status,
+                "accepted": True,
+            }
+
+            if isinstance(payload, dict):
+                result.update(payload)
+            elif payload:
+                result["response"] = payload
+
+            if (
+                result.get("success") is False
+                or result.get("accepted") is False
+            ):
+                result["success"] = False
+                result["verified"] = False
+                result["accepted"] = False
+                result["message"] = str(
+                    result.get("message")
+                    or result.get("error")
+                    or f"n8n rejected the {normalized_class} workflow."
+                )
+                return result
+
+            if not result.get("message"):
+                result["message"] = (
+                    f"n8n accepted the {normalized_class} workflow."
+                )
+
+            return result
+
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "http_status": status,
+            "message": f"n8n rejected the workflow with HTTP {status}.",
+        }
+
+    except HTTPError as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "http_status": int(exc.code),
+            "message": f"n8n workflow dispatch failed with HTTP {exc.code}.",
+        }
+    except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "message": f"n8n workflow dispatch failed: {exc}",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_class": normalized_class,
+            "message": f"n8n workflow dispatch failed: {exc}",
+        }
