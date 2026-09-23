@@ -136,3 +136,24 @@ A useful workflow pattern is:
     workflow continues or reports failure
 
 This is the intended ownership split: n8n handles persistence, schedules, branching, retries, and external services; JARVIS handles real-time Windows control and visual verification.
+## First computer workflow: Spotify Liked Songs
+
+An importable workflow is included at:
+
+    n8n/workflows/jarvis-gateway-spotify.json
+
+Import that workflow into n8n, publish/activate it, and keep its webhook path as
+jarvis-gateway. It routes requests containing Spotify + Liked Songs to the
+dedicated JARVIS action.
+
+The action:
+
+1. Opens Spotify using JARVIS's existing Windows application allowlist.
+2. Uses Spotify's documented Windows shortcut Alt+Shift+S to go to Liked Songs.
+3. Uses JARVIS screen vision to verify the Liked Songs view.
+4. Checks whether playback is already active; if not, uses Spotify's documented
+   Space Play/Pause shortcut to start playback.
+5. Verifies the final Spotify playback state with JARVIS screen vision.
+
+This keeps the side-effecting desktop interaction in JARVIS while n8n owns the
+workflow invocation and orchestration.
