@@ -231,6 +231,9 @@ class AutonomyKernelV2Tests(unittest.TestCase):
             total_steps=1,
         )
 
+        # BackgroundTaskController claims ownership after prepare() and before
+        # the worker reaches TaskState.start(). Verify start() preserves it.
+        state.set_background_speech_owned(True)
         self.assertTrue(state.is_background_speech_owned())
 
         self.assertTrue(
@@ -341,7 +344,9 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertIn("2 script-related item(s)", answer)
         self.assertIn("ServerMain", answer)
         self.assertIn("ClientMain", answer)
-        self.assertNotIn("ScriptService", answer)
+        self.assertIn("The project uses: ServerScriptService.", answer)
+        self.assertNotIn("The project uses: ScriptService", answer)
+        self.assertNotIn("Examples: ScriptService", answer)
 
     def test_roblox_gameplay_answer_stays_compact(self):
         task = _task(
