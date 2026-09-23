@@ -11,4 +11,4 @@ $env:N8N_PROTOCOL = "http"
 Write-Host "Starting local n8n on http://127.0.0.1:5678"
 Write-Host "JARVIS will use this endpoint when JARVIS_N8N_ENABLED=1."
 
-npx --yes n8n
+npx --yes n8n@2.40.5
