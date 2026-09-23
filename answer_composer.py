@@ -356,6 +356,109 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _browser_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
+    """Summarize structured browser search evidence without reading raw metadata."""
+    search_records: List[Dict[str, Any]] = []
+
+    for item in evidence:
+        tool = str(item.get("tool", "") or "").strip()
+        if tool not in {
+            "browser_search_google",
+            "browser_search_bing",
+            "search_website",
+        }:
+            continue
+
+        data = _mapping_payload(item.get("data"))
+        query = str(data.get("query") or "").strip()
+
+        results = data.get("results")
+        if isinstance(results, list):
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+
+                title = str(
+                    result.get("title")
+                    or result.get("name")
+                    or ""
+                ).strip()
+                url = str(
+                    result.get("url")
+                    or result.get("href")
+                    or ""
+                ).strip()
+
+                if not title:
+                    continue
+
+                record = {
+                    "tool": tool,
+                    "query": query,
+                    "title": title,
+                    "url": url,
+                }
+
+                if record not in search_records:
+                    search_records.append(record)
+
+        if not search_records:
+            title = str(data.get("title") or "").strip()
+            if title:
+                record = {
+                    "tool": tool,
+                    "query": query,
+                    "title": title,
+                    "url": str(data.get("url") or "").strip(),
+                }
+                if record not in search_records:
+                    search_records.append(record)
+
+    request = str(getattr(task, "request", "") or "").strip()
+    site = "Google"
+    for item in evidence:
+        tool = str(item.get("tool", "") or "").strip()
+        if tool == "browser_search_bing":
+            site = "Bing"
+            break
+
+    query = next(
+        (
+            record["query"]
+            for record in search_records
+            if record.get("query")
+        ),
+        "",
+    )
+
+    lines: List[str] = []
+    if query:
+        lines.append(f"I searched {site} for {query}.")
+    else:
+        lines.append("I checked the browser search results.")
+
+    if search_records:
+        lines.append(
+            f"I found {len(search_records)} visible result"
+            + ("s." if len(search_records) != 1 else ".")
+        )
+        lines.append(
+            "The top results were: "
+            + "; ".join(
+                f"{index}. {record['title']}"
+                for index, record in enumerate(search_records[:5], start=1)
+            )
+            + "."
+        )
+    elif request:
+        lines.append(
+            "The search completed, but the browser did not expose "
+            "structured result titles for me to summarize."
+        )
+
+    return "\n".join(lines)
+
+
 def _generic_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     lines: List[str] = []
     request = str(getattr(task, "request", "") or "").strip()
@@ -428,5 +531,8 @@ def compose_task_answer(
 
     if intent.get("domain") == "roblox":
         return _roblox_answer(task, evidence)
+
+    if intent.get("domain") == "browser":
+        return _browser_answer(task, evidence)
 
     return _generic_answer(task, evidence)

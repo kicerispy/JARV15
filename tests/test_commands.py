@@ -5,6 +5,7 @@ import pytest
 
 from commands import (
     normalize_command,
+    extract_search_query,
     is_cancel_command,
     is_end_conversation_command,
     is_shutdown_command,
@@ -126,6 +127,19 @@ class TestShouldResolveContext:
             "Show me the search results",
         ):
             assert should_resolve_context(command) is True
+
+class TestSearchQueryExtraction:
+    def test_report_language_is_not_sent_to_google(self):
+        assert extract_search_query(
+            "search Google for wifi skeleton and tell me what you find",
+            "google",
+        ) == "wifi skeleton"
+
+    def test_plain_google_search_is_unchanged(self):
+        assert extract_search_query(
+            "search Google for wifi skeleton",
+            "google",
+        ) == "wifi skeleton"
 
 class TestDeterministicBrowserSummaryRoute:
     """Tests for direct search-result snapshot routing."""

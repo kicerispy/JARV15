@@ -25,12 +25,26 @@ class RobloxRoutingFollowupTests(unittest.TestCase):
 
         self.assertIsNone(
             _deterministic_roblox_context_plan(
-                "find the scripts that control the core gameplay systems",
+                "find the scripts in this folder",
                 {
                     "site": "google",
                     "last_tool": "browser_search_google",
                 },
             )
+        )
+
+    def test_gameplay_followup_is_roblox_without_prior_context(self):
+        from planner import _deterministic_roblox_context_plan
+
+        plan = _deterministic_roblox_context_plan(
+            "find the scripts that control the core gameplay systems",
+            {},
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(
+            [step["tool"] for step in plan["steps"]],
+            ["roblox__search_files"],
         )
 
     def test_diagnostic_request_remains_read_only(self):

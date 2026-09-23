@@ -452,12 +452,39 @@ def _deterministic_roblox_context_plan(
         active_context.get("last_tool", "") or ""
     ).strip().lower()
 
-    if site != "roblox" and not last_tool.startswith(ROBLOX_TOOL_PREFIX):
-        return None
-
     normalized = _normalized_words(user_command)
 
     if not normalized:
+        return None
+
+    # Strong Roblox/gameplay language is sufficient to preserve the local
+    # Studio domain even when the previous Roblox MCP call failed before it
+    # could establish ActiveContext.
+    implicit_roblox = any(
+        phrase in normalized
+        for phrase in (
+            "core gameplay",
+            "gameplay system",
+            "gameplay systems",
+            "gameplay scripts",
+            "scripts that control the gameplay",
+            "scripts that control gameplay",
+            "script that controls the gameplay",
+            "script that controls gameplay",
+            "remote events",
+            "remote functions",
+            "server scripts",
+            "local scripts",
+            "module scripts",
+            "modulescripts",
+        )
+    )
+
+    if (
+        site != "roblox"
+        and not last_tool.startswith(ROBLOX_TOOL_PREFIX)
+        and not implicit_roblox
+    ):
         return None
 
     if (
