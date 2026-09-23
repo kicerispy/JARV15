@@ -35,7 +35,19 @@ def _meaningful(value: Any) -> bool:
     if isinstance(value, dict):
         if not value:
             return False
-        return any(_meaningful(v) for v in value.values())
+        ignored = {
+            "success",
+            "verified",
+            "retryable",
+            "tool",
+            "message",
+            "error",
+        }
+        return any(
+            _meaningful(v)
+            for key, v in value.items()
+            if key not in ignored
+        )
 
     if isinstance(value, (list, tuple, set)):
         return any(_meaningful(v) for v in value)
