@@ -267,9 +267,6 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         lines.append(location + ".")
 
     exact_script_classes = {"Script", "LocalScript", "ModuleScript"}
-    pair_data: List[Tuple[str, str]] = []
-    for source in structure:
-        for name, cls in _classes_from(source):
     known_services = {
         "Workspace",
         "Players",
