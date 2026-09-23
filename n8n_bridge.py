@@ -47,6 +47,22 @@ def classify_n8n_request(request: str) -> Optional[str]:
     if not text:
         return None
 
+    # Informational n8n questions must remain normal JARVIS conversation.
+    # This guard runs before workflow keywords such as "n8n workflow".
+    if "n8n" in text and any(
+        text.startswith(prefix)
+        for prefix in (
+            "what is ",
+            "what's ",
+            "what are ",
+            "explain ",
+            "how does ",
+            "how do ",
+            "how can ",
+            "tell me about ",
+        )
+    ):
+        return None
     # Scheduling / recurring work.
     if any(
         phrase in text
