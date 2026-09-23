@@ -538,13 +538,3 @@ def run_n8n_workflow(
             "message": f"n8n workflow dispatch failed: {exc}",
         }
 
-
-# Start the loopback computer-action gateway when n8n delegation is enabled.
-# This keeps the JARVIS -> n8n and n8n -> JARVIS paths available while the
-# main runtime is alive, without exposing a general-purpose shell endpoint.
-if N8N_ENABLED:
-    try:
-        from n8n_local_bridge import start_local_action_server
-        start_local_action_server()
-    except Exception:
-        pass
