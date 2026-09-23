@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -57,6 +58,7 @@ def _call_action(action: str, arguments: Any) -> tuple[int, dict[str, Any]]:
 
     handlers: dict[str, Callable[[], Any]] = {
         "open_program": lambda: _open_program(args.get("program")),
+        "spotify_play_liked_songs": _spotify_play_liked_songs,
         "browser_goto": lambda: _browser_goto(args.get("url")),
         "browser_search_google": lambda: _browser_search_google(args.get("query")),
         "type_text": lambda: _type_text(args.get("text")),
@@ -104,6 +106,93 @@ def _open_program(program: Any) -> dict[str, Any]:
         "verified": False,
         "message": str(message),
         "program": value,
+    }
+
+def _spotify_play_liked_songs() -> dict[str, Any]:
+    """Open Spotify, navigate to Liked Songs, and ensure playback is active.
+
+    This uses Spotify's documented Windows desktop shortcuts for navigation,
+    while JARVIS's screen vision verifies the resulting UI state. It is a
+    dedicated action rather than accepting arbitrary Spotify commands.
+    """
+    import screen_vision
+    import tools
+
+    launch_message = str(tools.open_program("spotify"))
+    if not launch_message.lower().startswith("opening "):
+        return {
+            "success": False,
+            "verified": False,
+            "message": launch_message,
+            "stage": "launch",
+        }
+
+    time.sleep(2.5)
+
+    # Spotify desktop: Alt+Shift+S = Go to Liked Songs.
+    navigation = screen_vision.press_key("alt shift s")
+    if not navigation.get("success"):
+        return {
+            "success": False,
+            "verified": False,
+            "message": "Spotify opened, but I couldn't navigate to Liked Songs.",
+            "stage": "navigate",
+            "details": navigation,
+        }
+
+    time.sleep(1.0)
+
+    liked_state = screen_vision.verify_screen_state(
+        "Spotify desktop is open and the Liked Songs view is visible."
+    )
+
+    if not liked_state.get("success"):
+        # Visual fallback for UI/layout changes where the shortcut is not enough.
+        clicked = screen_vision.click_screen_target("Liked Songs")
+        if not clicked.get("success"):
+            return {
+                "success": False,
+                "verified": False,
+                "message": "I couldn't locate Liked Songs in Spotify.",
+                "stage": "locate_liked_songs",
+                "details": liked_state,
+            }
+        time.sleep(0.8)
+
+    playing_state = screen_vision.verify_screen_state(
+        "Spotify desktop is open, the Liked Songs view is visible, and a track is currently playing."
+    )
+
+    if not playing_state.get("success"):
+        # Space is Spotify's documented desktop Play/Pause shortcut. Only use
+        # it after verifying that the desired Liked Songs view is present.
+        pressed = screen_vision.press_key("space")
+        if not pressed.get("success"):
+            return {
+                "success": False,
+                "verified": False,
+                "message": "Liked Songs is open, but playback could not be started.",
+                "stage": "play",
+                "details": pressed,
+            }
+        time.sleep(1.0)
+
+        playing_state = screen_vision.verify_screen_state(
+            "Spotify desktop is open, the Liked Songs view is visible, and a track is currently playing."
+        )
+
+    success = bool(playing_state.get("success"))
+    return {
+        "success": success,
+        "verified": success,
+        "action": "spotify_play_liked_songs",
+        "message": (
+            "Spotify is playing from Liked Songs."
+            if success
+            else "Spotify is open, but I couldn't verify active playback from Liked Songs."
+        ),
+        "liked_songs_verified": bool(liked_state.get("success")),
+        "playback_verified": success,
     }
 
 
@@ -307,6 +396,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 _ACTION_NAMES = {
     "open_program",
+    "spotify_play_liked_songs",
     "browser_goto",
     "browser_search_google",
     "type_text",
