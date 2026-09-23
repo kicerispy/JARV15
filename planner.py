@@ -343,6 +343,7 @@ def get_roblox_planner_tools() -> Dict[str, str]:
 
 def _deterministic_n8n_plan(
     user_command: str,
+    active_context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Route workflow-class requests directly to n8n without an LLM plan."""
     normalized = _normalized_words(user_command)
@@ -397,7 +398,11 @@ def _deterministic_n8n_plan(
                     {
                         "request": str(user_command).strip(),
                         "workflow_class": workflow_class,
-                        "context": {},
+                        "context": (
+                            dict(active_context)
+                            if isinstance(active_context, dict)
+                            else {}
+                        ),
                     },
                     ensure_ascii=False,
                 ),
@@ -2342,7 +2347,10 @@ def create_plan(
     # Workflow-class requests belong to n8n because it is better at
     # persistent state, schedules, retries, branching, and external-service
     # orchestration than JARVIS's real-time task loop.
-    deterministic_n8n = _deterministic_n8n_plan(user_command)
+    deterministic_n8n = _deterministic_n8n_plan(
+        user_command,
+        active_context=active_context,
+    )
 
     if deterministic_n8n is not None:
         logger.info(
