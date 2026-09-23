@@ -2662,6 +2662,12 @@ PRODUCT_RESEARCH_TOOLS = {
 }
 
 
+N8N_TOOLS = {
+    "n8n_status",
+    "n8n_run_workflow",
+}
+
+
 BROWSER_TOOLS = BROWSER_TOOLS
 
 
@@ -3209,6 +3215,40 @@ def _run_tool_raw(
     if tool_name in PRODUCT_RESEARCH_TOOLS:
         from product_research import research_product
         return research_product(argument)
+
+    if tool_name in N8N_TOOLS:
+        from n8n_bridge import n8n_status, run_n8n_workflow
+
+        if tool_name == "n8n_status":
+            return n8n_status()
+
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n workflow arguments must be valid JSON.",
+            }
+
+        if not isinstance(payload, dict):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n workflow arguments must be a JSON object.",
+            }
+
+        return run_n8n_workflow(
+            request=str(payload.get("request") or "").strip(),
+            workflow_class=str(payload.get("workflow_class") or "").strip(),
+            context=payload.get("context") if isinstance(payload.get("context"), dict) else {},
+        )
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
