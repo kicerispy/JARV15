@@ -282,13 +282,27 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         or ""
     ).strip()
 
+    request = str(getattr(task, "request", "") or "").strip().lower()
+    identifiers_requested = any(
+        phrase in request
+        for phrase in (
+            "place id",
+            "game id",
+            "place identifier",
+            "game identifier",
+            "place and game id",
+            "place and game identifiers",
+        )
+    )
+
     if place_name:
-        location = f"The active Roblox place is {place_name}"
-        if place_id:
-            location += f" (place ID {place_id})"
-        if game_id:
-            location += f", in game {game_id}"
-        lines.append(location + ".")
+        location = f"The active Roblox place is {place_name}."
+        if identifiers_requested:
+            if place_id:
+                location += f" Its place ID is {place_id}."
+            if game_id:
+                location += f" The game ID is {game_id}."
+        lines.append(location)
 
     exact_script_classes = {"Script", "LocalScript", "ModuleScript"}
     known_services = {
@@ -353,7 +367,6 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         if name not in unique_names:
             unique_names.append(name)
 
-    request = str(getattr(task, "request", "") or "").strip().lower()
     core_focus = any(
         phrase in request
         for phrase in (
