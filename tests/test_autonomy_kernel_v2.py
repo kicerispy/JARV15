@@ -46,6 +46,14 @@ class AutonomyKernelV2Tests(unittest.TestCase):
 
         self.assertEqual(intent["mode"], "answer")
 
+    def test_intent_resolver_report_overrides_action_plan(self):
+        intent = resolve_intent(
+            "search Google for wifi skeleton and tell me what you find",
+            plan={"response_mode": "action"},
+        )
+
+        self.assertEqual(intent["mode"], "answer")
+
     def test_postcondition_rejects_generic_completion_for_info_request(self):
         task = _task(
             "find the scripts that control the core gameplay systems",
