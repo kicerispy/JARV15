@@ -38,6 +38,7 @@ py-modules = [
     "capability_runtime", "extended_api_tools", "n8n_bridge", "gods_eye", "model_manager",
     "product_research", "result_context", "runtime_health", "smart_router",
     "startup_manager", "tts_mic_test", "typed_input", "voice", "wakeword",
+    "n8n_local_bridge",
     "web_interface", "web_summary", "web_tools",
 ]
 
