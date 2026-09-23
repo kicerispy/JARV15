@@ -167,6 +167,56 @@ class AutonomyKernelV2Tests(unittest.TestCase):
 
         self.assertIn("CombatService", answer)
 
+    def test_executor_defers_answer_bearing_task_to_agent_core(self):
+        from unittest.mock import patch
+
+        import tool_executor
+        from state import ActiveContext, TaskState
+        from tool_result import ToolResult
+
+        plan = {
+            "goal": "find the scripts that control the core gameplay systems",
+            "steps": [
+                {
+                    "tool": "roblox__search_files",
+                    "argument": '{"query":"Script","searchType":"type"}',
+                }
+            ],
+        }
+
+        task_state = TaskState()
+        active_context = ActiveContext()
+        spoken = []
+
+        def speak(message):
+            spoken.append(message)
+            return False
+
+        result = ToolResult(
+            success=True,
+            tool="roblox__search_files",
+            data={
+                "matches": [
+                    {
+                        "name": "CombatController",
+                        "className": "ModuleScript",
+                    }
+                ]
+            },
+        )
+
+        with patch.object(tool_executor, "run_tool", return_value=result):
+            execution_result = tool_executor.execute_plan(
+                plan,
+                active_context,
+                task_state,
+                speak,
+            )
+
+        self.assertEqual(execution_result, "done")
+        self.assertEqual(spoken, [])
+        self.assertEqual(active_context.site, "roblox")
+
     def test_needs_evidence_answer_distinguishes_action_and_information(self):
         self.assertTrue(
             needs_evidence_answer(
