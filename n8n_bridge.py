@@ -126,6 +126,42 @@ def classify_n8n_request(request: str) -> Optional[str]:
     ):
         return "integration"
 
+    # External-service work is n8n-first even when it is a single action.
+    # n8n can use a dedicated integration node or its generic HTTP Request node;
+    # JARVIS remains responsible for local UI/computer execution when needed.
+    external_services = (
+        "email", "gmail", "outlook", "calendar", "google calendar",
+        "google sheets", "google drive", "drive", "sheets", "slack",
+        "discord", "telegram", "notion", "github", "gitlab", "jira",
+        "linear", "trello", "todoist", "dropbox", "onedrive", "spotify",
+        "twilio", "stripe", "salesforce", "hubspot", "wordpress", "reddit",
+        "linkedin", "webhook", "rss",
+    )
+    external_actions = (
+        "send ", "post ", "create ", "add ", "update ", "save ", "sync ",
+        "forward ", "share ", "upload ", "download ", "notify ", "message ",
+        "schedule ", "play ", "open ", "start ", "stop ", "pause ", "resume ",
+        "search ", "find ", "get ", "fetch ", "list ",
+    )
+    if any(service in text for service in external_services) and any(
+        action in text for action in external_actions
+    ):
+        return "integration"
+
+    # Service-to-service language is workflow-shaped even when the user does
+    # not explicitly say "workflow" or "automation".
+    service_flow_signals = (
+        "sync " + " with ",
+        "copy " + " to ",
+        "send " + " to ",
+        "from " + " to ",
+        "between " + " and ",
+        "when " + " then ",
+        "after " + ", then ",
+    )
+    if any(signal in text for signal in service_flow_signals):
+        return "orchestration"
+
     # External-service workflows are better represented as n8n integrations
     # than as one-off JARVIS Python branches.
     if any(
