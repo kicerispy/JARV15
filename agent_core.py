@@ -3247,10 +3247,27 @@ class JarvisAgent:
                                 "composer selected evidence-grounded response."
                             )
                         else:
-                            logger.warning(
-                                "JARVIS AGENT: Evidence existed, but answer "
-                                "composer returned no safe response."
+                            task.error = (
+                                "Answer composer produced no safe response "
+                                "from verified evidence."
                             )
+                            task.status = "failed"
+                            task.completed_at = time.time()
+                            self.state["last_result"] = None
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = task.error
+
+                            self._announce(
+                                "I found the requested information, but I could not safely turn the verified evidence into an answer.",
+                                speak_callback,
+                            )
+
+                            logger.warning(
+                                "JARVIS AGENT: answer composer produced no safe response; failing task."
+                            )
+                            self._record_autonomy_episode(task)
+                            task_state.set_progress_callback(None)
+                            return task
                     else:
                         # Never announce false completion for a data-seeking
                         # task when postcondition evidence is missing.
