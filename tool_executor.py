@@ -108,6 +108,7 @@ SAFE_RETRY_TOOLS = {
     "screen_memory_status",
     "screen_memory_search",
     "screen_memory_recent",
+    "n8n_status",
 }
 
 
