@@ -15,7 +15,6 @@ The bridge is intentionally dependency-free and fail-closed:
 from __future__ import annotations
 
 import json
-import os
 import socket
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
@@ -23,47 +22,14 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-N8N_ENABLED = os.environ.get(
-    "JARVIS_N8N_ENABLED",
-    "0",
-).strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
-
-N8N_BASE_URL = (
-    os.environ.get(
-        "JARVIS_N8N_BASE_URL",
-        "http://127.0.0.1:5678",
-    )
-    .strip()
-    .rstrip("/")
+from config import (
+    N8N_BASE_URL,
+    N8N_ENABLED,
+    N8N_TIMEOUT_SECONDS,
+    N8N_WEBHOOK_PATH,
+    N8N_WEBHOOK_TOKEN,
 )
 
-N8N_WEBHOOK_PATH = (
-    os.environ.get(
-        "JARVIS_N8N_WEBHOOK_PATH",
-        "webhook/jarvis-gateway",
-    )
-    .strip()
-    .strip("/")
-
-N8N_WEBHOOK_TOKEN = os.environ.get(
-    "JARVIS_N8N_WEBHOOK_TOKEN",
-    "",
-).strip()
-
-N8N_TIMEOUT_SECONDS = max(
-    1.0,
-    float(
-        os.environ.get(
-            "JARVIS_N8N_TIMEOUT_SECONDS",
-            "15",
-        )
-    ),
-)
 
 MAX_N8N_PAYLOAD_CHARS = 12000
 MAX_N8N_RESPONSE_BYTES = 2 * 1024 * 1024
