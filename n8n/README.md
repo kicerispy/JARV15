@@ -91,3 +91,48 @@ For remote deployments, use HTTPS and configure JARVIS_N8N_WEBHOOK_TOKEN.
 ## Source control
 
 Keep n8n workflow exports and backups separate from JARVIS runtime artifacts unless you intentionally want them versioned. n8n also provides Git-based environment source control on supported plans.
+
+## n8n -> JARVIS local computer actions
+
+When n8n needs to perform an action on the Windows desktop, call the loopback JARVIS action gateway instead of using unrestricted shell/PowerShell execution.
+
+Endpoint:
+
+    http://127.0.0.1:8765/v1/jarvis/action
+
+Health:
+
+    http://127.0.0.1:8765/healthz
+
+Supported actions:
+
+    open_program: {"program":"spotify"}
+    browser_goto: {"url":"https://..."}
+    browser_search_google: {"query":"..."}
+    type_text: {"text":"..."}
+    press_key: {"key":"enter"}
+    click_screen_target: {"target":"Spotify Play button"}
+    analyze_screen: {"question":"What is visible?"}
+    verify_screen_state: {"expected":"Spotify is playing music"}
+    get_active_window: {}
+    get_screen_size: {}
+
+The program launcher reuses JARVIS's existing application allowlist. The gateway does not accept arbitrary shell commands, PowerShell, executable paths, or Python.
+
+The service binds only to 127.0.0.1. When JARVIS_N8N_WEBHOOK_TOKEN is configured, the same value is required in the X-JARVIS-N8N-TOKEN header. Keep n8n local-only during development.
+
+A useful workflow pattern is:
+
+    n8n trigger/schedule
+        ↓
+    workflow logic / service integrations
+        ↓
+    HTTP Request -> JARVIS local action
+        ↓
+    JARVIS computer action
+        ↓
+    JARVIS browser/screen verification
+        ↓
+    workflow continues or reports failure
+
+This is the intended ownership split: n8n handles persistence, schedules, branching, retries, and external services; JARVIS handles real-time Windows control and visual verification.
