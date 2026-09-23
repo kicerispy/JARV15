@@ -64,6 +64,26 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertTrue(result["requires_answer"])
         self.assertFalse(result["ready"])
 
+    def test_postcondition_rejects_metadata_only_payload(self):
+        task = _task(
+            "inspect my Roblox game and tell me how the project is structured",
+            [
+                {
+                    "tool": "roblox__get_project_structure",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "success": True,
+                        "message": "Tool completed.",
+                    },
+                }
+            ],
+        )
+
+        result = verify_postcondition(task.request, task)
+
+        self.assertFalse(result["ready"])
+
     def test_postcondition_accepts_structured_evidence(self):
         task = _task(
             "find the scripts that control the core gameplay systems",
