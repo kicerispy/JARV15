@@ -57,6 +57,17 @@ def _decode_json_text(value: Any) -> Any:
         return value
 
 
+def _mapping_payload(value: Any) -> Dict[str, Any]:
+    """Return the most useful mapping from a direct or MCP content payload."""
+    decoded = _decode_json_text(_unwrap(value))
+    if isinstance(decoded, dict) and isinstance(decoded.get("content"), list):
+        for item in decoded["content"]:
+            if isinstance(item, dict) and "text" in item:
+                nested = _decode_json_text(item.get("text"))
+                if isinstance(nested, dict):
+                    return nested
+    return decoded if isinstance(decoded, dict) else {}
+
 def _content_items(value: Any) -> List[Any]:
     value = _decode_json_text(_unwrap(value))
 
@@ -207,7 +218,7 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         detail = str(item.get("detail", "") or "").strip()
 
         if tool == "roblox__get_place_info":
-            place.update(data if isinstance(data, dict) else {})
+            place.update(_mapping_payload(data))
         elif tool == "roblox__get_project_structure":
             if data is not None:
                 structure.extend(_content_items(data))
