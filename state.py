@@ -167,7 +167,10 @@ class TaskState:
             self.recovery_count = 0
             self._last_progress_key = None
             self.completion_spoken = False
-            self.background_speech_owned = False
+            # BackgroundTaskController claims speech ownership before the
+            # executor starts. Preserve that claim instead of resetting it
+            # here; otherwise a worker can leak intermediate tool summaries
+            # into TTS before the final answer is ready.
             self.final_speech = None
             return True
 

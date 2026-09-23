@@ -222,6 +222,29 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         )
         self.assertIn("connection timeout", context.last_result.lower())
 
+    def test_task_state_start_preserves_background_speech_ownership(self):
+        from state import TaskState
+
+        state = TaskState()
+        state.prepare(
+            description="background task",
+            total_steps=1,
+        )
+
+        # BackgroundTaskController claims ownership after prepare() and before
+        # the worker reaches TaskState.start(). Verify start() preserves it.
+        state.set_background_speech_owned(True)
+        self.assertTrue(state.is_background_speech_owned())
+
+        self.assertTrue(
+            state.start(
+                description="background task",
+                total_steps=1,
+            )
+        )
+
+        self.assertTrue(state.is_background_speech_owned())
+
     def test_executor_defers_answer_bearing_task_to_agent_core(self):
         from unittest.mock import patch
 
@@ -271,6 +294,103 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertEqual(execution_result, "done")
         self.assertEqual(spoken, [])
         self.assertEqual(active_context.site, "roblox")
+
+    def test_roblox_answer_does_not_count_services_as_scripts(self):
+        task = _task(
+            "inspect my Roblox game and tell me how the project is structured",
+            [
+                {
+                    "tool": "roblox__get_place_info",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "name": "Baddies",
+                        "placeId": 129980665337091,
+                        "gameId": 10767662715,
+                    },
+                },
+                {
+                    "tool": "roblox__get_project_structure",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "children": [
+                            {
+                                "name": "ServerScriptService",
+                                "className": "ServerScriptService",
+                            },
+                            {
+                                "name": "ScriptService",
+                                "className": "ScriptService",
+                            },
+                            {
+                                "name": "ServerMain",
+                                "className": "Script",
+                                "fullName": "game.ServerScriptService.ServerMain",
+                            },
+                            {
+                                "name": "ClientMain",
+                                "className": "LocalScript",
+                                "fullName": "game.StarterPlayer.StarterPlayerScripts.ClientMain",
+                            },
+                        ]
+                    },
+                },
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("2 script-related item(s)", answer)
+        self.assertIn("ServerMain", answer)
+        self.assertIn("ClientMain", answer)
+        self.assertIn("The project uses: ServerScriptService.", answer)
+        self.assertNotIn("The project uses: ScriptService", answer)
+        self.assertNotIn("Examples: ScriptService", answer)
+
+    def test_roblox_gameplay_answer_stays_compact(self):
+        task = _task(
+            "find the scripts that control the core gameplay systems",
+            [
+                {
+                    "tool": "roblox__search_files",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "matches": [
+                            {
+                                "name": "ServerMain",
+                                "className": "Script",
+                                "fullName": "game.ServerScriptService.ServerMain",
+                            },
+                            {
+                                "name": "ClientMain",
+                                "className": "LocalScript",
+                                "fullName": "game.StarterPlayer.StarterPlayerScripts.ClientMain",
+                            },
+                            {
+                                "name": "ScriptService",
+                                "className": "ScriptService",
+                                "fullName": "game.ScriptService",
+                            },
+                            {
+                                "name": "Script Context",
+                                "className": "ScriptContext",
+                                "fullName": "game.Script Context",
+                            },
+                        ]
+                    },
+                }
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("likely core gameplay entry point(s)", answer)
+        self.assertIn("ServerMain", answer)
+        self.assertIn("ClientMain", answer)
+        self.assertNotIn("Script Context", answer)
+        self.assertLess(len(answer), 700)
 
     def test_browser_search_answer_uses_structured_result_titles(self):
         task = _task(
