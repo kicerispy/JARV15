@@ -79,6 +79,23 @@ class N8NLocalBridgeTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["program"], "spotify")
 
+    def test_spotify_liked_songs_action_avoids_toggle_when_already_playing(self):
+        import n8n_local_bridge
+
+        with mock.patch("tools.open_program", return_value="Opening Spotify."),
+             mock.patch("screen_vision.press_key", return_value={"success": True}) as press,
+             mock.patch("screen_vision.verify_screen_state", side_effect=[
+                 {"success": True, "verified": True},
+                 {"success": True, "verified": True},
+             ]),
+             mock.patch("time.sleep"):
+            result = n8n_local_bridge._spotify_play_liked_songs()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["playback_verified"])
+        self.assertEqual(press.call_count, 1)
+        press.assert_called_once_with("alt shift s")
     def test_token_is_required_when_configured(self):
         import config
 
