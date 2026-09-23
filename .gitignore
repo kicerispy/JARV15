@@ -73,9 +73,14 @@ wakeword_dataset/
 
 # Historical backup files
 *.before_*
+*.before-*
 *.backup
 *.bak
 *backup*
+
+# Local runtime/debug state
+.jarvis_runtime/
+.playwright-mcp/
 
 # Archives
 *.zip
