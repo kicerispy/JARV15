@@ -245,6 +245,44 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         self.assertEqual(spoken, [])
         self.assertEqual(active_context.site, "roblox")
 
+    def test_browser_search_answer_uses_structured_result_titles(self):
+        task = _task(
+            "search Google for wifi skeleton and tell me what you find",
+            [
+                {
+                    "tool": "browser_search_google",
+                    "success": True,
+                    "verified": True,
+                    "detail": "Google search complete.",
+                    "data": {
+                        "query": "wifi skeleton",
+                        "title": "wifi skeleton - Google Search",
+                        "url": "https://www.google.com/search?q=wifi+skeleton",
+                        "results": [
+                            {
+                                "index": 1,
+                                "title": "WiFi Skeleton | Example",
+                                "url": "https://example.com/wifi",
+                            },
+                            {
+                                "index": 2,
+                                "title": "Wi-Fi Skeleton Documentation",
+                                "url": "https://example.org/docs",
+                            },
+                        ],
+                    },
+                }
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("wifi skeleton", answer)
+        self.assertIn("WiFi Skeleton | Example", answer)
+        self.assertIn("Wi-Fi Skeleton Documentation", answer)
+        self.assertNotIn("browsersearchgoogle", answer)
+        self.assertLess(len(answer), 700)
+
     def test_needs_evidence_answer_distinguishes_action_and_information(self):
         self.assertTrue(
             needs_evidence_answer(
