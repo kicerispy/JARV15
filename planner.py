@@ -369,6 +369,27 @@ def _deterministic_roblox_plan(
             "resolved_command": user_command,
         }
 
+    identifier_signals = (
+        "place id",
+        "game id",
+        "place identifier",
+        "game identifier",
+        "place and game id",
+        "place and game identifiers",
+    )
+
+    if any(signal in normalized for signal in identifier_signals):
+        return {
+            "goal": "get Roblox place and game IDs",
+            "steps": [
+                {
+                    "tool": "roblox__get_place_info",
+                    "argument": "{}",
+                },
+            ],
+            "resolved_command": user_command,
+        }
+
     diagnostic_signals = (
         "error",
         "errors",
