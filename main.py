@@ -30,6 +30,7 @@ from config import (
     PROFILE_PATH,
     TYPED_INPUT_ENABLED,
     CODING_MODEL_WARMUP_DELAY_SECONDS,
+    N8N_ENABLED,
 )
 from typed_input import TypedInputChannel
 from context_aware import JarvisContext
@@ -1835,6 +1836,26 @@ def main():
         f"PERF: startup initialization complete: "
         f"{perf_now() - startup_start:.3f}s"
     )
+
+    # Start the n8n -> JARVIS local computer-action gateway at boot so
+    # workflows can call JARVIS immediately without waiting for planner/tool
+    # imports to occur.
+    if N8N_ENABLED:
+        try:
+            from n8n_local_bridge import start_local_action_server
+
+            if start_local_action_server():
+                logger.info(
+                    "JARVIS: n8n local computer-action gateway ready."
+                )
+            else:
+                logger.warning(
+                    "JARVIS: n8n local computer-action gateway unavailable."
+                )
+        except Exception as exc:
+            logger.warning(
+                f"JARVIS: n8n local computer-action gateway startup failed: {exc}"
+            )
 
     typed_input.start()
 
