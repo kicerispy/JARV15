@@ -15,6 +15,7 @@ The bridge is intentionally dependency-free and fail-closed:
 from __future__ import annotations
 
 import json
+import re
 import socket
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
@@ -150,16 +151,18 @@ def classify_n8n_request(request: str) -> Optional[str]:
 
     # Service-to-service language is workflow-shaped even when the user does
     # not explicitly say "workflow" or "automation".
-    service_flow_signals = (
-        "sync " + " with ",
-        "copy " + " to ",
-        "send " + " to ",
-        "from " + " to ",
-        "between " + " and ",
-        "when " + " then ",
-        "after " + ", then ",
-    )
-    if any(signal in text for signal in service_flow_signals):
+    if any(
+        re.search(pattern, text)
+        for pattern in (
+            r"\bsync\b.+\bwith\b",
+            r"\bcopy\b.+\bto\b",
+            r"\bsend\b.+\bto\b",
+            r"\bfrom\b.+\bto\b",
+            r"\bbetween\b.+\band\b",
+            r"\bwhen\b.+\bthen\b",
+            r"\bafter\b.+,?\s+then\b",
+        )
+    ):
         return "orchestration"
 
     # External-service workflows are better represented as n8n integrations
