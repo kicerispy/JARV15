@@ -20,6 +20,11 @@ DEFAULT_STREAM_DELAY_MS = int(
     )
 )
 
+# WebRTC's realtime example uses 10 ms frames at 16 kHz. Keeping the wrapper
+# on that frame boundary avoids oversized-vector problems in native bindings
+# while preserving stateful AEC processing across sequential frames.
+AEC_FRAME_MS = 10
+
 
 class SpeakerEchoCanceller:
     """Stateful WebRTC AEC3 processor for one microphone thread."""
@@ -98,15 +103,49 @@ class SpeakerEchoCanceller:
             else:
                 far = far[:len(mic)]
 
-        cleaned = self.processor.process(
-            mic,
-            far,
+        frame_samples = max(
+            1,
+            int(round(self.sample_rate * AEC_FRAME_MS / 1000.0)),
         )
 
-        return np.asarray(
-            cleaned,
-            dtype=mic.dtype,
-        ).reshape(-1)
+        cleaned_parts = []
+        for start in range(0, len(mic), frame_samples):
+            end = min(start + frame_samples, len(mic))
+
+            mic_frame = mic[start:end]
+            far_frame = far[start:end]
+
+            original_len = len(mic_frame)
+            if original_len < frame_samples:
+                pad_width = frame_samples - original_len
+                mic_frame = np.pad(
+                    mic_frame,
+                    (0, pad_width),
+                )
+                far_frame = np.pad(
+                    far_frame,
+                    (0, pad_width),
+                )
+
+            cleaned_frame = self.processor.process(
+                mic_frame,
+                far_frame,
+            )
+
+            cleaned_parts.append(
+                np.asarray(
+                    cleaned_frame,
+                    dtype=mic.dtype,
+                ).reshape(-1)[:original_len]
+            )
+
+        if not cleaned_parts:
+            return mic
+
+        return np.concatenate(cleaned_parts).astype(
+            mic.dtype,
+            copy=False,
+        )
 
 
 def create_echo_canceller() -> Optional[SpeakerEchoCanceller]:
