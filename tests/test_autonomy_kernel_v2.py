@@ -165,10 +165,33 @@ class AutonomyKernelV2Tests(unittest.TestCase):
         answer = compose_task_answer(task.request, task)
 
         self.assertIn("Test Place", answer)
-        self.assertIn("123", answer)
-        self.assertIn("456", answer)
         self.assertIn("CombatController", answer)
         self.assertIn("RoundManager", answer)
+        self.assertNotIn("123", answer)
+        self.assertNotIn("456", answer)
+
+    def test_roblox_answer_includes_identifiers_when_requested(self):
+        task = _task(
+            "what are the Roblox place ID and game ID",
+            [
+                {
+                    "tool": "roblox__get_place_info",
+                    "success": True,
+                    "verified": True,
+                    "data": {
+                        "name": "Test Place",
+                        "placeId": 129980665337091,
+                        "gameId": 10767662715,
+                    },
+                }
+            ],
+        )
+
+        answer = compose_task_answer(task.request, task)
+
+        self.assertIn("Test Place", answer)
+        self.assertIn("129980665337091", answer)
+        self.assertIn("10767662715", answer)
 
     def test_roblox_mcp_text_payload_is_decoded(self):
         task = _task(
