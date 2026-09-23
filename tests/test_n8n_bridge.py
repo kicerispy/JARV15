@@ -48,6 +48,11 @@ class N8nBridgeTests(unittest.TestCase):
                 "Explain how n8n workflows work"
             )
         )
+        self.assertIsNone(
+            n8n_bridge.classify_n8n_request(
+                "How does n8n handle workflow retries?"
+            )
+        )
 
 
     def test_classifier_does_not_steal_immediate_local_work(self):

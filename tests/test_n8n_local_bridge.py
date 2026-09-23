@@ -56,12 +56,19 @@ class N8NLocalBridgeTests(unittest.TestCase):
     def test_unknown_action_is_rejected(self):
         self.bridge.start_local_action_server()
 
-        status, payload = self._post({
-            "action": "run_shell",
-            "arguments": {"command": "whoami"},
-        })
+        from urllib.error import HTTPError
 
-        self.assertEqual(status, 400)
+        try:
+            self._post({
+                "action": "run_shell",
+                "arguments": {"command": "whoami"},
+            })
+        except HTTPError as exc:
+            self.assertEqual(exc.code, 400)
+            payload = json.loads(exc.read().decode("utf-8"))
+        else:
+            self.fail("Unknown local action was unexpectedly accepted.")
+
         self.assertFalse(payload["success"])
 
     def test_browser_url_validation(self):
