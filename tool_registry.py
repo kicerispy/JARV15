@@ -15,6 +15,14 @@ def is_roblox_tool_name(name) -> bool:
     return str(name or "").startswith(ROBLOX_TOOL_PREFIX)
 
 
+N8N_TOOLS = frozenset(
+    {
+        "n8n_status",
+        "n8n_run_workflow",
+    }
+)
+
+
 BROWSER_TOOLS = frozenset(
     {
         "browser_connect",
@@ -82,5 +90,6 @@ def validate_known_tools(tool_names) -> list[str]:
         for name in tool_names
         if str(name) not in BROWSER_TOOLS
         and str(name) not in JSON_ARGUMENT_TOOLS
+        and str(name) not in N8N_TOOLS
         and not is_roblox_tool_name(name)
     )
