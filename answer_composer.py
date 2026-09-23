@@ -208,9 +208,10 @@ def _meaningful_text(value: Any) -> List[str]:
 
 
 def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
-    place = {}
-    structure = []
-    scripts = []
+    """Compose a compact Roblox answer from verified structured evidence."""
+    place: Dict[str, Any] = {}
+    structure: List[Any] = []
+    scripts: List[Any] = []
 
     for item in evidence:
         tool = str(item.get("tool", "") or "").strip()
@@ -265,10 +266,10 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
             location += f", in game {game_id}"
         lines.append(location + ".")
 
-    pair_data = []
+    exact_script_classes = {"Script", "LocalScript", "ModuleScript"}
+    pair_data: List[Tuple[str, str]] = []
     for source in structure:
-        pair_data.extend(_classes_from(source))
-
+        for name, cls in _classes_from(source):
     known_services = {
         "Workspace",
         "Players",
@@ -288,11 +289,11 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         "TestService",
     }
 
-    service_names = []
-    script_names = []
-    for name, cls in pair_data:
-        lowered = cls.lower()
-        if "script" in lowered:
+    service_names: List[str] = []
+    script_names: List[str] = []
+
+    for name, cls in _classes_from(structure):
+        if cls in exact_script_classes:
             if name not in script_names:
                 script_names.append(name)
         elif cls in known_services or name in known_services:
@@ -300,61 +301,79 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
                 service_names.append(name)
 
     if service_names:
-        preview = ", ".join(service_names[:12])
-        suffix = "…" if len(service_names) > 12 else ""
-        lines.append(
-            "The structure includes: "
-            + preview
-            + suffix
-            + "."
-        )
+        preview = ", ".join(service_names[:10])
+        suffix = "…" if len(service_names) > 10 else ""
+        lines.append(f"The project uses: {preview}{suffix}.")
 
-    # Project structure payloads already contain class metadata for Script and
-    # ModuleScript instances. Preserve those names alongside explicit script
-    # search results instead of throwing the structure-level script_names away.
-    names = list(script_names)
+    names: List[str] = list(script_names)
     for source in scripts:
         names.extend(_script_like_names(source))
 
-    if names:
-        unique = []
-        for name in names:
-            if name not in unique:
-                unique.append(name)
+    unique_names: List[str] = []
+    for name in names:
+        if name not in unique_names:
+            unique_names.append(name)
 
-        preview = ", ".join(unique[:15])
-        suffix = "…" if len(unique) > 15 else ""
-        count_text = (
-            f"{len(unique)} script-related items were found. "
-            if len(unique) > 1
-            else "One script-related item was found. "
+    request = str(getattr(task, "request", "") or "").strip().lower()
+    core_focus = any(
+        phrase in request
+        for phrase in (
+            "core gameplay",
+            "gameplay system",
+            "gameplay systems",
+            "gameplay scripts",
+            "scripts that control gameplay",
+            "scripts that control the gameplay",
         )
+    )
+
+    if core_focus:
+        # Prefer server/client entry points that are structurally closer to
+        # gameplay execution. This is a location-based shortlist, not a claim
+        # that these scripts are definitely responsible for every game system.
+        preferred = []
+        for name in unique_names:
+            lowered = name.lower()
+            if any(
+                marker in lowered
+                for marker in (
+                    "serverscriptservice",
+                    "starterplayer.starterplayerscripts",
+                )
+            ):
+                preferred.append(name)
+
+        ordered = preferred + [
+            name for name in unique_names if name not in preferred
+        ]
+        unique_names = ordered[:5]
+
+        if unique_names:
+            lines.append(
+                f"I found {len(unique_names)} likely core gameplay entry point(s): "
+                + ", ".join(unique_names)
+                + "."
+            )
+        elif scripts:
+            lines.append(
+                "I found script evidence, but none was clearly located in a "
+                "server/client gameplay entry point."
+            )
+    elif unique_names:
+        preview = ", ".join(unique_names[:6])
+        suffix = "…" if len(unique_names) > 6 else ""
         lines.append(
-            count_text
-            + "Examples include: "
-            + preview
-            + suffix
-            + "."
+            f"I found {len(unique_names)} script-related item(s). "
+            f"Examples: {preview}{suffix}."
         )
-
-    raw_text = []
-    for source in structure + scripts:
-        raw_text.extend(_meaningful_text(source))
-
-    # Keep evidence-derived narrative useful without dumping raw MCP JSON.
-    for chunk in raw_text[:4]:
-        compact = _clip(chunk, 900)
-        if compact and compact not in lines and compact not in _GENERIC:
-            lines.append(compact.rstrip(".") + ".")
 
     if not lines:
         return (
             "I completed the Roblox inspection, but the returned evidence "
-            "did not contain enough structured detail for me to summarize it safely."
+            "did not contain enough structured detail for a reliable summary."
         )
 
-    return "\n".join(lines)
-
+    return "\n".join(lines)[:900]
 
 def _browser_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     """Summarize structured browser search evidence without reading raw metadata."""
