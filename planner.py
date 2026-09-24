@@ -2976,6 +2976,12 @@ def create_plan(
                 "resolved_command": user_command.strip(),
             }
 
+    # Normalize optional context once deterministic routing is complete.
+    # Internal planner phases may call create_plan() without active context, but
+    # the learned-hints path below still expects a dictionary.
+    if not isinstance(active_context, dict):
+        active_context = {}
+
     context_str = ""
     if active_context:
         context_str = f"""
