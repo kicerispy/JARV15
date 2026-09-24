@@ -29,6 +29,13 @@ def n8n_port_open(host: str = "127.0.0.1", port: int = 5678, timeout: float = 0.
 def n8n_start_script() -> Path:
     return Path(config.BASE_DIR) / "n8n" / "start-n8n.ps1"
 
+def n8n_log_path() -> Path:
+    """Return the ignored local log path for n8n startup diagnostics."""
+    path = Path(config.BASE_DIR) / ".jarvis_runtime" / "n8n-autostart.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _powershell_path() -> str:
     windir = os.environ.get("WINDIR", r"C:\Windows")
     return str(Path(windir) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
