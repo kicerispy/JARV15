@@ -88,11 +88,25 @@ def _is_enabled() -> bool:
 
 
 def _has_any(text: str, signals: tuple[str, ...]) -> bool:
-    return any(signal in text for signal in signals)
+    return any(
+        re.search(rf"(?<!\\w){re.escape(signal)}(?!\\w)", text)
+        for signal in signals
+    )
 
 
 def _is_software_request(text: str) -> bool:
     return _has_any(text, _SOFTWARE_SIGNALS)
+
+
+_READ_ONLY_SIGNALS = (
+    "find", "locate", "search for", "look for", "where is", "where are",
+    "inspect", "read", "open", "show", "list", "explain", "describe",
+    "how does", "what does", "what is",
+)
+
+
+def _is_read_only_request(text: str, explicit_file_count: int) -> bool:
+    return explicit_file_count >= 1 and _has_any(text, _READ_ONLY_SIGNALS)
 
 
 def classify_software_request(request: str) -> Optional[SuperpowersWorkflow]:
@@ -115,6 +129,16 @@ def classify_software_request(request: str) -> Optional[SuperpowersWorkflow]:
         )
     )
     multi_step = complexity_markers >= 2 or explicit_file_count >= 2
+
+    # Purely observational project/code requests should stay on JARVIS's
+    # deterministic read path rather than invoking engineering methodology.
+    if (
+        not repair
+        and not change
+        and not architectural
+        and _is_read_only_request(normalized, explicit_file_count)
+    ):
+        return None
 
     if architectural or multi_step:
         return SuperpowersWorkflow(
@@ -228,10 +252,15 @@ def planner_directives(request: str) -> str:
         ])
 
     if workflow.requires_verification:
-        lines.extend([
-            "- A successful tool return is not completion evidence by itself.",
-            "- Run fresh validation after the final mutation before claiming completion.",
-        ])
+        lines.append("- A successful tool return is not completion evidence by itself.")
+        if workflow.requires_tdd or workflow.requires_debugging or workflow.requires_plan:
+            lines.append(
+                "- Run fresh validation after the final mutation before claiming completion."
+            )
+        else:
+            lines.append(
+                "- Verify factual claims against the observed source and tool output."
+            )
 
     return "\n".join(lines)
 
