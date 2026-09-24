@@ -548,6 +548,69 @@ def _browser_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _project_file_answer(evidence: Sequence[Dict[str, Any]]) -> str:
+    """Summarize deterministic project-file lookup results."""
+    values: List[str] = []
+
+    for item in evidence:
+        tool = str(item.get("tool", "") or "").strip()
+        if tool not in {"find_file", "list_files"}:
+            continue
+
+        data = item.get("data")
+        detail = str(item.get("detail", "") or "").strip()
+
+        candidates: List[str] = []
+        if isinstance(data, str):
+            candidates.extend(
+                line.strip()
+                for line in data.splitlines()
+                if line.strip()
+            )
+        elif isinstance(data, list):
+            candidates.extend(
+                str(value).strip()
+                for value in data
+                if str(value).strip()
+            )
+        elif isinstance(data, dict):
+            for key in ("path", "paths", "files", "results", "matches"):
+                value = data.get(key)
+                if isinstance(value, str):
+                    candidates.extend(
+                        line.strip()
+                        for line in value.splitlines()
+                        if line.strip()
+                    )
+                elif isinstance(value, list):
+                    candidates.extend(
+                        str(entry).strip()
+                        for entry in value
+                        if str(entry).strip()
+                    )
+
+        if detail:
+            for line in detail.splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.lower().startswith("execution attempt"):
+                    candidates.append(stripped)
+
+        for candidate in candidates:
+            candidate = candidate.removeprefix("Found:").strip()
+            if candidate and candidate not in values:
+                values.append(candidate)
+
+    if not values:
+        return "I checked the project, but I couldn't identify a matching file."
+
+    preview = values[:8]
+    lines = [f"I found {len(values)} matching project file" + ("s." if len(values) != 1 else ".")]
+    lines.append("The matches are: " + "; ".join(preview) + ".")
+    if len(values) > len(preview):
+        lines.append(f"There are {len(values) - len(preview)} additional matches.")
+    return " ".join(lines)
+
+
 def _generic_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     lines: List[str] = []
     request = str(getattr(task, "request", "") or "").strip()
@@ -617,6 +680,17 @@ def compose_task_answer(
         active_context=active_context,
         plan=getattr(task, "planner_result", None),
     )
+
+    # Prefer the executed tool over keyword-based intent. Filenames such as
+    # "browser_controller.py" contain browser vocabulary but are still project
+    # filesystem lookups when find_file produced the evidence.
+    executed_tools = {
+        str(item.get("tool", "") or "").strip()
+        for item in evidence
+    }
+
+    if "find_file" in executed_tools or "list_files" in executed_tools:
+        return _project_file_answer(evidence)
 
     if intent.get("domain") == "roblox":
         return _roblox_answer(task, evidence)
