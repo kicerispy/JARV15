@@ -192,7 +192,7 @@ def classify_n8n_request(request: str) -> Optional[str]:
         "linkedin", "webhook", "rss",
     )
     external_actions = (
-        "send ", "post ", "create ", "add ", "update ", "save ", "sync ",
+        "send ", "email ", "post ", "create ", "add ", "update ", "save ", "sync ",
         "forward ", "share ", "upload ", "download ", "notify ", "message ",
         "schedule ",
     )
