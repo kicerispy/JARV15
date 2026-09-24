@@ -41,7 +41,7 @@ def test_software_repair_detection():
 def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch):
     calls = []
 
-    def fake_planner(messages, format="json", **kwargs):
+    def fake_planner(self, messages, format="json", **kwargs):
         calls.append((messages, format))
         return {
             "message": {
@@ -64,9 +64,9 @@ def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch
             "internal agent phases must not enter the generic deterministic router"
         )
 
-    monkeypatch.setattr(planner_module.MODEL_MANAGER, "coding", fake_planner)
+    monkeypatch.setattr(planner_module.ModelManager, "coding", fake_planner)
     monkeypatch.setattr(
-        planner_module.MODEL_MANAGER,
+        planner_module.ModelManager,
         "planner",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("focused CHANGE phase must use the coding planner")
