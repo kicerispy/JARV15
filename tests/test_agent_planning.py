@@ -41,7 +41,7 @@ def test_software_repair_detection():
 def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch):
     calls = []
 
-    def fake_planner(messages, format="json"):
+    def fake_planner(messages, format="json", **kwargs):
         calls.append((messages, format))
         return {
             "message": {
