@@ -6,6 +6,7 @@ instance when port 5678 is already listening.
 """
 from __future__ import annotations
 import os
+import ntpath
 import shutil
 import socket
 import subprocess
@@ -88,7 +89,10 @@ def _launch_process() -> subprocess.Popen | None:
     )
     # Resolve the batch file through the inherited PATH instead of passing its
     # absolute path through cmd.exe. This avoids Windows' nested-quote parsing.
-    npx_command = Path(npx).name
+    # npx may be represented as a Windows path even when this module is
+    # exercised by a POSIX CI runner. ntpath handles both native Windows
+    # paths and Windows-style test fixtures consistently.
+    npx_command = ntpath.basename(str(npx).replace("/", "\\"))
     if npx_command.lower().endswith(".cmd"):
         command_line = f"call {npx_command} --yes n8n@2.40.5"
     else:
