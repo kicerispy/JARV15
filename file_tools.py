@@ -456,11 +456,17 @@ def delete_file(filename: str, folder: str = ".") -> str:
     if target_dir is None:
         return "Invalid folder path."
 
-    safe_name = _sanitize_folder_name(filename)
+    safe_name = _sanitize_relative_filename(filename)
     if not safe_name:
         return "Invalid filename."
 
-    target = target_dir / safe_name
+    target = _resolve_safe_path(
+        target_dir,
+        safe_name,
+        allow_outside=False,
+    )
+    if target is None:
+        return "Invalid filename."
 
     if not target.exists():
         return f"File not found: {safe_name}"
