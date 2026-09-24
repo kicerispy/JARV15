@@ -64,11 +64,33 @@ def _is_ignored_list_entry(name: str) -> bool:
 
 
 def _sanitize_folder_name(name: str) -> str:
-    """Sanitize a folder name to prevent path traversal."""
-    # Remove any path separators and dangerous characters
+    """Sanitize a single folder/file-name component."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
     name = name.strip('. ')
     return name
+
+
+def _sanitize_relative_filename(filename: str) -> Optional[str]:
+    """Sanitize a project-relative filename without destroying its subdirectories."""
+    raw = str(filename or "").strip()
+    if not raw:
+        return None
+
+    normalized = raw.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+
+    if not parts or any(part == ".." for part in parts):
+        return None
+
+    sanitized_parts = [
+        _sanitize_folder_name(part)
+        for part in parts
+    ]
+
+    if any(not part for part in sanitized_parts):
+        return None
+
+    return str(Path(*sanitized_parts))
 
 
 def _resolve_safe_path(
@@ -273,12 +295,18 @@ def write_file(
     if not target_dir.is_dir():
         return f"Not a folder: {folder}"
 
-    # Sanitize filename
-    safe_name = _sanitize_folder_name(filename)
+    # Sanitize filename while preserving nested project-relative paths.
+    safe_name = _sanitize_relative_filename(filename)
     if not safe_name:
         return "Invalid filename."
 
-    target = target_dir / safe_name
+    target = _resolve_safe_path(
+        target_dir,
+        safe_name,
+        allow_outside=False,
+    )
+    if target is None:
+        return "Invalid filename."
 
     # Check if file exists
     if target.exists() and not overwrite:
@@ -317,11 +345,17 @@ def read_file(filename: str, folder: str = ".") -> str:
     if target_dir is None:
         return "Invalid folder path."
 
-    safe_name = _sanitize_folder_name(filename)
+    safe_name = _sanitize_relative_filename(filename)
     if not safe_name:
         return "Invalid filename."
 
-    target = target_dir / safe_name
+    target = _resolve_safe_path(
+        target_dir,
+        safe_name,
+        allow_outside=False,
+    )
+    if target is None:
+        return "Invalid filename."
 
     if not target.exists():
         return f"File not found: {safe_name}"
@@ -368,11 +402,17 @@ def edit_file(
     if target_dir is None:
         return "Invalid folder path."
 
-    safe_name = _sanitize_folder_name(filename)
+    safe_name = _sanitize_relative_filename(filename)
     if not safe_name:
         return "Invalid filename."
 
-    target = target_dir / safe_name
+    target = _resolve_safe_path(
+        target_dir,
+        safe_name,
+        allow_outside=False,
+    )
+    if target is None:
+        return "Invalid filename."
 
     if not target.exists():
         return f"File not found: {safe_name}"
