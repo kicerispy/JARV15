@@ -179,6 +179,32 @@ def classify_n8n_request(request: str) -> Optional[str]:
         )
     )
 
+    # Explicit external-service actions should stay integration-classified
+    # even when the request names two services (for example, emailing a
+    # GitHub report). Reserve orchestration for explicit cross-service
+    # workflows/synchronization.
+    external_services = (
+        "email", "gmail", "outlook", "calendar", "google calendar",
+        "google sheets", "google drive", "drive", "sheets", "slack",
+        "discord", "telegram", "notion", "github", "gitlab", "jira",
+        "linear", "trello", "todoist", "dropbox", "onedrive", "spotify",
+        "twilio", "stripe", "salesforce", "hubspot", "wordpress", "reddit",
+        "linkedin", "webhook", "rss",
+    )
+    external_actions = (
+        "send ", "post ", "create ", "add ", "update ", "save ", "sync ",
+        "forward ", "share ", "upload ", "download ", "notify ", "message ",
+        "schedule ",
+    )
+
+    is_external_mutation = (
+        any(service in text for service in external_services)
+        and any(action in text for action in external_actions)
+    )
+
+    if is_external_mutation:
+        return "integration"
+
     if len(mentioned_services) >= 2:
         return "orchestration"
 
@@ -193,24 +219,6 @@ def classify_n8n_request(request: str) -> Optional[str]:
     # External-service mutations and integrations are n8n-first. Read-only
     # search/lookup questions stay on the fast JARVIS/web path unless the user
     # explicitly asks for a workflow.
-    external_services = (
-        "email", "gmail", "outlook", "calendar", "google calendar",
-        "google sheets", "google drive", "drive", "sheets", "slack",
-        "discord", "telegram", "notion", "github", "gitlab", "jira",
-        "linear", "trello", "todoist", "dropbox", "onedrive", "spotify",
-        "twilio", "stripe", "salesforce", "hubspot", "wordpress", "reddit",
-        "linkedin", "webhook", "rss",
-    )
-    external_actions = (
-        "send ", "post ", "create ", "add ", "update ", "save ", "sync ",
-        "forward ", "share ", "upload ", "download ", "notify ", "message ",
-        "schedule ",
-    )
-    if any(service in text for service in external_services) and any(
-        action in text for action in external_actions
-    ):
-        return "integration"
-
     # Desktop/media control can still be n8n-first when the request is about
     # an external service that benefits from orchestration (Spotify is the
     # initial example implemented by the JARVIS local-action gateway).

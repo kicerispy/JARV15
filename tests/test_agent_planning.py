@@ -704,8 +704,9 @@ class DiscoveryThenRepairPlanner:
 
 
 class RecordingExecutor:
-    def __init__(self):
+    def __init__(self, diagnostic_failure=False):
         self.calls = []
+        self.diagnostic_failure = diagnostic_failure
 
     def __call__(
         self,
@@ -719,24 +720,45 @@ class RecordingExecutor:
         tool_executor.LAST_EXECUTION_TRACE = []
         self.calls.append(plan)
 
+        any_failure = False
+
         for index, step in enumerate(plan.get("steps", []), start=1):
+            tool = step.get("tool", "")
+            failed = self.diagnostic_failure and tool == "code_diagnose"
+            any_failure = any_failure or failed
+
             tool_executor.LAST_EXECUTION_TRACE.append(
                 {
                     "index": index,
-                    "tool": step.get("tool", ""),
+                    "tool": tool,
                     "argument": step.get("argument", ""),
-                    "status": "completed",
-                    "success": True,
-                    "verified": True,
-                    "result": "done",
-                    "message": "completed",
+                    "status": "failed" if failed else "completed",
+                    "success": not failed,
+                    "verified": False if failed else True,
+                    "result": (
+                        {
+                            "success": False,
+                            "verified": False,
+                            "retryable": True,
+                            "message": "Diagnostic found an actionable failure.",
+                            "failures": ["simulated diagnostic failure"],
+                        }
+                        if failed
+                        else "done"
+                    ),
+                    "message": (
+                        "Diagnostic found an actionable failure."
+                        if failed
+                        else "completed"
+                    ),
+                    "retryable": True if failed else False,
                 }
             )
 
-        return "done"
+        return "failed" if any_failure else "done"
 
 
-def test_successful_discovery_transitions_into_repair_phase():
+def test_successful_discovery_transitions_into_diagnostic_phase_without_planner_call():
     planner = DiscoveryThenRepairPlanner()
     executor = RecordingExecutor()
     agent = JarvisAgent(
@@ -764,9 +786,17 @@ def test_successful_discovery_transitions_into_repair_phase():
     )
 
     assert completed.status == "completed"
-    assert len(planner.calls) == 2
+    assert len(planner.calls) == 1
     assert len(executor.calls) == 2
-    assert executor.calls[1]["steps"][-1]["tool"] == "code_test"
+    assert executor.calls[1]["steps"] == [
+        {
+            "tool": "code_diagnose",
+            "argument": (
+                '{"path":"browser_controller.py","run_tests":false,'
+                '"run_lint":false,"run_types":false}'
+            ),
+        }
+    ]
 
 
 
@@ -927,7 +957,7 @@ def test_diagnostic_plan_rejects_hallucinated_file_target():
 
 def test_repair_task_can_gather_source_before_editing():
     planner = ThreePhasePlanner()
-    executor = RecordingExecutor()
+    executor = RecordingExecutor(diagnostic_failure=True)
     agent = JarvisAgent(
         planner=planner,
         executor=executor,
@@ -947,8 +977,8 @@ def test_repair_task_can_gather_source_before_editing():
     )
 
     assert completed.status == "completed"
-    assert len(planner.calls) == 3
-    assert len(executor.calls) == 3
+    assert len(planner.calls) == 2
+    assert len(executor.calls) == 4
     assert [
         step["tool"]
         for step in executor.calls[0]["steps"]
@@ -957,7 +987,16 @@ def test_repair_task_can_gather_source_before_editing():
         step["tool"]
         for step in executor.calls[1]["steps"]
     ] == ["read_file"]
-    assert executor.calls[2]["steps"][-1]["tool"] == "code_test"
+    assert executor.calls[2]["steps"] == [
+        {
+            "tool": "code_diagnose",
+            "argument": (
+                '{"path":"browser_controller.py","run_tests":false,'
+                '"run_lint":false,"run_types":false}'
+            ),
+        }
+    ]
+    assert executor.calls[3]["steps"][-1]["tool"] == "code_test"
 
 
 
