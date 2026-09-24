@@ -1119,6 +1119,9 @@ class JarvisAgent:
         if not target and require_code_read:
             target = self._infer_diagnostic_source_target(task)
 
+        if not target and require_code_read:
+            target = self._infer_requested_file_target(task.request)
+
         if require_code_diagnose and target:
             return {
                 "goal": "targeted diagnostic",
@@ -1216,6 +1219,7 @@ class JarvisAgent:
         history_text: str = "",
         planning_request: Optional[str] = None,
         require_repair_plan: bool = False,
+        require_change_plan: bool = False,
         require_code_read: bool = False,
         require_code_test: bool = False,
         require_code_diagnose: bool = False,
@@ -1226,6 +1230,8 @@ class JarvisAgent:
         phase_marker = ""
         if require_repair_plan:
             phase_marker = "[JARVIS_INTERNAL_PHASE:REPAIR]\n"
+        elif require_change_plan:
+            phase_marker = "[JARVIS_INTERNAL_PHASE:CHANGE]\n"
         elif require_code_diagnose:
             phase_marker = "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]\n"
         elif require_code_test:
@@ -1319,6 +1325,7 @@ class JarvisAgent:
             and is_software_repair_request(task.request)
             and not (
                 require_repair_plan
+                or require_change_plan
                 or require_code_read
                 or require_code_test
                 or require_code_diagnose
@@ -1330,7 +1337,8 @@ class JarvisAgent:
 
             if self._requested_file_exists(requested_target):
                 deterministic_plan = self._build_phase_fallback_plan(
-                    task
+                    task,
+                    require_code_read=True,
                 )
 
                 if deterministic_plan is not None:
@@ -1347,6 +1355,51 @@ class JarvisAgent:
                         "target file was discovered without an LLM planning call."
                     )
                     return task
+
+        # Explicit software change requests with a named existing file start
+        # from deterministic source evidence. The planner is reserved for the
+        # implementation decision after the actual file has been read.
+        if (
+            planning_request is None
+            and is_software_change_request(task.request)
+            and not is_software_repair_request(task.request)
+            and not (
+                require_repair_plan
+                or require_change_plan
+                or require_code_read
+                or require_code_test
+                or require_code_diagnose
+            )
+        ):
+            requested_target = self._infer_requested_file_target(
+                task.request
+            )
+
+            if self._requested_file_exists(requested_target):
+                deterministic_plan = {
+                    "goal": "inspect requested change target",
+                    "jarvis_internal_phase": True,
+                    "steps": [
+                        {
+                            "tool": "read_file",
+                            "argument": requested_target,
+                        }
+                    ],
+                }
+
+                logger.info(
+                    "JARVIS AGENT: Explicit existing change target found; "
+                    "starting deterministic source inspection without planner call."
+                )
+                task = self._install_phase_plan(
+                    task,
+                    deterministic_plan,
+                )
+                task.observations.append(
+                    "Deterministic change entry point: explicit existing "
+                    "target file was inspected without an LLM planning call."
+                )
+                return task
 
         # Give an incomplete plan one corrective planning pass in general.
         # For a repair request that already names an existing target file,
@@ -1504,6 +1557,7 @@ class JarvisAgent:
                     )
                     if (
                         require_repair_plan
+                        or require_change_plan
                         or require_code_read
                         or require_code_test
                         or require_code_diagnose
@@ -1562,9 +1616,19 @@ class JarvisAgent:
                                 "code_test afterward."
                                 if require_repair_plan
                                 else
-                                "For the discovery phase, inspect the "
-                                "relevant project code and do not modify "
-                                "files yet."
+                                (
+                                    "For the change implementation phase, "
+                                    "use the verified source evidence above. "
+                                    "Do not repeat generic discovery. Include "
+                                    "code_checkpoint before modification, an "
+                                    "appropriate file change, and code_test "
+                                    "afterward."
+                                    if require_change_plan
+                                    else
+                                    "For the discovery phase, inspect the "
+                                    "relevant project code and do not modify "
+                                    "files yet."
+                                )
                             ),
                             (
                                 "The corrected plan must include the "
@@ -1627,7 +1691,9 @@ class JarvisAgent:
                     fallback_issues = assess_plan(
                         task.request,
                         fallback_plan,
-                        require_modification=require_repair_plan,
+                        require_modification=(
+                            require_repair_plan or require_change_plan
+                        ),
                         require_code_read=require_code_read,
                         require_code_test=require_code_test,
                         require_code_diagnose=require_code_diagnose,
@@ -1651,6 +1717,7 @@ class JarvisAgent:
                             )
                             if (
                                 require_repair_plan
+                                or require_change_plan
                                 or require_code_read
                                 or require_code_test
                                 or require_code_diagnose
@@ -1784,6 +1851,32 @@ class JarvisAgent:
 
         return "\n".join(lines)
 
+
+    def _build_change_request_after_source(
+        self,
+        task: AgentTask,
+    ) -> str:
+        """Build a focused implementation request from verified source evidence."""
+        return "\n".join([
+            "The deterministic source-inspection phase has completed successfully.",
+            "Use the verified source evidence below to implement the original software change.",
+            "",
+            f"Original request: {task.request}",
+            f"Goal: {task.goal}",
+            "",
+            self._build_evidence_packet(task),
+            "",
+            "CHANGE IMPLEMENTATION RULES:",
+            "1. Treat verified source evidence as authoritative.",
+            "2. Make the smallest safe change that satisfies the original request.",
+            "3. Include code_checkpoint before the first file modification.",
+            "4. For a regression-test request, update the named test file and run the relevant focused tests afterward.",
+            "5. Use edit_file/write_file only after inspecting the source evidence.",
+            "6. Run code_test after the final file modification.",
+            "7. Do not invent filenames, functions, or behavior not supported by the evidence.",
+            "",
+            "Return ONLY JSON.",
+        ])
 
     def _build_repair_request_after_discovery(
         self,
@@ -3110,6 +3203,61 @@ class JarvisAgent:
                         return replanned
 
                     continue
+
+                # Explicit software changes use the same evidence-first
+                # orchestration as repairs: deterministic source read first,
+                # then a focused implementation plan, then execution and
+                # validation.
+                if (
+                    is_software_change_request(task.request)
+                    and not is_software_repair_request(task.request)
+                    and not self._plan_has_mutation(task.planner_result)
+                ):
+                    has_source_read = self._has_verified_evidence(
+                        task,
+                        {"read_file"},
+                    )
+
+                    if not has_source_read:
+                        phase_plan = self._build_phase_fallback_plan(
+                            task,
+                            require_code_read=True,
+                        )
+
+                        if phase_plan is not None:
+                            self._install_phase_plan(
+                                task,
+                                phase_plan,
+                            )
+                            logger.info(
+                                "JARVIS AGENT: Advancing directly to the "
+                                "change source-read phase without another "
+                                "planner call."
+                            )
+                            continue
+
+                    else:
+                        logger.info(
+                            "JARVIS AGENT: Source inspection complete; "
+                            "planning the focused change implementation."
+                        )
+
+                        replanned = self.plan_task(
+                            task,
+                            history_text=history_text,
+                            planning_request=(
+                                self._build_change_request_after_source(task)
+                            ),
+                            require_change_plan=True,
+                        )
+
+                        if replanned.status in {
+                            "conversation",
+                            "failed",
+                        }:
+                            return replanned
+
+                        continue
 
                 # Any successful software change must be validated even when
                 # the initial plan did not explicitly include a test step.
