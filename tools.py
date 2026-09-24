@@ -1593,20 +1593,6 @@ CODE_CHECKPOINT_MANIFEST = (
 
 def _checkpoint_source_files():
     base = __import__("pathlib").Path.cwd().resolve()
-    ignored = {
-        ".git",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "jarvis_cuda",
-        "venv",
-        ".venv",
-        "node_modules",
-        "build",
-        "dist",
-        ".jarvis_checkpoints",
-    }
     excluded_names = {
         "profile.json",
         ".env",
@@ -1618,15 +1604,13 @@ def _checkpoint_source_files():
     for path in iter_project_files(base):
         if not path.is_file():
             continue
-                if path.name in excluded_names:
+        if path.name in excluded_names:
             continue
         if path.suffix.lower() not in CODE_SOURCE_EXTENSIONS:
             continue
         files.append(path)
 
     return files
-
-
 def code_checkpoint(argument=""):
     """Snapshot project source files before an autonomous edit."""
     import json
@@ -2287,11 +2271,12 @@ def code_diagnose(argument=""):
             else []
         )
     else:
-        python_files = [
-            path
-            for path in base.rglob("*.py")
-            if path.is_file()
-        ]
+        python_files = list(
+            iter_project_files(
+                base,
+                suffixes={".py"},
+            )
+        )
 
     checks = []
     failures = []
