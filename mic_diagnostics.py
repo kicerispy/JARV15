@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-import sounddevice as sd
+from typing import Any
 
 from adaptive_speech_gate import AdaptiveSpeechGate
 from config import CHUNK_SIZE, MIC_DEVICE, SAMPLE_RATE, SILENCE_THRESHOLD
@@ -94,7 +94,7 @@ def measure_signal(
 
 
 def capture(
-    stream: sd.InputStream,
+    stream: Any,
     seconds: float,
 ) -> np.ndarray:
     chunks: list[np.ndarray] = []
@@ -318,6 +318,19 @@ def print_heed_scores(
     return result
 
 
+def _load_sounddevice():
+    """Load sounddevice only when live microphone access is requested."""
+    try:
+        import sounddevice as sd
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "Microphone capture requires the sounddevice package and a "
+            "working PortAudio installation."
+        ) from exc
+
+    return sd
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Measure the JARVIS microphone signal path."
@@ -339,6 +352,7 @@ def main() -> int:
     if args.seconds <= 0:
         raise SystemExit("--seconds must be greater than 0")
 
+    sd = _load_sounddevice()
     devices = sd.query_devices()
     device_info = devices[args.device]
 
