@@ -127,6 +127,24 @@ def classify_n8n_request(request: str) -> Optional[str]:
     ):
         return "integration"
 
+    # Service-to-service language is workflow-shaped even when the user does
+    # not explicitly say "workflow" or "automation". Check this before the
+    # single-service integration rule so requests such as "sync Sheets with
+    # Airtable" remain orchestration tasks.
+    if any(
+        re.search(pattern, text)
+        for pattern in (
+            r"\bsync\b.+\bwith\b",
+            r"\bcopy\b.+\bto\b",
+            r"\bsend\b.+\bto\b",
+            r"\bfrom\b.+\bto\b",
+            r"\bbetween\b.+\band\b",
+            r"\bwhen\b.+\bthen\b",
+            r"\bafter\b.+,?\s+then\b",
+        )
+    ):
+        return "orchestration"
+
     # External-service mutations and integrations are n8n-first. Read-only
     # search/lookup questions stay on the fast JARVIS/web path unless the user
     # explicitly asks for a workflow.
@@ -157,22 +175,6 @@ def classify_n8n_request(request: str) -> Optional[str]:
         action in text for action in media_actions
     ):
         return "integration"
-
-    # Service-to-service language is workflow-shaped even when the user does
-    # not explicitly say "workflow" or "automation".
-    if any(
-        re.search(pattern, text)
-        for pattern in (
-            r"\bsync\b.+\bwith\b",
-            r"\bcopy\b.+\bto\b",
-            r"\bsend\b.+\bto\b",
-            r"\bfrom\b.+\bto\b",
-            r"\bbetween\b.+\band\b",
-            r"\bwhen\b.+\bthen\b",
-            r"\bafter\b.+,?\s+then\b",
-        )
-    ):
-        return "orchestration"
 
     # External-service workflows are better represented as n8n integrations
     # than as one-off JARVIS Python branches.
