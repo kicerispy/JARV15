@@ -2624,6 +2624,21 @@ class JarvisAgent:
                     result
                 )
 
+                # Cancellation must win over any recovery/replan attempt.
+                # In particular, do not start a new Ollama planning call after
+                # the user has already requested shutdown/cancellation.
+                try:
+                    if task_state.is_cancelled():
+                        task.status = "cancelled"
+                        task.completed_at = time.time()
+                        self.state["last_status"] = task.status
+                        self.state["last_error"] = "Cancellation requested by the user."
+                        self._record_autonomy_episode(task)
+                        task_state.set_progress_callback(None)
+                        return task
+                except Exception:
+                    pass
+
                 retryable, retry_message = self._failure_is_retryable()
 
                 if not retryable:
@@ -3418,6 +3433,18 @@ class JarvisAgent:
                     if not evidence.get("success"):
                         latest_diagnostic = evidence
                         break
+
+                try:
+                    if task_state.is_cancelled():
+                        task.status = "cancelled"
+                        task.completed_at = time.time()
+                        self.state["last_status"] = task.status
+                        self.state["last_error"] = "Cancellation requested by the user."
+                        self._record_autonomy_episode(task)
+                        task_state.set_progress_callback(None)
+                        return task
+                except Exception:
+                    pass
 
                 if (
                     is_software_repair_request(task.request)
