@@ -2377,7 +2377,7 @@ def create_plan(
     # authoritative and must reach the focused planner below.
     internal_phase = bool(
         re.match(
-            r"^\\s*\\[JARVIS_INTERNAL_PHASE:[A-Z_]+\\]",
+            r"^\s*\[JARVIS_INTERNAL_PHASE:[A-Z_]+\]",
             str(user_command or ""),
             re.IGNORECASE,
         )
