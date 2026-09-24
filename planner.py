@@ -3265,10 +3265,18 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                 flush=True,
             )
 
+        focused_num_predict = (
+            240
+            if is_repair_phase
+            else 320
+            if is_change_phase
+            else None
+        )
+
         repair_options = (
             {
                 "temperature": 0,
-                "num_predict": 320,
+                "num_predict": focused_num_predict,
                 "num_ctx": config.CODING_NUM_CTX,
             }
             if focused_implementation_phase
@@ -3358,7 +3366,11 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                         format="json",
                         options={
                             "temperature": 0,
-                            "num_predict": 240,
+                            "num_predict": (
+                                240
+                                if is_repair_phase
+                                else 320
+                            ),
                             "num_ctx": config.CODING_NUM_CTX,
                         },
                         model=fallback_model,
