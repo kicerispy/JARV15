@@ -1891,3 +1891,113 @@ def test_superpowers_change_workflow_rejects_read_only_completion():
         "file modification" in observation.lower()
         for observation in planned.observations
     )
+
+
+class ChangeImplementationPlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+        return {
+            "goal": "add requested regression test",
+            "steps": [
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": (
+                        "tests/test_superpowers_engine.py"
+                        "|||def test_placeholder(): pass"
+                        "|||def test_placeholder():\\n    assert True"
+                    ),
+                },
+                {
+                    "tool": "code_test",
+                    "argument": (
+                        '{"mode":"pytest",'
+                        '"path":"tests/test_superpowers_engine.py"}'
+                    ),
+                },
+            ],
+        }
+
+
+class RejectPlannerCall:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        raise AssertionError(
+            "The initial explicit change phase should not call the LLM planner."
+        )
+
+
+def test_explicit_change_target_starts_with_deterministic_source_read():
+    planner = RejectPlannerCall()
+    agent = JarvisAgent(planner=planner)
+
+    task = agent.create_task(
+        "Add a regression test to tests/test_superpowers_engine.py "
+        "ensuring read-only Python file inspection does not invoke the "
+        "Superpowers engineering workflow. Run the relevant tests afterward "
+        "and verify the final result."
+    )
+
+    planned = agent.plan_task(task)
+
+    assert planned.status == "ready"
+    assert planner.calls == 0
+    assert planned.steps[0].tool == "read_file"
+    assert planned.steps[0].argument == "tests/test_superpowers_engine.py"
+    assert planned.planner_result.get("jarvis_internal_phase") is True
+
+
+def test_explicit_change_target_moves_from_source_read_to_focused_implementation():
+    planner = ChangeImplementationPlanner()
+    executor = EvidencePhaseExecutor()
+    agent = JarvisAgent(
+        planner=planner,
+        executor=executor,
+    )
+
+    task = agent.create_task(
+        "Add a regression test to tests/test_superpowers_engine.py "
+        "ensuring read-only Python file inspection does not invoke the "
+        "Superpowers engineering workflow. Run the relevant tests afterward "
+        "and verify the final result."
+    )
+
+    planned = agent.plan_task(task)
+
+    assert planned.steps[0].tool == "read_file"
+    assert planner.calls == 0
+
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert len(planner.calls) == 1
+    assert len(executor.calls) == 2
+    assert executor.calls[0]["steps"][0]["tool"] == "read_file"
+    assert [step["tool"] for step in executor.calls[1]["steps"]] == [
+        "code_checkpoint",
+        "edit_file",
+        "code_test",
+    ]
+    assert any(
+        "[JARVIS_INTERNAL_PHASE:CHANGE]" in call
+        for call in planner.calls
+    )
