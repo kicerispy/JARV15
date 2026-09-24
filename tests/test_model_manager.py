@@ -256,4 +256,4 @@ class PlannerBudgetConfigTests(unittest.TestCase):
     def test_planner_output_budget_is_large_enough_for_structured_code_tasks(self):
         import config
 
-        self.assertGreaterEqual(config.PLANNER_NUM_PREDICT, 320)
+        self.assertGreaterEqual(config.PLANNER_NUM_PREDICT, 512)
