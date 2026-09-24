@@ -71,3 +71,24 @@ def test_architecture_terms_are_classified_as_software_work():
     assert workflow.classification == "architectural"
     assert workflow.requires_design is True
     assert workflow.requires_plan is True
+
+
+
+def test_read_only_project_file_lookup_is_not_governed_by_superpowers():
+    assert classify_software_request(
+        "find browser_controller.py in my project"
+    ) is None
+
+
+def test_read_only_code_explanation_is_not_misclassified_as_architectural():
+    assert classify_software_request(
+        "inspect planner.py and explain how the Superpowers workflow is integrated"
+    ) is None
+
+
+def test_architectural_signal_requires_a_real_word_boundary():
+    workflow = classify_software_request(
+        "integrate a new autonomous coding subsystem"
+    )
+    assert workflow is not None
+    assert workflow.classification == "architectural"
