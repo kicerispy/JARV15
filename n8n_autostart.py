@@ -126,7 +126,7 @@ def ensure_n8n_started(*, timeout: float | None = None, poll_interval: float | N
     if not bool(getattr(config, "N8N_AUTOSTART", True)):
         return {"success": True, "enabled": True, "started": False, "reachable": False, "message": "n8n autostart is disabled by configuration."}
 
-    if os.name != "nt":
+    if not _is_windows():
         return {"success": False, "enabled": True, "started": False, "reachable": False, "message": "n8n autostart is currently supported on Windows only."}
 
     if n8n_port_open():

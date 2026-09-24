@@ -17,7 +17,8 @@ class BarehandsToolsTests(unittest.TestCase):
     def test_controller_uses_barehands_state_directory(self):
         with patch.dict(os.environ, {"BAREHANDS_DIR": r"C:\barehands"}, clear=False):
             controller = _controller()
-        self.assertEqual(str(controller.state_dir), r"C:\barehands\state")
+        normalized = str(controller.state_dir).replace("\\", "/")
+        self.assertEqual(normalized, "C:/barehands/state")
 
     def test_present_requires_title_and_body(self):
         result = barehands_present("JARVIS")
