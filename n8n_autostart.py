@@ -86,9 +86,13 @@ def _launch_process() -> subprocess.Popen | None:
         "ComSpec",
         str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "cmd.exe"),
     )
-    # npx.cmd is a batch file. Use CALL so cmd.exe handles it correctly even when
-    # the Node.js installation path contains spaces (for example, Program Files).
-    command_line = f'call "{npx}" --yes n8n@2.40.5'
+    # Resolve the batch file through the inherited PATH instead of passing its
+    # absolute path through cmd.exe. This avoids Windows' nested-quote parsing.
+    npx_command = Path(npx).name
+    if npx_command.lower().endswith(".cmd"):
+        command_line = f"call {npx_command} --yes n8n@2.40.5"
+    else:
+        command_line = f"{npx_command} --yes n8n@2.40.5"
 
     flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     flags |= int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -105,9 +109,8 @@ def _launch_process() -> subprocess.Popen | None:
         # Pass one complete command line to CreateProcess. Supplying /c as a
         # separate argv item makes Python's Windows quoting rules escape the
         # embedded quotes in the batch-file path.
-        full_command = f'"{cmd_exe}" /d /c {command_line}'
         process = subprocess.Popen(
-            full_command,
+            [cmd_exe, "/d", "/c", command_line],
             cwd=str(config.BASE_DIR),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -140,7 +143,16 @@ def _monitor_startup(process: subprocess.Popen | None, timeout: float, poll_inte
             return
         if process is not None:
             try:
-                if process.poll() is not None:
+                return_code = process.poll()
+                if return_code is not None:
+                    try:
+                        with n8n_log_path().open("a", encoding="utf-8") as log_file:
+                            log_file.write(
+                                "JARVIS n8n supervisor: child exited "
+                                f"with code {return_code} before port 5678 became available.\n"
+                            )
+                    except OSError:
+                        pass
                     logger.warning(
                         "JARVIS: n8n autostart process exited before port 5678 became available."
                     )
