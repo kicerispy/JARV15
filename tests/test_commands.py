@@ -171,12 +171,12 @@ class TestProjectFileLookupRoutes:
             assert plan is not None
             assert plan["steps"][0]["tool"] == "find_file"
 
-    def test_browser_find_element_still_uses_dom_route(self):
+    def test_browser_element_actions_still_use_dom_route(self):
         from commands import get_fast_command
 
-        plan = get_fast_command("Find the Downloads button on the current page")
+        plan = get_fast_command("Click the Downloads button")
         assert plan is not None
-        assert plan["steps"][0]["tool"] == "browser_find_element"
+        assert plan["steps"][0]["tool"] == "browser_click_element"
 
 
 class TestBrowserQolFastRoutes:
