@@ -248,3 +248,12 @@ class ModelManagerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class PlannerBudgetConfigTests(unittest.TestCase):
+
+    def test_planner_output_budget_is_large_enough_for_structured_code_tasks(self):
+        import config
+
+        self.assertGreaterEqual(config.PLANNER_NUM_PREDICT, 320)
