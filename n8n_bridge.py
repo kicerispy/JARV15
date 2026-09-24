@@ -202,18 +202,18 @@ def classify_n8n_request(request: str) -> Optional[str]:
         and any(action in text for action in external_actions)
     )
 
-    if is_external_mutation:
-        return "integration"
-
-    if len(mentioned_services) >= 2:
-        return "orchestration"
-
     if explicit_multi_service and (
         "sync " in text
         or "between " in text
         or "across multiple services" in text
         or "across multiple apps" in text
     ):
+        return "orchestration"
+
+    if is_external_mutation:
+        return "integration"
+
+    if len(mentioned_services) >= 2:
         return "orchestration"
 
     # External-service mutations and integrations are n8n-first. Read-only

@@ -977,7 +977,7 @@ def test_repair_task_can_gather_source_before_editing():
     )
 
     assert completed.status == "completed"
-    assert len(planner.calls) == 2
+    assert len(planner.calls) == 3
     assert len(executor.calls) == 4
     assert [
         step["tool"]
