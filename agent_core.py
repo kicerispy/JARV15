@@ -1337,8 +1337,7 @@ class JarvisAgent:
 
             if self._requested_file_exists(requested_target):
                 deterministic_plan = self._build_phase_fallback_plan(
-                    task,
-                    require_code_read=True,
+                    task
                 )
 
                 if deterministic_plan is not None:
