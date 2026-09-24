@@ -88,10 +88,16 @@ def _is_enabled() -> bool:
 
 
 def _has_any(text: str, signals: tuple[str, ...]) -> bool:
-    return any(
-        re.search(rf"(?<!\w){re.escape(signal)}(?!\w)", text)
-        for signal in signals
-    )
+    for signal in signals:
+        if signal.startswith("."):
+            # File extensions are embedded in filenames, so a leading
+            # word-boundary assertion would incorrectly reject them.
+            if re.search(rf"{re.escape(signal)}(?!\w)", text):
+                return True
+            continue
+        if re.search(rf"(?<!\w){re.escape(signal)}(?!\w)", text):
+            return True
+    return False
 
 
 def _is_software_request(text: str) -> bool:
