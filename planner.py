@@ -3064,9 +3064,11 @@ Last tool: {active_context.get('last_tool', 'none')}
     # --------------------------------------------------------
     # Agent Core prefixes internal phase markers so intermediate
     # investigation/test planning cannot accidentally enter repair mode.
-    # Only the final repair phase uses the coding model.
+    # The final repair/change phases use the coding model; discovery remains
+    # model-free or planner-model driven as appropriate.
     # --------------------------------------------------------
     is_repair_phase = "[JARVIS_INTERNAL_PHASE:REPAIR]" in user_command
+    is_change_phase = "[JARVIS_INTERNAL_PHASE:CHANGE]" in user_command
     is_source_read_phase = "[JARVIS_INTERNAL_PHASE:SOURCE_READ]" in user_command
     is_diagnostic_test_phase = "[JARVIS_INTERNAL_PHASE:DIAGNOSTIC_TEST]" in user_command
 
@@ -3122,6 +3124,61 @@ Required shape:
 }}
 
 The final step must validate the changed target. Return ONLY JSON.
+"""
+    elif is_change_phase:
+        change_tools = {
+            name: AVAILABLE_TOOLS[name]
+            for name in (
+                "code_checkpoint",
+                "edit_file",
+                "write_file",
+                "delete_file",
+                "code_test",
+                "read_file",
+            )
+        }
+
+        change_tool_list = "\n".join(
+            f"{name}: {desc}"
+            for name, desc in change_tools.items()
+        )
+
+        system_content = f"""You are JARVIS's focused software change planner.
+
+The deterministic source-inspection phase has completed successfully. The user
+message contains verified source evidence from the real project.
+
+Available tools:
+{change_tool_list}
+
+CHANGE IMPLEMENTATION MODE — HIGH PRIORITY:
+
+Rules:
+- Implement the original requested change using the verified source evidence.
+- Do not rediscover the project or replace the evidence with guesses.
+- Make the smallest safe change that satisfies the request.
+- For an existing file, prefer edit_file:
+  filename|||old_text|||new_text
+- Copy old_text exactly from the verified source evidence.
+- Create code_checkpoint before any mutation.
+- For a regression-test request, modify the named test file and run the relevant
+  focused tests afterward.
+- Run code_test after the final mutation.
+- Do not return a read-only plan for an explicit change request.
+- Do not invent filenames, code, errors, or behavior.
+- Return executable JSON only. Never return prose or an empty plan.
+
+Required shape:
+{{
+  "goal": "brief implementation goal",
+  "steps": [
+    {{"tool": "code_checkpoint", "argument": ""}},
+    {{"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"}},
+    {{"tool": "code_test", "argument": "{{\"mode\":\"pytest\",\"path\":\"tests/test_target.py\"}}"}}
+  ]
+}}
+
+Return ONLY JSON.
 """
     elif is_source_read_phase:
         system_content = f"""You are JARVIS's focused source-inspection planner.
@@ -3187,29 +3244,38 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         print("JARVIS DEBUG: planner -> calling Ollama", flush=True)
         planner_start = time.perf_counter()
 
+        focused_implementation_phase = (
+            is_repair_phase or is_change_phase
+        )
+
         planner_model = (
             MODEL_MANAGER.coding_model
-            if is_repair_phase
+            if focused_implementation_phase
             else PLANNER_MODEL
         )
 
-        if is_repair_phase:
+        if focused_implementation_phase:
+            phase_label = (
+                "repair"
+                if is_repair_phase
+                else "change"
+            )
             print(
-                f"JARVIS DEBUG: repair planner -> using {planner_model}",
+                f"JARVIS DEBUG: {phase_label} planner -> using {planner_model}",
                 flush=True,
             )
 
         repair_options = (
             {
                 "temperature": 0,
-                "num_predict": 240,
+                "num_predict": 320,
                 "num_ctx": config.CODING_NUM_CTX,
             }
-            if is_repair_phase
+            if focused_implementation_phase
             else None
         )
 
-        if is_repair_phase:
+        if focused_implementation_phase:
             response = MODEL_MANAGER.coding(
                 messages,
                 format="json",
@@ -3230,7 +3296,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         # Ollama reports the major latency components on ChatResponse. Keep
         # these metrics in the debug log so cold-load time is distinguishable
         # from prompt evaluation and token generation time.
-        if is_repair_phase:
+        if focused_implementation_phase:
             def _seconds_from_ns(name: str):
                 try:
                     value = getattr(response, name, None)
@@ -3252,7 +3318,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 
             if metric_parts:
                 print(
-                    "JARVIS DEBUG: repair latency breakdown: "
+                    "JARVIS DEBUG: focused coding planner latency breakdown: "
                     + " | ".join(metric_parts),
                     flush=True,
                 )
@@ -3279,7 +3345,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
     except Exception as e:
         logger.error(f"Planner LLM call failed: {e}")
 
-        if is_repair_phase:
+        if focused_implementation_phase:
             fallback_model = MODEL_MANAGER.coding_fallback_model
             if fallback_model and fallback_model != planner_model:
                 logger.warning(
@@ -3341,7 +3407,11 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
     if not data:
         logger.warning(f"Planner returned invalid JSON: {content[:200]}")
 
-        if is_roblox_request(user_command) and not is_repair_phase:
+        if (
+            is_roblox_request(user_command)
+            and not is_repair_phase
+            and not is_change_phase
+        ):
             fallback = _roblox_safe_fallback_plan(user_command)
             validated_fallback = validate_plan(fallback)
             if validated_fallback.get("steps"):
@@ -3399,6 +3469,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
     if (
         is_roblox_request(user_command)
         and not is_repair_phase
+        and not is_change_phase
         and not validated.get("steps")
     ):
         fallback = _roblox_safe_fallback_plan(user_command)
