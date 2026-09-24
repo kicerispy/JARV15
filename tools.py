@@ -2242,20 +2242,6 @@ def code_diagnose(argument=""):
         normalized_target = re.sub(r"[^a-z0-9]", "", raw_value.lower())
 
         if normalized_target:
-            ignored = {
-                ".git",
-                "__pycache__",
-                ".pytest_cache",
-                ".mypy_cache",
-                ".ruff_cache",
-                "jarvis_cuda",
-                "venv",
-                ".venv",
-                "node_modules",
-                "build",
-                "dist",
-                ".jarvis_checkpoints",
-            }
 
             matches = []
             try:
@@ -2305,7 +2291,6 @@ def code_diagnose(argument=""):
             path
             for path in base.rglob("*.py")
             if path.is_file()
-            and not any(part in ignored for part in path.parts)
         ]
 
     checks = []
