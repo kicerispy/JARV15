@@ -128,21 +128,56 @@ def classify_n8n_request(request: str) -> Optional[str]:
         return "integration"
 
     # Service-to-service language is workflow-shaped even when the user does
-    # not explicitly say "workflow" or "automation". Check this before the
-    # single-service integration rule so requests such as "sync Sheets with
-    # Airtable" remain orchestration tasks.
-    if any(
+    # not explicitly say "workflow" or "automation". Require either multiple
+    # recognized services or explicit cross-service wording so ordinary actions
+    # such as "send an email to my inbox" remain integrations.
+    mentioned_services = {
+        service
+        for service in (
+            "email", "gmail", "outlook", "calendar", "google calendar",
+            "google sheets", "google drive", "drive", "sheets", "slack",
+            "discord", "telegram", "notion", "github", "gitlab", "jira",
+            "linear", "trello", "todoist", "dropbox", "onedrive", "spotify",
+            "twilio", "stripe", "salesforce", "hubspot", "wordpress", "reddit",
+            "linkedin", "webhook", "rss",
+        )
+        if service in text
+    }
+
+    explicit_multi_service = any(
         re.search(pattern, text)
         for pattern in (
             r"\bsync\b.+\bwith\b",
-            r"\bcopy\b.+\bto\b",
-            r"\bsend\b.+\bto\b",
-            r"\bfrom\b.+\bto\b",
             r"\bbetween\b.+\band\b",
             r"\bwhen\b.+\bthen\b",
             r"\bafter\b.+,?\s+then\b",
+            r"\bacross\s+(?:multiple|two|several)\s+(?:services|apps)\b",
+            r"\bfrom\s+\w[\w .-]*\bto\s+\w[\w .-]*\b",
+        )
+    )
+
+    if len(mentioned_services) >= 2 and any(
+        action in text
+        for action in (
+            "send ",
+            "post ",
+            "create ",
+            "add ",
+            "update ",
+            "save ",
+            "sync ",
+            "forward ",
+            "share ",
+            "upload ",
+            "download ",
+            "notify ",
+            "message ",
+            "schedule ",
         )
     ):
+        return "orchestration"
+
+    if explicit_multi_service:
         return "orchestration"
 
     # External-service mutations and integrations are n8n-first. Read-only
