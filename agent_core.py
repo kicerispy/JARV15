@@ -1456,8 +1456,18 @@ class JarvisAgent:
                 if isinstance(step, dict)
             )
 
+            # Superpowers change workflows are mutation-bearing by definition.
+            # Do not allow a read-only candidate plan to complete an explicit
+            # feature/change request after the planner has selected TDD.
+            superpowers_requires_mutation = (
+                bool(task.superpowers)
+                and bool(task.superpowers.get("requires_tdd"))
+                and not bool(task.superpowers.get("requires_debugging"))
+            )
+
             enforce_change_workflow = (
                 require_repair_plan
+                or superpowers_requires_mutation
                 or (
                     (
                         is_software_change_request(task.request)
