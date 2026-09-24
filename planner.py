@@ -3268,7 +3268,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         focused_num_predict = (
             240
             if is_repair_phase
-            else 320
+            else 512
             if is_change_phase
             else None
         )
@@ -3339,7 +3339,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                     value = getattr(response, name, None)
                     if value is not None:
                         print(
-                            f"JARVIS DEBUG: repair {label}={value}",
+                            f"JARVIS DEBUG: focused coding planner {label}={value}",
                             flush=True,
                         )
                 except Exception:
@@ -3369,7 +3369,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                             "num_predict": (
                                 240
                                 if is_repair_phase
-                                else 320
+                                else 512
                             ),
                             "num_ctx": config.CODING_NUM_CTX,
                         },
