@@ -131,17 +131,40 @@ def classify_n8n_request(request: str) -> Optional[str]:
     # not explicitly say "workflow" or "automation". Require either multiple
     # recognized services or explicit cross-service wording so ordinary actions
     # such as "send an email to my inbox" remain integrations.
+    service_aliases = {
+        "email": ("email", "gmail", "outlook"),
+        "calendar": ("calendar", "google calendar"),
+        "sheets": ("sheets", "google sheets", "google spreadsheet", "spreadsheets"),
+        "drive": ("drive", "google drive"),
+        "slack": ("slack",),
+        "discord": ("discord",),
+        "telegram": ("telegram",),
+        "notion": ("notion",),
+        "github": ("github",),
+        "gitlab": ("gitlab",),
+        "jira": ("jira",),
+        "linear": ("linear",),
+        "trello": ("trello",),
+        "todoist": ("todoist",),
+        "dropbox": ("dropbox",),
+        "onedrive": ("onedrive",),
+        "spotify": ("spotify",),
+        "twilio": ("twilio",),
+        "stripe": ("stripe",),
+        "salesforce": ("salesforce",),
+        "hubspot": ("hubspot",),
+        "wordpress": ("wordpress",),
+        "reddit": ("reddit",),
+        "linkedin": ("linkedin",),
+        "webhook": ("webhook",),
+        "rss": ("rss",),
+        "airtable": ("airtable",),
+    }
+
     mentioned_services = {
         service
-        for service in (
-            "email", "gmail", "outlook", "calendar", "google calendar",
-            "google sheets", "google drive", "drive", "sheets", "slack",
-            "discord", "telegram", "notion", "github", "gitlab", "jira",
-            "linear", "trello", "todoist", "dropbox", "onedrive", "spotify",
-            "twilio", "stripe", "salesforce", "hubspot", "wordpress", "reddit",
-            "linkedin", "webhook", "rss",
-        )
-        if service in text
+        for service, aliases in service_aliases.items()
+        if any(alias in text for alias in aliases)
     }
 
     explicit_multi_service = any(
@@ -156,28 +179,15 @@ def classify_n8n_request(request: str) -> Optional[str]:
         )
     )
 
-    if len(mentioned_services) >= 2 and any(
-        action in text
-        for action in (
-            "send ",
-            "post ",
-            "create ",
-            "add ",
-            "update ",
-            "save ",
-            "sync ",
-            "forward ",
-            "share ",
-            "upload ",
-            "download ",
-            "notify ",
-            "message ",
-            "schedule ",
-        )
-    ):
+    if len(mentioned_services) >= 2:
         return "orchestration"
 
-    if explicit_multi_service:
+    if explicit_multi_service and (
+        "sync " in text
+        or "between " in text
+        or "across multiple services" in text
+        or "across multiple apps" in text
+    ):
         return "orchestration"
 
     # External-service mutations and integrations are n8n-first. Read-only
