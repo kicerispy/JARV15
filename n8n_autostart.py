@@ -86,7 +86,9 @@ def _launch_process() -> subprocess.Popen | None:
         "ComSpec",
         str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "cmd.exe"),
     )
-    command_line = f'"{npx}" --yes n8n@2.40.5'
+    # npx.cmd is a batch file. Use CALL so cmd.exe handles it correctly even when
+    # the Node.js installation path contains spaces (for example, Program Files).
+    command_line = f'call "{npx}" --yes n8n@2.40.5'
 
     flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     flags |= int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -101,7 +103,7 @@ def _launch_process() -> subprocess.Popen | None:
 
     try:
         process = subprocess.Popen(
-            [cmd_exe, "/d", "/s", "/c", command_line],
+            [cmd_exe, "/d", "/c", command_line],
             cwd=str(config.BASE_DIR),
             env=env,
             stdin=subprocess.DEVNULL,
