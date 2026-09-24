@@ -6,6 +6,7 @@ instance when port 5678 is already listening.
 """
 from __future__ import annotations
 import os
+import shutil
 import socket
 import subprocess
 import threading
@@ -32,30 +33,51 @@ def _powershell_path() -> str:
     windir = os.environ.get("WINDIR", r"C:\Windows")
     return str(Path(windir) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
 
-def _is_windows() -> bool:
-    return os.name == "nt"
 
-
-def n8n_log_path() -> Path:
-    """Return the ignored local log path for hidden n8n startup."""
-    path = Path(config.BASE_DIR) / ".jarvis_runtime" / "n8n-autostart.log"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+def _npx_path() -> str | None:
+    return shutil.which("npx.cmd") or shutil.which("npx")
 
 
 def _launch_process() -> subprocess.Popen | None:
-    script = n8n_start_script()
-
-    if not script.exists():
-        logger.warning(f"JARVIS: n8n autostart script not found: {script}")
+    npx = _npx_path()
+    if not npx:
+        logger.warning(
+            "JARVIS: npx was not found in PATH; n8n autostart cannot start."
+        )
+        try:
+            log_file = n8n_log_path().open("a", encoding="utf-8")
+            log_file.write(
+                "JARVIS n8n supervisor: npx was not found in PATH.\n"
+            )
+            log_file.close()
+        except OSError:
+            pass
         return None
 
-    powershell = _powershell_path()
-    if not Path(powershell).exists():
-        powershell = "powershell.exe"
+    log_path = n8n_log_path()
+    try:
+        log_file = log_path.open("a", encoding="utf-8")
+        log_file.write(
+            "JARVIS n8n supervisor: launching npx directly.\n"
+            f"npx={npx}\n"
+        )
+        log_file.flush()
+    except OSError as exc:
+        logger.warning(f"JARVIS: could not open n8n startup log: {exc}")
+        return None
+
+    env = os.environ.copy()
+    env["N8N_HOST"] = "127.0.0.1"
+    env["N8N_PORT"] = "5678"
+    env["N8N_PROTOCOL"] = "http"
+
+    cmd_exe = os.environ.get(
+        "ComSpec",
+        str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "cmd.exe"),
+    )
+    command_line = f'"{npx}" --yes n8n@2.40.5'
 
     flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-    flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
     flags |= int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
     startupinfo = None
@@ -67,34 +89,30 @@ def _launch_process() -> subprocess.Popen | None:
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
     try:
-        log_file = n8n_log_path().open("a", encoding="utf-8")
-        try:
-            return subprocess.Popen(
-                [
-                    powershell,
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-File",
-                    str(script),
-                ],
-                cwd=str(config.BASE_DIR),
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=log_file,
-                startupinfo=startupinfo,
-                creationflags=flags,
-                close_fds=True,
-            )
-        except Exception:
-            log_file.close()
-            raise
+        process = subprocess.Popen(
+            [cmd_exe, "/d", "/s", "/c", command_line],
+            cwd=str(config.BASE_DIR),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
+            startupinfo=startupinfo,
+            creationflags=flags,
+            close_fds=False,
+        )
+        log_file.write(
+            f"JARVIS n8n supervisor: child PID={process.pid}.\n"
+        )
+        log_file.flush()
+        return process
     except Exception as exc:
+        log_file.write(
+            f"JARVIS n8n supervisor: process launch failed: {exc}\n"
+        )
+        log_file.close()
         logger.warning(f"JARVIS: n8n autostart launch failed: {exc}")
         return None
+
 
 def _monitor_startup(process: subprocess.Popen | None, timeout: float, poll_interval: float) -> None:
     elapsed = 0.0
