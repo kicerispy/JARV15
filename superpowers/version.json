@@ -1,0 +1,7 @@
+{
+  "upstream": "obra/superpowers",
+  "version": "6.4.1",
+  "source": "https://github.com/obra/superpowers",
+  "license": "MIT",
+  "adapter": "superpowers_engine.py"
+}

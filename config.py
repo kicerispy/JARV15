@@ -119,6 +119,17 @@ ROBLOX_MCP_TIMEOUT = float(
 )
 
 # ============================================================
+# SUPERPOWERS SOFTWARE WORKFLOW
+# ============================================================
+
+SUPERPOWERS_ENABLED = os.environ.get(
+    "JARVIS_SUPERPOWERS_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SUPERPOWERS_VERSION = "6.4.1"
+
+# ============================================================
 # TEXT INPUT
 # ============================================================
 

@@ -3017,6 +3017,16 @@ Last tool: {active_context.get('last_tool', 'none')}
             f"JARVIS planner: intent resolution skipped: {exc}"
         )
 
+    try:
+        from superpowers_engine import planner_directives
+        superpowers_context = planner_directives(user_command)
+        if superpowers_context:
+            context_str += "\n" + superpowers_context + "\n"
+    except Exception as exc:
+        logger.debug(
+            f"JARVIS planner: Superpowers directives skipped: {exc}"
+        )
+
     learned_hints = active_context.get("learned_hints")
     if isinstance(learned_hints, list) and learned_hints:
         cleaned_hints = [

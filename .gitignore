@@ -85,3 +85,6 @@ wakeword_dataset/
 # Archives
 *.zip
 chrome_automation/
+
+# Superpowers plan-execution scratch workspace
+.superpowers/sdd/

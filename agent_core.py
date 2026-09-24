@@ -60,6 +60,7 @@ from planner import (
 )
 from tool_executor import execute_plan
 from state import ActiveContext, TaskState
+from superpowers_engine import classify_software_request
 
 
 # ==========================================================
@@ -142,6 +143,9 @@ class AgentTask:
     error: Optional[str] = None
 
     initial_acknowledged: bool = False
+
+    # Native Superpowers workflow metadata retained across replanning.
+    superpowers: Dict[str, Any] = field(default_factory=dict)
 
 
 # ==========================================================
@@ -315,6 +319,15 @@ class JarvisAgent:
             task.max_replans = 5
         elif is_software_diagnostic_request(normalized_request):
             task.max_replans = 3
+
+        workflow = classify_software_request(normalized_request)
+        if workflow is not None:
+            task.superpowers = workflow.to_dict()
+            task.active_context["superpowers"] = workflow.to_dict()
+            task.observations.append(
+                "Superpowers workflow selected: "
+                f"{workflow.classification} / {workflow.execution_mode}."
+            )
 
         self.current_task = task
 
