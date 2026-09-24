@@ -1951,6 +1951,7 @@ def test_requested_file_target_extracts_nested_change_path():
     target = JarvisAgent._infer_requested_file_target(request)
 
     assert target == "tests/test_superpowers_engine.py"
+    assert JarvisAgent._requested_file_exists(target) is True
 
 
 def test_explicit_change_target_starts_with_deterministic_source_read():
