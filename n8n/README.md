@@ -52,6 +52,12 @@ n8n supports self-hosting with npm or Docker. For a simple local development set
 
 JARVIS expects the n8n base URL at http://127.0.0.1:5678 by default.
 
+When JARVIS_N8N_ENABLED=1, JARVIS also starts the repository-local n8n launcher automatically in the background. It first checks port 5678 and will not create a duplicate n8n process. JARVIS startup does not wait for n8n to finish loading; a background monitor reports whether n8n becomes reachable.
+
+Disable automatic launch without disabling the n8n bridge with:
+
+    $env:JARVIS_N8N_AUTOSTART="0"
+
 ## Create the gateway workflow
 
 Create a workflow in n8n with a Webhook trigger:

@@ -1857,6 +1857,17 @@ def main():
                 f"JARVIS: n8n local computer-action gateway startup failed: {exc}"
             )
 
+    if N8N_ENABLED:
+        try:
+            from n8n_autostart import ensure_n8n_started
+            autostart_result = ensure_n8n_started()
+            logger.info(
+                "JARVIS: n8n autostart status: "
+                f"{autostart_result.get('message', 'unknown status')}"
+            )
+        except Exception as exc:
+            logger.warning(f"JARVIS: n8n autostart failed: {exc}")
+
     typed_input.start()
 
     # ==================================================
