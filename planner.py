@@ -2977,9 +2977,14 @@ def create_plan(
             }
 
     # Normalize optional context once deterministic routing is complete.
-    # Internal planner phases may call create_plan() without active context, but
-    # the learned-hints path below still expects a dictionary.
-    if not isinstance(active_context, dict):
+    # Internal planner phases may call create_plan() without active context, while
+    # Agent Core can provide its ActiveContext wrapper instead of a plain dict.
+    if hasattr(active_context, "to_dict"):
+        try:
+            active_context = active_context.to_dict()
+        except Exception:
+            active_context = {}
+    elif not isinstance(active_context, dict):
         active_context = {}
 
     context_str = ""
