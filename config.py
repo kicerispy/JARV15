@@ -440,7 +440,7 @@ CHAT_NUM_PREDICT = int(
 PLANNER_NUM_PREDICT = int(
     os.environ.get(
         "JARVIS_PLANNER_NUM_PREDICT",
-        "320",
+        "512",
     )
 )
 
