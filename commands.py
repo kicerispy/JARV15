@@ -1,6 +1,7 @@
 from ollama import chat
 import json
-import re
+import re
+from pathlib import Path
 
 
 MODEL = "qwen3:8b"
@@ -1232,6 +1233,50 @@ def build_browser_dom_plan(user_request):
     return None
 
 
+def build_project_file_lookup_plan(user_request):
+    """Build a deterministic project-file lookup before browser routing."""
+    text = clean_text(user_request)
+    if not text:
+        return None
+
+    match = re.match(
+        r"^(?:find|locate|search(?:\s+for)?|look\s+for)\s+"
+        r"(?:the\s+)?([A-Za-z0-9_./\\-]+)"
+        r"(?:\s+(?:in|inside|within)\s+(?:my|the)\s+project)?$",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    target = match.group(1).strip().rstrip("?.!,")
+    filename = Path(target.replace("\\", "/")).name
+
+    project_extensions = {
+        ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css",
+        ".json", ".yaml", ".yml", ".toml", ".md", ".lua", ".java",
+        ".cpp", ".c", ".h", ".hpp", ".go", ".rs", ".rb", ".php",
+        ".ps1", ".bat", ".cmd",
+    }
+
+    if (
+        Path(filename).suffix.lower() not in project_extensions
+        and "/" not in target
+        and "\\" not in target
+    ):
+        return None
+
+    if not filename or "." not in filename:
+        return None
+
+    return {
+        "steps": [{
+            "tool": "find_file",
+            "argument": target,
+        }]
+    }
+
+
 def build_browser_navigation_plan(user_request):
     """Build a deterministic browser navigation plan for direct URLs."""
     original = str(user_request or "").strip()
@@ -1535,6 +1580,16 @@ def deterministic_route(user_request, active_context=None):
     if software_like_find:
         print("JARVIS: Software/gameplay follow-up detected.")
         return None
+
+
+    # Project filename lookups must run before generic browser "find/search" routes.
+    project_file_plan = build_project_file_lookup_plan(user_request)
+
+    if project_file_plan:
+
+        print("JARVIS: Project file lookup detected.")
+
+        return project_file_plan
 
 
     # Direct Browser Navigation
