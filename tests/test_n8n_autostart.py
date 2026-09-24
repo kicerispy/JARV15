@@ -29,9 +29,9 @@ class N8NAutostartTests(unittest.TestCase):
         self.assertFalse(result["started"])
         launch.assert_not_called()
 
-    def test_missing_script_fails_cleanly(self):
+    def test_missing_npx_fails_cleanly(self):
         import config, n8n_autostart
-        with mock.patch.object(config, "N8N_ENABLED", True),              mock.patch.object(config, "N8N_AUTOSTART", True),              mock.patch.object(n8n_autostart, "_is_windows", return_value=True),              mock.patch.object(n8n_autostart, "n8n_port_open", return_value=False),              mock.patch.object(n8n_autostart, "n8n_start_script", return_value=Path("Z:/missing/start-n8n.ps1")):
+        with mock.patch.object(config, "N8N_ENABLED", True),              mock.patch.object(config, "N8N_AUTOSTART", True),              mock.patch.object(n8n_autostart, "_is_windows", return_value=True),              mock.patch.object(n8n_autostart, "n8n_port_open", return_value=False),              mock.patch.object(n8n_autostart, "_npx_path", return_value=None):
             result = n8n_autostart.ensure_n8n_started()
         self.assertFalse(result["success"])
 
