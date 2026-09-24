@@ -932,6 +932,25 @@ class JarvisAgent:
             if candidate:
                 return candidate
 
+        # Also recover an explicitly named nested project path even when it
+        # appears in a feature/change request without words like "file" or
+        # "target", e.g. "add a test to tests/test_superpowers_engine.py".
+        nested_path_match = re.search(
+            rf"(?<![A-Za-z0-9_.-])"
+            rf"((?:[A-Za-z0-9_-]+[\\/])+"
+            rf"[A-Za-z0-9_. -]+\.{extension_pattern})"
+            rf"(?![A-Za-z0-9_.-])",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
+        if nested_path_match:
+            candidate = str(
+                nested_path_match.group(1)
+            ).strip().rstrip(".,!?;:")
+            if candidate:
+                return candidate
+
         # Also support requests where the filename follows "target", "file",
         # or similar wording instead of a repair verb.
         command_match = re.search(
