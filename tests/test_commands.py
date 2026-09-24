@@ -158,6 +158,27 @@ class TestDeterministicBrowserSummaryRoute:
 
 
 
+class TestProjectFileLookupRoutes:
+    def test_project_filename_searches_do_not_route_to_browser(self):
+        from commands import get_fast_command
+
+        for command in (
+            "Find browser_controller.py in my project",
+            "Search for browser_controller.py",
+            "Locate agent_core.py in the project",
+        ):
+            plan = get_fast_command(command)
+            assert plan is not None
+            assert plan["steps"][0]["tool"] == "find_file"
+
+    def test_browser_find_element_still_uses_dom_route(self):
+        from commands import get_fast_command
+
+        plan = get_fast_command("Find the Downloads button on the current page")
+        assert plan is not None
+        assert plan["steps"][0]["tool"] == "browser_find_element"
+
+
 class TestBrowserQolFastRoutes:
     def test_page_title_route_does_not_require_llm(self):
         from commands import get_fast_command
