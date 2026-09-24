@@ -64,7 +64,14 @@ def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch
             "internal agent phases must not enter the generic deterministic router"
         )
 
-    monkeypatch.setattr(planner_module.MODEL_MANAGER, "planner", fake_planner)
+    monkeypatch.setattr(planner_module.MODEL_MANAGER, "coding", fake_planner)
+    monkeypatch.setattr(
+        planner_module.MODEL_MANAGER,
+        "planner",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("focused CHANGE phase must use the coding planner")
+        ),
+    )
 
     import commands
     monkeypatch.setattr(
@@ -79,6 +86,7 @@ def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch
     )
 
     assert calls
+    assert "CHANGE IMPLEMENTATION MODE" in calls[0][0][0]["content"]
     assert [step["tool"] for step in plan["steps"]] == [
         "code_checkpoint",
         "edit_file",
