@@ -63,3 +63,11 @@ def test_artifact_paths_are_project_local():
     )
     assert paths["spec"].startswith("docs/superpowers/specs/2026-09-24-")
     assert paths["plan"].startswith("docs/superpowers/plans/2026-09-24-")
+
+
+def test_architecture_terms_are_classified_as_software_work():
+    workflow = classify_software_request("integrate a new subsystem")
+    assert workflow is not None
+    assert workflow.classification == "architectural"
+    assert workflow.requires_design is True
+    assert workflow.requires_plan is True
