@@ -1877,7 +1877,25 @@ def test_superpowers_change_workflow_rejects_read_only_completion():
         "and run the relevant tests afterward."
     )
 
-    planned = agent.plan_task(task)
+    task.evidence = [
+        {
+            "attempt": 1,
+            "tool": "read_file",
+            "target": "tests/test_superpowers_engine.py",
+            "success": True,
+            "verified": True,
+            "detail": (
+                "1: from superpowers_engine import classify_software_request\\n"
+                "2: def test_existing_regression(): pass"
+            ),
+        }
+    ]
+
+    planned = agent.plan_task(
+        task,
+        planning_request=agent._build_change_request_after_source(task),
+        require_change_plan=True,
+    )
 
     assert planned.status == "ready"
     assert len(planner.calls) == 2
@@ -1992,7 +2010,7 @@ def test_explicit_change_target_moves_from_source_read_to_focused_implementation
     planned = agent.plan_task(task)
 
     assert planned.steps[0].tool == "read_file"
-    assert planner.calls == 0
+    assert len(planner.calls) == 0
 
     completed = agent.execute_task(
         planned,
