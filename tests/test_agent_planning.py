@@ -1941,6 +1941,18 @@ class RejectPlannerCall:
         )
 
 
+def test_requested_file_target_extracts_nested_change_path():
+    request = (
+        "Add a regression test to tests/test_superpowers_engine.py "
+        "ensuring read-only Python file inspection does not invoke the "
+        "Superpowers engineering workflow."
+    )
+
+    target = JarvisAgent._infer_requested_file_target(request)
+
+    assert target == "tests/test_superpowers_engine.py"
+
+
 def test_explicit_change_target_starts_with_deterministic_source_read():
     planner = RejectPlannerCall()
     agent = JarvisAgent(planner=planner)
