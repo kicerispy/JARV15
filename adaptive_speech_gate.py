@@ -82,10 +82,12 @@ class AdaptiveSpeechGate:
             start_threshold = self.start_threshold
 
         elif (
-            volume < start_threshold
+            volume < self._noise_floor
             and volume < self.legacy_threshold
         ):
-            # Slowly track quieter room conditions without chasing speech.
+            # Only track measurements below the current noise floor. A quiet
+            # speech frame can be louder than the floor without turning into a
+            # new baseline and raising the start threshold mid-session.
             self._noise_floor = (
                 0.90 * self._noise_floor
                 + 0.10 * volume
