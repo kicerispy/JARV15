@@ -2046,6 +2046,17 @@ def main():
                 )
                 time.sleep(delay)
 
+            task_controller = getattr(state, "task_controller", None)
+            if (
+                task_controller is not None
+                and task_controller.has_active_task()
+            ):
+                logger.info(
+                    "JARVIS: Coding model warm-up skipped because "
+                    "an active task is already running."
+                )
+                return
+
             warmup_start = perf_now()
             ModelManager().warmup_coding_model()
             logger.info(
