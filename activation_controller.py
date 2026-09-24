@@ -53,7 +53,7 @@ HEED_CANDIDATE_THRESHOLD = float(
 NORMAL_SINGLE_TRIGGER = float(
     os.environ.get(
         "JARVIS_ACTIVATION_SINGLE_TRIGGER",
-        "0.90",
+        "0.78",
     )
 )
 
@@ -71,6 +71,16 @@ NORMAL_MULTI_SUPPORT_TRIGGER = float(
     os.environ.get(
         "JARVIS_ACTIVATION_MULTI_SUPPORT_TRIGGER",
         "0.68",
+    )
+)
+
+# Moderate wake candidates may be separated by a small number of weak frames.
+# This mirrors the natural timing of a spoken wake word without allowing an
+# arbitrary number of scattered hits to accumulate.
+NORMAL_MULTI_WINDOW_FRAMES = int(
+    os.environ.get(
+        "JARVIS_ACTIVATION_MULTI_WINDOW_FRAMES",
+        "4",
     )
 )
 
@@ -257,28 +267,38 @@ def evaluate_wake_scores(
             top_scores,
         )
 
-    # Require consecutive moderate/strong predictions. An isolated high
-    # score such as 0.811 in a hard-negative "Jared" recording should not
-    # activate JARVIS.
-    for index in range(len(recent_timeline) - 1):
-        first = recent_timeline[index]
-        second = recent_timeline[index + 1]
+    # Require two moderate/strong candidates inside a short temporal
+    # window. A weak frame between the two predictions is normal for wake-word
+    # scoring and should not erase an otherwise coherent spoken candidate.
+    for first_index in range(len(recent_timeline)):
+        first = recent_timeline[first_index]
 
-        if (
-            first >= NORMAL_MULTI_TRIGGER
-            and second >= NORMAL_MULTI_TRIGGER
-            and max(first, second) >= NORMAL_MULTI_SUPPORT_TRIGGER
-            and (first + second) / 2.0 >= NORMAL_MULTI_TRIGGER
+        if first < NORMAL_MULTI_TRIGGER:
+            continue
+
+        for second_index in range(
+            first_index + 1,
+            min(
+                len(recent_timeline),
+                first_index + NORMAL_MULTI_WINDOW_FRAMES,
+            ),
         ):
-            return ActivationDecision(
-                True,
-                "consecutive multi-frame wake confirmation",
-                peak,
-                (
-                    max(first, second),
-                    min(first, second),
-                ),
-            )
+            second = recent_timeline[second_index]
+
+            if (
+                second >= NORMAL_MULTI_TRIGGER
+                and max(first, second) >= NORMAL_MULTI_SUPPORT_TRIGGER
+                and (first + second) / 2.0 >= NORMAL_MULTI_TRIGGER
+            ):
+                return ActivationDecision(
+                    True,
+                    "multi-frame wake confirmation",
+                    peak,
+                    (
+                        max(first, second),
+                        min(first, second),
+                    ),
+                )
 
     # A softer path remains available, but all three moderate predictions
     # must be consecutive so a scattered sequence cannot trigger.
