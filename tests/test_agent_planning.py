@@ -1,6 +1,8 @@
 from agent_core import JarvisAgent
+import planner as planner_module
 from planner import (
     assess_plan,
+    create_plan,
     is_software_diagnostic_request,
     is_software_repair_request,
     validate_plan,
@@ -34,6 +36,54 @@ def test_software_repair_detection():
     assert is_software_repair_request(
         "tell me a story about a robot"
     ) is False
+
+
+def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch):
+    calls = []
+
+    def fake_planner(messages, format="json"):
+        calls.append((messages, format))
+        return {
+            "message": {
+                "content": (
+                    '{"goal":"implement the regression test",'
+                    '"steps":['
+                    '{"tool":"code_checkpoint","argument":""},'
+                    '{"tool":"edit_file","argument":'
+                    '"tests/test_superpowers_engine.py|||old|||new"},'
+                    '{"tool":"code_test","argument":'
+                    '"{\\\"mode\\\":\\\"pytest\\\",'
+                    '\\"path\\\":\\\"tests/test_superpowers_engine.py\\\"}"}'
+                    ']}'
+                )
+            }
+        }
+
+    def fail_deterministic_route(*args, **kwargs):
+        raise AssertionError(
+            "internal agent phases must not enter the generic deterministic router"
+        )
+
+    monkeypatch.setattr(planner_module.MODEL_MANAGER, "planner", fake_planner)
+
+    import commands
+    monkeypatch.setattr(
+        commands,
+        "deterministic_route",
+        fail_deterministic_route,
+    )
+
+    plan = create_plan(
+        "[JARVIS_INTERNAL_PHASE:CHANGE]\n"
+        "Implement the verified regression-test change and run the relevant tests."
+    )
+
+    assert calls
+    assert [step["tool"] for step in plan["steps"]] == [
+        "code_checkpoint",
+        "edit_file",
+        "code_test",
+    ]
 
 
 def test_validate_plan_preserves_internal_phase_metadata():
