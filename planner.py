@@ -2370,6 +2370,19 @@ def create_plan(
         )
         return validate_plan(deterministic_roblox)
 
+    # Internal agent phases are already semantically resolved. Their
+    # prompts may contain ordinary words such as "run", "search", or "add"
+    # that happen to match user-facing deterministic commands. Never let the
+    # general command router hijack an internal phase; the phase marker is
+    # authoritative and must reach the focused planner below.
+    internal_phase = bool(
+        re.match(
+            r"^\\s*\\[JARVIS_INTERNAL_PHASE:[A-Z_]+\\]",
+            str(user_command or ""),
+            re.IGNORECASE,
+        )
+    )
+
     # Use the canonical command router as the first safety boundary.
     # Agent Core may call this planner directly, bypassing main.py's
     # fast-command lookup, so simple actions must still stay model-free.
@@ -2449,7 +2462,7 @@ def create_plan(
         defer_contextual_route = True
 
     try:
-        if defer_contextual_route:
+        if internal_phase or defer_contextual_route:
             deterministic_plan = None
         else:
             from commands import deterministic_route
