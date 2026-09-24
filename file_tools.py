@@ -30,6 +30,7 @@ IGNORED_LIST_DIRECTORIES = {
 
 IGNORED_LIST_FILE_TOKENS = (
     ".before_",
+    ".before-",
     ".backup",
     "_backup",
     ".bak",
