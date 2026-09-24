@@ -1812,3 +1812,82 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
         os.chdir(original_cwd)
         shutil.rmtree(test_root, ignore_errors=True)
 
+
+
+
+class ReadOnlyThenChangePlanner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        request,
+        active_context=None,
+        history_text="",
+    ):
+        self.calls.append(request)
+
+        if len(self.calls) == 1:
+            return {
+                "goal": "inspect Superpowers classifier",
+                "steps": [
+                    {
+                        "tool": "read_file",
+                        "argument": "tests/test_superpowers_engine.py",
+                    }
+                ],
+            }
+
+        return {
+            "goal": "add regression test for read-only inspection",
+            "steps": [
+                {
+                    "tool": "read_file",
+                    "argument": "tests/test_superpowers_engine.py",
+                },
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": (
+                        "tests/test_superpowers_engine.py"
+                        "|||def test_example(): pass"
+                        "|||def test_example():\n    assert True"
+                    ),
+                },
+                {
+                    "tool": "code_test",
+                    "argument": (
+                        '{"mode":"pytest",'
+                        '"path":"tests/test_superpowers_engine.py"}'
+                    ),
+                },
+            ],
+        }
+
+
+def test_superpowers_change_workflow_rejects_read_only_completion():
+    planner = ReadOnlyThenChangePlanner()
+    agent = JarvisAgent(planner=planner)
+
+    task = agent.create_task(
+        "Add a regression test to tests/test_superpowers_engine.py "
+        "and run the relevant tests afterward."
+    )
+
+    planned = agent.plan_task(task)
+
+    assert planned.status == "ready"
+    assert len(planner.calls) == 2
+    assert [step.tool for step in planned.steps] == [
+        "read_file",
+        "code_checkpoint",
+        "edit_file",
+        "code_test",
+    ]
+    assert any(
+        "file modification" in observation.lower()
+        for observation in planned.observations
+    )
