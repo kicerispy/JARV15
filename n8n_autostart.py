@@ -33,6 +33,10 @@ def _powershell_path() -> str:
     windir = os.environ.get("WINDIR", r"C:\Windows")
     return str(Path(windir) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 
 def _npx_path() -> str | None:
     return shutil.which("npx.cmd") or shutil.which("npx")
