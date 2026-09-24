@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import config
 from model_manager import ModelManager
 from logger import logger
+from project_fs import iter_project_files
 from tool_registry import BROWSER_TOOLS, JSON_ARGUMENT_TOOLS
 
 MODEL_MANAGER = ModelManager()
@@ -1965,20 +1966,6 @@ def _resolve_project_file_target(target: str, base) -> Optional[str]:
     if direct.exists() and direct.is_file():
         return direct.relative_to(base).as_posix()
 
-    ignored = {
-        ".git",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "jarvis_cuda",
-        "venv",
-        ".venv",
-        "node_modules",
-        "build",
-        "dist",
-    }
-
     target_key = _normalized_filename_key(raw)
     target_parts = [
         _normalized_filename_key(part)
@@ -1988,10 +1975,8 @@ def _resolve_project_file_target(target: str, base) -> Optional[str]:
 
     matches = []
     try:
-        for path in base.rglob("*"):
+        for path in iter_project_files(base):
             if not path.is_file():
-                continue
-            if any(part in ignored for part in path.parts):
                 continue
 
             relative = path.relative_to(base)

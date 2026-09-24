@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from logger import logger
+from project_fs import iter_project_files
 from autonomy_memory import get_failure_hints, record_episode
 from answer_composer import compose_task_answer
 from postcondition_verifier import verify_postcondition
@@ -856,25 +857,10 @@ class JarvisAgent:
         if not target_key:
             return False
 
-        ignored_parts = {
-            ".git",
-            "__pycache__",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            "jarvis_cuda",
-            "venv",
-            ".venv",
-            "node_modules",
-            "build",
-            "dist",
-            ".jarvis_checkpoints",
-        }
-
-        try:
+            try:
             project_root = Path.cwd().resolve()
 
-            for path in project_root.rglob("*"):
+            for path in iter_project_files(project_root):
                 if not path.is_file():
                     continue
 
@@ -963,26 +949,11 @@ class JarvisAgent:
         # If the request did not contain a clean explicit filename, match
         # against real project files. This handles underscores, spaces,
         # hyphens, casing, and voice transcription artifacts safely.
-        ignored_parts = {
-            ".git",
-            "__pycache__",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            "jarvis_cuda",
-            "venv",
-            ".venv",
-            "node_modules",
-            "build",
-            "dist",
-            ".jarvis_checkpoints",
-        }
-
-        project_root = Path.cwd().resolve()
+            project_root = Path.cwd().resolve()
         matches = []
 
         try:
-            for path in project_root.rglob("*"):
+            for path in iter_project_files(project_root):
                 if not path.is_file():
                     continue
                 if any(part in ignored_parts for part in path.parts):
@@ -2695,6 +2666,68 @@ class JarvisAgent:
                 return "failed"
 
             if result_text == "done":
+
+                # Autonomous software repair/change phases must be backed by
+                # the executor's structured trace. A legacy/custom executor
+                # that returns "done" without a trace cannot prove that any
+                # step ran, so fail closed instead of allowing the repair
+                # state machine to re-enter deterministic phases forever.
+                try:
+                    from tool_executor import get_last_execution_trace
+
+                    execution_trace = get_last_execution_trace()
+                except Exception:
+                    execution_trace = []
+
+                if (
+                    not execution_trace
+                    and task.planner_result.get("steps")
+                    and (
+                        is_software_repair_request(task.request)
+                        or is_software_change_request(task.request)
+                    )
+                ):
+                    reason = (
+                        "Executor returned 'done' without an execution trace; "
+                        "JARVIS refused to treat the autonomous software phase "
+                        "as verified."
+                    )
+                    task.error = reason
+                    task.execution_result = "failed"
+                    task.observations.append(reason)
+
+                    try:
+                        import tool_executor
+
+                        tool_executor.LAST_EXECUTION_TRACE = [
+                            {
+                                "index": 1,
+                                "tool": "agent_verification_guard",
+                                "argument": "",
+                                "status": "failed",
+                                "success": False,
+                                "verified": False,
+                                "result": {
+                                    "success": False,
+                                    "verified": False,
+                                    "retryable": False,
+                                    "message": reason,
+                                },
+                                "message": reason,
+                                "retryable": False,
+                                "terminal": True,
+                            }
+                        ]
+                    except Exception:
+                        pass
+
+                    self._apply_step_status(
+                        task,
+                        success=False,
+                        result=reason,
+                    )
+
+                    return "failed"
 
                 self._apply_step_status(
                     task,

@@ -19,6 +19,7 @@ import psutil
 
 from tool_result import ToolResult
 from tool_registry import BROWSER_TOOLS
+from project_fs import iter_project_files
 
 import barehands_tools
 import file_tools
@@ -1614,12 +1615,10 @@ def _checkpoint_source_files():
     }
 
     files = []
-    for path in base.rglob("*"):
+    for path in iter_project_files(base):
         if not path.is_file():
             continue
-        if any(part in ignored for part in path.parts):
-            continue
-        if path.name in excluded_names:
+                if path.name in excluded_names:
             continue
         if path.suffix.lower() not in CODE_SOURCE_EXTENSIONS:
             continue
@@ -1794,33 +1793,18 @@ def code_search(argument=""):
         return "Code search query cannot be empty."
 
     base = __import__("pathlib").Path.cwd().resolve()
-    ignored = {
-        ".git",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        "jarvis_cuda",
-        "venv",
-        ".venv",
-        "node_modules",
-        "build",
-        "dist",
-    }
-
     matches = []
     query_lower = query.lower()
 
     try:
-        for path in base.rglob("*"):
+        for path in iter_project_files(base):
             if len(matches) >= 50:
                 break
 
             if not path.is_file():
                 continue
 
-            if any(part in ignored for part in path.parts):
-                continue
-
+            
             try:
                 text = path.read_text(
                     encoding="utf-8",
@@ -2275,12 +2259,10 @@ def code_diagnose(argument=""):
 
             matches = []
             try:
-                for path in base.rglob("*"):
+                for path in iter_project_files(base):
                     if not path.is_file():
                         continue
-                    if any(part in ignored for part in path.parts):
-                        continue
-
+                    
                     normalized_name = re.sub(
                         r"[^a-z0-9]",
                         "",
@@ -2311,21 +2293,6 @@ def code_diagnose(argument=""):
             "failures": [target_error],
             "message": "Project diagnostic could not start.",
         }
-
-    ignored = {
-        ".git",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "jarvis_cuda",
-        "venv",
-        ".venv",
-        "node_modules",
-        "build",
-        "dist",
-        ".jarvis_checkpoints",
-    }
 
     if target_path is not None:
         python_files = (

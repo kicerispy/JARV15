@@ -718,6 +718,21 @@ class RecordingExecutor:
 
         tool_executor.LAST_EXECUTION_TRACE = []
         self.calls.append(plan)
+
+        for index, step in enumerate(plan.get("steps", []), start=1):
+            tool_executor.LAST_EXECUTION_TRACE.append(
+                {
+                    "index": index,
+                    "tool": step.get("tool", ""),
+                    "argument": step.get("argument", ""),
+                    "status": "completed",
+                    "success": True,
+                    "verified": True,
+                    "result": "done",
+                    "message": "completed",
+                }
+            )
+
         return "done"
 
 
@@ -753,6 +768,73 @@ def test_successful_discovery_transitions_into_repair_phase():
     assert len(executor.calls) == 2
     assert executor.calls[1]["steps"][-1]["tool"] == "code_test"
 
+
+
+class TracelessExecutor:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(
+        self,
+        plan,
+        active_context,
+        task_state,
+        speak_callback,
+    ):
+        import tool_executor
+
+        self.calls += 1
+        tool_executor.LAST_EXECUTION_TRACE = []
+        return "done"
+
+
+def test_traceless_software_executor_fails_closed():
+    planner_calls = []
+
+    def planner(request, active_context=None, history_text=""):
+        planner_calls.append(request)
+        return {
+            "goal": "repair browser automation",
+            "steps": [
+                {
+                    "tool": "code_checkpoint",
+                    "argument": "",
+                },
+                {
+                    "tool": "edit_file",
+                    "argument": "browser_controller.py|||old|||new",
+                },
+                {
+                    "tool": "code_test",
+                    "argument": '{"mode":"compile","path":"browser_controller.py"}',
+                },
+            ],
+        }
+
+    executor = TracelessExecutor()
+    agent = JarvisAgent(
+        planner=planner,
+        executor=executor,
+    )
+
+    task = agent.create_task(
+        "diagnose and repair browser_controller.py",
+    )
+
+    planned = agent.plan_task(task)
+
+    completed = agent.execute_task(
+        planned,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "failed"
+    assert executor.calls == 1
+    assert len(planner_calls) == 0
+    assert "without an execution trace" in completed.error.lower()
+    assert "retry" not in completed.error.lower()
 
 
 class ThreePhasePlanner:
