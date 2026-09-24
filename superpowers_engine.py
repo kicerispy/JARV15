@@ -89,7 +89,7 @@ def _is_enabled() -> bool:
 
 def _has_any(text: str, signals: tuple[str, ...]) -> bool:
     return any(
-        re.search(rf"(?<!\\w){re.escape(signal)}(?!\\w)", text)
+        re.search(rf"(?<!\w){re.escape(signal)}(?!\w)", text)
         for signal in signals
     )
 
