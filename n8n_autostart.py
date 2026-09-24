@@ -102,8 +102,12 @@ def _launch_process() -> subprocess.Popen | None:
             startupinfo.wShowWindow = subprocess.SW_HIDE
 
     try:
+        # Pass one complete command line to CreateProcess. Supplying /c as a
+        # separate argv item makes Python's Windows quoting rules escape the
+        # embedded quotes in the batch-file path.
+        full_command = f'"{cmd_exe}" /d /c {command_line}'
         process = subprocess.Popen(
-            [cmd_exe, "/d", "/c", command_line],
+            full_command,
             cwd=str(config.BASE_DIR),
             env=env,
             stdin=subprocess.DEVNULL,
