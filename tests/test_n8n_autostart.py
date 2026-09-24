@@ -35,7 +35,7 @@ class N8NAutostartTests(unittest.TestCase):
             result = n8n_autostart.ensure_n8n_started()
         self.assertFalse(result["success"])
 
-    def test_launch_uses_call_for_npx_cmd_paths_with_spaces(self):
+    def test_launch_uses_native_cmd_line_for_npx_cmd_paths_with_spaces(self):
         import config, n8n_autostart
 
         fake_file = mock.Mock()
@@ -64,13 +64,17 @@ class N8NAutostartTests(unittest.TestCase):
             result = n8n_autostart.ensure_n8n_started(timeout=0.5, poll_interval=0.1)
 
         self.assertTrue(result["success"])
-        args = popen.call_args.args[0]
-        self.assertEqual(args[1:3], ["/d", "/c"])
+        full_command = popen.call_args.args[0]
+        self.assertIsInstance(full_command, str)
+        self.assertIn(
+            r'"C:\\Program Files\\nodejs\\npx.cmd"',
+            full_command,
+        )
         self.assertIn(
             r'call "C:\\Program Files\\nodejs\\npx.cmd" --yes n8n@2.40.5',
-            args[3],
+            full_command,
         )
-        self.assertNotIn("/s", args)
+        self.assertIn(' /d /c ', full_command)
 
     def test_background_launch_returns_without_waiting(self):
         import config, n8n_autostart
