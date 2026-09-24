@@ -107,6 +107,18 @@ class TestFindFile:
         assert "Found" in result
         assert "test_file.txt" in result
 
+    def test_find_ignores_hyphenated_before_backups(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "browser_controller.py").write_text("real")
+        (tmp_path / "browser_controller.py.before-google-goto-fix").write_text("backup")
+        (tmp_path / "browser_controller.py.before-suite-fix").write_text("backup")
+
+        result = find_file("browser_controller.py")
+
+        assert "browser_controller.py" in result
+        assert ".before-google-goto-fix" not in result
+        assert ".before-suite-fix" not in result
+
     def test_find_no_results(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = find_file("nonexistent_file_xyz")
