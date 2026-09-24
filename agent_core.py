@@ -932,13 +932,13 @@ class JarvisAgent:
             if candidate:
                 return candidate
 
-        # Also recover an explicitly named nested project path even when it
-        # appears in a feature/change request without words like "file" or
-        # "target", e.g. "add a test to tests/test_superpowers_engine.py".
+        # Recover an explicitly named nested project path first.
+        # Requiring at least one directory separator prevents ordinary prose
+        # containing the word "file" from becoming the target.
         nested_path_match = re.search(
             rf"(?<![A-Za-z0-9_.-])"
             rf"((?:[A-Za-z0-9_-]+[\\/])+"
-            rf"[A-Za-z0-9_. -]+\.{extension_pattern})"
+            rf"[A-Za-z0-9_.-]+\.{extension_pattern})"
             rf"(?![A-Za-z0-9_.-])",
             normalized_text,
             flags=re.IGNORECASE,
