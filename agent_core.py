@@ -857,16 +857,10 @@ class JarvisAgent:
         if not target_key:
             return False
 
-            try:
+        try:
             project_root = Path.cwd().resolve()
 
             for path in iter_project_files(project_root):
-                if not path.is_file():
-                    continue
-
-                if any(part in ignored_parts for part in path.parts):
-                    continue
-
                 filename_key = re.sub(
                     r"[^a-z0-9]",
                     "",
@@ -949,17 +943,13 @@ class JarvisAgent:
         # If the request did not contain a clean explicit filename, match
         # against real project files. This handles underscores, spaces,
         # hyphens, casing, and voice transcription artifacts safely.
-            project_root = Path.cwd().resolve()
+        project_root = Path.cwd().resolve()
         matches = []
 
         try:
             for path in iter_project_files(project_root):
-                if not path.is_file():
-                    continue
-                if any(part in ignored_parts for part in path.parts):
-                    continue
-
                 filename_key = normalized_key(path.name)
+
                 if (
                     filename_key
                     and len(filename_key) >= 5
