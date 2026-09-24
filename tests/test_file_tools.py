@@ -13,6 +13,10 @@ from file_tools import (
     list_files,
     find_file,
     open_folder,
+    read_file,
+    write_file,
+    edit_file,
+    delete_file,
 )
 
 
@@ -128,3 +132,40 @@ class TestFindFile:
         monkeypatch.chdir(tmp_path)
         result = find_file("")
         assert "empty" in result.lower()
+
+
+def test_file_tools_preserve_nested_relative_paths(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "tests" / "fixtures"
+    nested.mkdir(parents=True)
+    target = nested / "sample.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+
+    assert read_file("tests/fixtures/sample.py") == "value = 1\n"
+
+    write_result = write_file(
+        "tests/fixtures/written.py",
+        "value = 2\n",
+    )
+    assert "Wrote" in write_result
+    assert (nested / "written.py").read_text(encoding="utf-8") == "value = 2\n"
+
+    edit_result = edit_file(
+        "tests/fixtures/written.py",
+        "value = 2",
+        "value = 3",
+    )
+    assert "Replaced 1 occurrence" in edit_result
+    assert (nested / "written.py").read_text(encoding="utf-8") == "value = 3\n"
+
+    delete_result = delete_file("tests/fixtures/written.py")
+    assert "Deleted tests" in delete_result
+    assert not (nested / "written.py").exists()
+
+
+def test_file_tools_reject_relative_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert read_file("../outside.txt") == "Invalid filename."
+    assert write_file("../outside.txt", "nope") == "Invalid filename."
+    assert edit_file("../outside.txt", "old", "new") == "Invalid filename."
+    assert delete_file("../outside.txt") == "Invalid filename."
