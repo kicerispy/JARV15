@@ -883,6 +883,21 @@ class JarvisAgent:
                 if filename_key == target_key:
                     return True
 
+                # Nested explicit paths such as
+                # tests/test_superpowers_engine.py must be matched against
+                # their normalized relative path as well as the basename.
+                try:
+                    relative_key = re.sub(
+                        r"[^a-z0-9]",
+                        "",
+                        path.relative_to(project_root).as_posix().lower(),
+                    )
+                except ValueError:
+                    relative_key = ""
+
+                if relative_key == target_key:
+                    return True
+
         except OSError:
             return False
 
