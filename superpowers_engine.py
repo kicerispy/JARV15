@@ -34,7 +34,7 @@ _SOFTWARE_SIGNALS = (
     "python", "javascript", "typescript", "program", "bug", "error", "exception",
     "traceback", "module", "application", "browser automation", "roblox", "luau",
     "test", "pytest", "compile", "refactor", "feature", "implementation",
-    ".py", ".js", ".ts", "framework",
+    ".py", ".js", ".ts", "framework", "subsystem", "architecture",
 )
 
 _CHANGE_SIGNALS = (
