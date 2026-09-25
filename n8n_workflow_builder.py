@@ -477,6 +477,7 @@ Rules:
 - Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
 - For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
 - Include a real trigger and connect every required stage.
+- For conditional bug/issue identification, prefer n8n-nodes-base.if. Do not choose n8n-nodes-base.filter unless its exact verified schema and version are supplied in the architecture.
 - For monitoring/polling workflows, prefer a manually testable Schedule Trigger unless the user explicitly requests an external event trigger.
 - Do not choose a service-specific trigger merely because one was discovered; the trigger must support the requested behavior and the requested test lifecycle.
 - Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
