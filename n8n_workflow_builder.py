@@ -495,7 +495,7 @@ def _schema_repair_instructions(validation_blockers: List[str]) -> List[str]:
             "Never use an array directly as parameters.assignments."
         )
 
-    if "parameters.operation" in text and "slack" in text:
+    if ("parameters.operation" in text or "operation" in text) and "slack" in text:
         instructions.append(
             "For a Slack message alert, pair the discriminator values correctly: "
             "resource: 'message' and operation: 'post'. Do not use send_message."
