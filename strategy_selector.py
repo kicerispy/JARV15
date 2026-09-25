@@ -322,7 +322,13 @@ def record_task_outcome(task: Any) -> dict[str, Any]:
             if regression.get("regressed"):
                 quarantine = quarantine_strategy(
                     fingerprint,
-                    seconds=3600,
+                    seconds=float(
+                        getattr(
+                            config,
+                            "AUTONOMY_STRATEGY_QUARANTINE_SECONDS",
+                            3600,
+                        )
+                    ),
                     reason=str(regression.get("reason", "")),
                 )
 
