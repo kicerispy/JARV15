@@ -49,6 +49,9 @@ JARVIS_PLATFORM_TOOLS = frozenset(
         "tool_reset",
         "memory_status",
         "jarvis_capabilities",
+        "autonomy_status",
+        "strategy_history",
+        "regression_status",
     }
 )
 
