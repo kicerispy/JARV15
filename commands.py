@@ -1525,6 +1525,168 @@ def build_browser_qol_plan(user_request):
     return None
 
 
+
+def build_anipy_plan(user_request):
+    """Build deterministic first-class routes for the upstream anipy-cli integration."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    explicit = re.match(
+        r"^(?:run|use|launch|start)\s+(?:the\s+)?anipy(?:-|\s+)cli(?:\s+(.*))?$",
+        original,
+        re.IGNORECASE,
+    )
+    if explicit:
+        return {
+            "steps": [{
+                "tool": "anipy_cli",
+                "argument": (explicit.group(1) or "").strip(),
+            }]
+        }
+
+    if (
+        ("anipy" in text or "anime" in text)
+        and any(phrase in text for phrase in (
+            "providers",
+            "provider list",
+            "available providers",
+        ))
+    ):
+        return {"steps": [{"tool": "anipy_providers", "argument": ""}]}
+
+    anime_domain = any(
+        phrase in text
+        for phrase in ("anime", "anipy", "anilist", "myanimelist")
+    )
+    if not anime_domain:
+        return None
+
+    language_match = re.search(r"\b(sub|dub)\b", text, re.IGNORECASE)
+    default_language = language_match.group(1).lower() if language_match else "sub"
+
+    patterns = (
+        r"^(?:search|find|look up)\s+(?:for\s+)?(?:the\s+)?anime\s+(.+)$",
+        r"^(?:search|find|look up)\s+(?:for\s+)?(.+?)\s+(?:on\s+)?anipy(?:-|\s+)cli$",
+        r"^(?:anime)\s+(?:search|find)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, original, re.IGNORECASE)
+        if match:
+            query = match.group(1).strip().rstrip("?.!,").strip()
+            if query:
+                return {
+                    "steps": [{
+                        "tool": "anipy_search",
+                        "argument": json.dumps({"query": query, "language": default_language}),
+                    }]
+                }
+
+    match = re.match(
+        r"^(?:get|show|find|tell me)\s+(?:the\s+)?(?:anime\s+)?"
+        r"(?:info|information|details|metadata)\s+(?:for|on|about)\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        query = match.group(1).strip().rstrip("?.!,").strip()
+        if query:
+            return {"steps": [{"tool": "anipy_info", "argument": json.dumps({"query": query})}]}
+
+    match = re.match(
+        r"^(?:list|show|get|find)\s+(?:the\s+)?(?:available\s+)?"
+        r"(?:anime\s+)?episodes?\s+(?:for|of)\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        query = match.group(1).strip().rstrip("?.!,").strip()
+        return {
+            "steps": [{
+                "tool": "anipy_episodes",
+                "argument": json.dumps({"query": query, "language": default_language}),
+            }]
+        }
+
+    match = re.match(
+        r"^(?:get|find|resolve)\s+(?:the\s+)?(?:video|stream|stream\s+link|video\s+link)"
+        r"\s+(?:for|of)\s+(.+?)\s+episode\s+(\d+(?:\.\d+)?)(?:\s+(sub|dub))?$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        ep_text = match.group(2)
+        episode = float(ep_text) if "." in ep_text else int(ep_text)
+        return {
+            "steps": [{
+                "tool": "anipy_get_video",
+                "argument": json.dumps({
+                    "query": match.group(1).strip(),
+                    "episode": episode,
+                    "language": (match.group(3) or default_language).lower(),
+                }),
+            }]
+        }
+
+    match = re.match(
+        r"^(?:download|save)\s+(?:the\s+)?(?:anime\s+)?(.+?)\s+"
+        r"episodes?\s+([0-9]+(?:\.[0-9]+)?(?:\s*-\s*[0-9]+(?:\.[0-9]+)?)?)"
+        r"(?:\s+(sub|dub))?$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        episode_range = re.sub(r"\s+", "", match.group(2))
+        episode_value = episode_range
+        if "-" not in episode_range:
+            episode_value = float(episode_range) if "." in episode_range else int(episode_range)
+        return {
+            "steps": [{
+                "tool": "anipy_download",
+                "argument": json.dumps({
+                    "query": match.group(1).strip(),
+                    "episodes": episode_value,
+                    "language": (match.group(3) or default_language).lower(),
+                }),
+            }]
+        }
+
+    match = re.match(
+        r"^(?:download|save)\s+(?:the\s+)?(?:anime\s+)?(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match and not re.search(r"\b(?:episode|episodes)\b", match.group(1), re.IGNORECASE):
+        return {"steps": [{"tool": "anipy_cli", "argument": "-D"}]}
+
+    match = re.match(
+        r"^(?:watch|play|stream)\s+(?:the\s+)?(?:anime\s+)?(.+?)\s+"
+        r"episode\s+([0-9]+(?:\.[0-9]+)?(?:\s*-\s*[0-9]+(?:\.[0-9]+)?)?)"
+        r"(?:\s+(sub|dub))?$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        episode_range = re.sub(r"\s+", "", match.group(2))
+        lang = (match.group(3) or default_language).lower()
+        query = match.group(1).strip()
+        args = ["-s", f"{query}:{episode_range}:{lang}"]
+        if "-" in episode_range:
+            args = ["-B", "-s", f"{query}:{episode_range}:{lang}"]
+        return {"steps": [{"tool": "anipy_cli", "argument": json.dumps({"args": args})}]}
+
+    match = re.match(
+        r"^(?:watch|play)\s+(?:the\s+)?(?:anime\s+)?(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        return {"steps": [{"tool": "anipy_cli", "argument": ""}]}
+
+    return None
+
+
 def deterministic_route(user_request, active_context=None):
 
 
@@ -1581,6 +1743,15 @@ def deterministic_route(user_request, active_context=None):
         print("JARVIS: Software/gameplay follow-up detected.")
         return None
 
+
+    # ==================================================
+    # ANIPY-CLI / ANIME
+    # ==================================================
+
+    anipy_plan = build_anipy_plan(user_request)
+    if anipy_plan:
+        print("JARVIS: anipy-cli route selected.")
+        return anipy_plan
 
     # Project filename lookups must run before generic browser "find/search" routes.
     project_file_plan = build_project_file_lookup_plan(user_request)
