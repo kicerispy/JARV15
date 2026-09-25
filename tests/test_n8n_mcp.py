@@ -205,6 +205,62 @@ class N8nMcpTests(unittest.TestCase):
         self.assertIsNone(plan)
         self.assertIn("n8n_mcp__create_workflow", scope)
 
+    def test_build_execution_inputs_matches_n8n_execute_schema(self):
+        context = {
+            "location": "Chicago",
+            "workflow_class": "orchestration",
+        }
+
+        self.assertEqual(
+            n8n_mcp._build_execution_inputs(
+                {"kind": "chat"},
+                "What's the weather?",
+                context,
+            ),
+            {"chatInput": "What's the weather?"},
+        )
+
+        self.assertEqual(
+            n8n_mcp._build_execution_inputs(
+                {"kind": "webhook"},
+                "Run the automation",
+                context,
+            ),
+            {
+                "webhookData": {
+                    "method": "POST",
+                    "body": {
+                        "location": "Chicago",
+                        "workflow_class": "orchestration",
+                        "request": "Run the automation",
+                    },
+                }
+            },
+        )
+
+        self.assertEqual(
+            n8n_mcp._build_execution_inputs(
+                {"kind": "form"},
+                "Submit this",
+                context,
+            ),
+            {
+                "formData": {
+                    "location": "Chicago",
+                    "workflow_class": "orchestration",
+                    "request": "Submit this",
+                }
+            },
+        )
+
+        self.assertIsNone(
+            n8n_mcp._build_execution_inputs(
+                {"kind": "manual"},
+                "Run it",
+                context,
+            )
+        )
+
     def test_run_workflow_request_selects_mcp_workflow_and_polls(self):
         tool_calls = [
             {
