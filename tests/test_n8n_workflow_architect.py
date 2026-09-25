@@ -703,7 +703,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             {"name": "Slack", "nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
         ]
         requirements = architect._requirements(
-            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            "Monitor GitHub issues, summarize bugs, and send me a Slack alert.",
             ["monitoring", "content_generation", "notification"],
         )
         gate = architect._quality_gate(
@@ -763,7 +763,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
 
     def test_quality_gate_accepts_schema_backed_summarization_not_in_ranked_candidates(self):
-        request = "Monitor GitHub issues, summarize bugs, and send me an alert."
+        request = "Monitor GitHub issues, summarize bugs, and send me a Slack alert."
         candidates = [
             {
                 "name": "GitHub Trigger",
@@ -900,7 +900,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
 
     def test_discover_nodes_backfills_missing_required_capabilities(self):
-        request = "Monitor GitHub issues, summarize bugs, and send me an alert"
+        request = "Monitor GitHub issues, summarize bugs, and send me a Slack alert"
 
         def fake_call(tool_name, arguments=None):
             self.assertEqual(tool_name, "search_nodes")
@@ -1053,7 +1053,7 @@ export type RetiredNode = {
 
     def test_external_alerts_are_treated_as_side_effects(self):
         requirements = architect._requirements(
-            "Monitor GitHub issues and send me an alert when a bug appears.",
+            "Monitor GitHub issues and send me a Slack alert when a bug appears.",
             ["monitoring"],
         )
 
