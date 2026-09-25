@@ -10,6 +10,8 @@ import psutil
 from logger import logger
 import runtime_health
 from healing_kernel import healing_status
+from local_memory import memory_status
+from resilience_kernel import tool_health_status
 
 
 _start_time = time.time()
@@ -31,6 +33,8 @@ def get_status(model: str = "") -> str:
         status = collect_status()
         health = status["health"]
         healing = healing_status()
+        memory = memory_status()
+        tool_health = tool_health_status(limit=5)
 
         model_text = model.strip() if model else "configured models"
         return (
@@ -48,6 +52,8 @@ def get_status(model: str = "") -> str:
             f"Self-healing: {'ENABLED' if healing.get('enabled') else 'DISABLED'}\n"
             f"Healing journal: {healing.get('events', 0)} events; "
             f"budget {healing.get('max_attempts', 0)} attempt(s)\n"
+            f"Local memory: {memory.get('records', 0)} records\n"
+            f"Degraded tools: {len(tool_health.get('degraded_tools', []))}\n"
             f"Models: {model_text}"
         )
     except Exception as exc:
