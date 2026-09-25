@@ -33,6 +33,7 @@ import task_memory
 import jarvis_doctor
 import local_memory
 import resilience_kernel
+from healing_kernel import healing_history
 from model_manager import ModelManager
 
 from config import (
@@ -3679,6 +3680,83 @@ def _run_tool_raw(
                 pass
 
         return local_memory.forget(query)
+
+    elif tool_name == "healing_history":
+
+        raw = str(argument or "").strip()
+        try:
+            limit = int(raw) if raw else 10
+        except (TypeError, ValueError):
+            limit = 10
+
+        return {
+            "success": True,
+            "verified": True,
+            "events": healing_history(limit=limit),
+        }
+
+    elif tool_name == "tool_reset":
+
+        name = str(argument or "").strip()
+
+        if name:
+            try:
+                payload = json.loads(name)
+                if isinstance(payload, dict):
+                    name = str(payload.get("tool", "") or "").strip()
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return {
+            "success": bool(name),
+            "verified": bool(name),
+            "tool": name,
+            "reset": resilience_kernel.get_resilience().reset_tool(name)
+            if name
+            else False,
+            "message": (
+                f"Reset resilience state for {name}."
+                if name
+                else "Tool name is required."
+            ),
+        }
+
+    elif tool_name == "memory_status":
+
+        return local_memory.memory_status()
+
+    elif tool_name == "jarvis_capabilities":
+
+        from tool_registry import (
+            BROWSER_TOOLS,
+            JARVIS_PLATFORM_TOOLS,
+            N8N_TOOLS,
+        )
+
+        inventory = {
+            "browser": sorted(BROWSER_TOOLS),
+            "n8n": sorted(N8N_TOOLS),
+            "platform": sorted(JARVIS_PLATFORM_TOOLS),
+        }
+
+        try:
+            from roblox_mcp import get_roblox_planner_tools
+
+            inventory["roblox"] = sorted(
+                get_roblox_planner_tools().keys()
+            )
+        except Exception:
+            inventory["roblox"] = []
+
+        return {
+            "success": True,
+            "verified": True,
+            "categories": {
+                key: len(value)
+                for key, value in inventory.items()
+            },
+            "tools": inventory,
+        }
 
     elif tool_name == "ollama_models":
 
