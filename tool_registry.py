@@ -23,6 +23,19 @@ N8N_TOOLS = frozenset(
 )
 
 
+ANIPY_TOOLS = frozenset(
+    {
+        "anipy_cli",
+        "anipy_providers",
+        "anipy_search",
+        "anipy_info",
+        "anipy_episodes",
+        "anipy_get_video",
+        "anipy_download",
+    }
+)
+
+
 BROWSER_TOOLS = frozenset(
     {
         "browser_connect",
@@ -77,6 +90,12 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "product_research",
         "code_diagnose",
         "dev_command",
+        "anipy_providers",
+        "anipy_search",
+        "anipy_info",
+        "anipy_episodes",
+        "anipy_get_video",
+        "anipy_download",
     }
 )
 
@@ -91,5 +110,6 @@ def validate_known_tools(tool_names) -> list[str]:
         if str(name) not in BROWSER_TOOLS
         and str(name) not in JSON_ARGUMENT_TOOLS
         and str(name) not in N8N_TOOLS
+        and str(name) not in ANIPY_TOOLS
         and not is_roblox_tool_name(name)
     )
