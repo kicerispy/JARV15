@@ -1886,6 +1886,67 @@ def test_failed_diagnostic_routes_directly_to_repair_handoff():
 
 
 
+def test_deterministic_fast_plan_does_not_replan_after_tool_failure(monkeypatch):
+    import tool_executor
+
+    planner_calls = []
+
+    def unexpected_plan(*args, **kwargs):
+        planner_calls.append((args, kwargs))
+        raise AssertionError("deterministic fast plan must not call the LLM replanner")
+
+    def failing_executor(plan, active_context, task_state, speak_callback):
+        tool_executor.LAST_EXECUTION_TRACE = [
+            {
+                "index": 1,
+                "tool": "anipy_search",
+                "argument": '{"query":"Cowboy Bebop"}',
+                "status": "failed",
+                "success": False,
+                "verified": False,
+                "result": {
+                    "success": False,
+                    "retryable": True,
+                    "message": "Provider unavailable",
+                },
+                "message": "Provider unavailable",
+                "retryable": True,
+                "terminal": False,
+            }
+        ]
+        return "failed"
+
+    agent = JarvisAgent(
+        planner=unexpected_plan,
+        executor=failing_executor,
+    )
+
+    task = agent.create_task("search anime Cowboy Bebop")
+    task.planner_result = {
+        "goal": "search anime Cowboy Bebop",
+        "steps": [
+            {
+                "tool": "anipy_search",
+                "argument": '{"query":"Cowboy Bebop"}',
+            }
+        ],
+    }
+    task.allow_replanning = False
+    task.steps = agent._build_steps(task.planner_result)
+    task.status = "ready"
+
+    completed = agent.execute_task(
+        task,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "failed"
+    assert completed.replan_count == 0
+    assert planner_calls == []
+
+
 class ReadOnlyThenChangePlanner:
     def __init__(self):
         self.calls = []

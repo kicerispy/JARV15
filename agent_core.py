@@ -134,6 +134,11 @@ class AgentTask:
 
     max_replans: int = 2
 
+    # Deterministic fast routes already have an explicit plan and should not
+    # invoke the expensive LLM replanner when a tool/provider fails. Their
+    # tool-level retry/recovery remains active, but the plan itself is fixed.
+    allow_replanning: bool = True
+
     current_step: int = -1
 
     created_at: float = field(
@@ -3740,6 +3745,34 @@ class JarvisAgent:
             # ------------------------------------------------
 
             if result == "failed":
+
+                # Deterministic fast routes already have a complete plan.
+                # Tool-level retries have already happened inside the executor;
+                # do not escalate a transient provider/tool failure into the
+                # expensive global Ollama replanner. The fixed plan must fail
+                # cleanly and report the concrete tool error instead.
+                if not task.allow_replanning:
+                    task.status = "failed"
+                    task.completed_at = time.time()
+
+                    self.state["last_result"] = task.execution_result
+                    self.state["last_status"] = task.status
+                    self.state["last_error"] = task.error
+                    self.state["replans"] = task.replan_count
+
+                    logger.warning(
+                        "JARVIS AGENT: Deterministic plan failed; "
+                        "skipping LLM replanning."
+                    )
+
+                    self._announce(
+                        task.error or "I wasn't able to complete the task.",
+                        speak_callback,
+                    )
+
+                    self._record_autonomy_episode(task)
+                    task_state.set_progress_callback(None)
+                    return task
 
                 # Respect the tool's explicit retryability contract at the
                 # Agent Core boundary. _execute_once() already records and

@@ -1029,9 +1029,11 @@ def process_command(
                 )
 
                 # The fast router already produced the plan.
-                # Do not spend another LLM call planning the same
-                # task. Give the existing agent the deterministic
-                # plan and let its execution/replan loop manage it.
+                # Do not spend another LLM call planning the same task.
+                # Deterministic fast plans also must not invoke the global
+                # Ollama replanner if a tool/provider fails; the executor's
+                # own bounded retry/recovery remains in effect.
+                agent_task.allow_replanning = False
                 agent_task.planner_result = fast_plan
 
                 agent_task.goal = str(
