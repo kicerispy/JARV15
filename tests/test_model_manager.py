@@ -11,6 +11,7 @@ class ModelManagerTests(unittest.TestCase):
 
         self.assertEqual(manager.chat_model, "qwen3.5:9b")
         self.assertEqual(manager.planner_model, "qwen3.5:9b")
+        self.assertEqual(manager.change_planner_model, "qwen3.5:9b")
         self.assertEqual(manager.coding_model, "qwen2.5-coder:14b")
         self.assertEqual(manager.coding_fallback_model, "gemma4:26b")
         self.assertEqual(manager.coding_num_ctx, 8192)
