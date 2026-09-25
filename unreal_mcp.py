@@ -251,7 +251,7 @@ def _external_repo() -> Path:
     return (
         Path(os.path.expandvars(os.path.expanduser(raw))).resolve()
         if raw
-        else Path.cwd().resolve() / "external-tools" / "Unreal_mcp"
+        else Path.cwd().resolve() / ".jarvis_external" / "Unreal_mcp"
     )
 
 
