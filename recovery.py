@@ -204,8 +204,11 @@ def retry_with_recovery(
                 # and code defects belong to Agent Core's evidence/replan
                 # workflow rather than another blind local retry.
                 if (
-                    not result.retryable
-                    or decision.action in {"replan", "repair_code", "stop", "escalate"}
+                    decision.action in {"replan", "repair_code", "stop", "escalate"}
+                    or (
+                        not result.retryable
+                        and decision.action != "repair_argument"
+                    )
                 ):
                     return {
                         "success": False,
