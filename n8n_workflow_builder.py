@@ -22,6 +22,12 @@ DEFAULT_MODEL = os.getenv("JARVIS_N8N_BUILDER_MODEL", os.getenv("JARVIS_CODING_M
 DEFAULT_TIMEOUT = 180
 MAX_ARCHITECT_CONTEXT = 24000
 MAX_REPAIR_ATTEMPTS = 2
+PROGRESS_ENABLED = os.getenv("JARVIS_N8N_BUILDER_PROGRESS", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _progress(stage: str) -> None:
+    if PROGRESS_ENABLED:
+        print(f"[JARVIS][n8n-builder] {stage}", flush=True)
 
 
 def _clean(value: Any) -> str:
@@ -347,6 +353,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     folder_id = _clean(arguments.get("folder_id")) or None
     timeout = int(arguments.get("test_timeout", 300) or 300)
 
+    _progress("architecture: discovering n8n capabilities")
     design = design_workflow(request, arguments.get("context"))
     if (
         design.get("quality_gate", {}).get("ready_to_build")
@@ -364,6 +371,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     attempts: List[Dict[str, Any]] = []
 
     for attempt in range(MAX_REPAIR_ATTEMPTS + 1):
+        _progress(f"compile/validate: attempt {attempt + 1}/{MAX_REPAIR_ATTEMPTS + 1}")
         if not code:
             try:
                 generated = _ollama_json(_compiler_prompt(design))
@@ -424,6 +432,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         )
         code = str(repaired.get("code") or "").strip()
 
+    _progress("create: sending validated workflow to n8n")
     create_result = _create_workflow(
         code,
         name or "JARVIS Generated Workflow",
@@ -451,6 +460,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
             creation=create_result,
         )
 
+    _progress("verify: fetching saved workflow graph")
     verification = _verify_saved_workflow(workflow_id)
     if verification.get("success") is not True:
         return _failed(
@@ -462,11 +472,13 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         )
 
     workflow = verification["workflow"]
+    _progress("test: preparing pin data and executing workflow")
     test_result = (
         _test_workflow(workflow_id, workflow, timeout)
         if test_requested
         else None
     )
+    _progress("audit: checking live workflow graph")
     audit_result = audit_workflow(workflow_id)
 
     audit_ready = bool(
@@ -497,6 +509,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
                 audit=audit_result,
             )
 
+        _progress("publish: activation gate passed; publishing workflow")
         published = call_tool(
             "publish_workflow",
             {"workflowId": workflow_id},
