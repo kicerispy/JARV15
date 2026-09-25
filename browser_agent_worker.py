@@ -344,17 +344,15 @@ async def _navigate_directly_with_cdp(
         return False
 
 
-def _build_jarvis_tools():
-    """Expose deterministic JARVIS browser primitives to Browser Use.
+def _build_jarvis_tools(llm):
+    """Expose JARVIS-named deterministic browser tools on Browser Use's CDP session.
 
-    The bridge is only attached when advanced mode enables it. Each action
-    calls the existing JARVIS browser controller so Browser Use can fall back
-    to the same hardened DOM/recovery logic used by deterministic routes.
+    These actions intentionally use the Browser Use Page/Element actor instead
+    of importing JARVIS's Playwright launcher, preventing a second Chromium
+    process or competing Playwright context inside the isolated worker.
     """
     from browser_use.agent.views import ActionResult
     from browser_use.tools.service import Tools
-
-    import browser_controller
 
     tools = Tools()
 
@@ -380,96 +378,219 @@ def _build_jarvis_tools():
     @tools.registry.action(
         description=(
             "Read the current JARVIS-controlled browser page info "
-            "(URL, title, and status). Prefer this before repeating navigation."
+            "(URL and title). Prefer this before repeating navigation."
         )
     )
-    async def jarvis_page_info():
+    async def jarvis_page_info(browser_session):
         return _result(
-            await asyncio.to_thread(browser_controller.browser_page_info),
+            {
+                "success": True,
+                "url": await browser_session.get_current_page_url(),
+                "title": await browser_session.get_current_page_title(),
+            },
             "page_info",
         )
 
     @tools.registry.action(
         description=(
             "Read a bounded structured snapshot of the current page using "
-            "JARVIS's Playwright DOM observer."
+            "the shared Browser Use CDP page."
         )
     )
-    async def jarvis_page_snapshot(max_links: int = 20):
+    async def jarvis_page_snapshot(browser_session, max_links: int = 20):
         bounded = max(1, min(int(max_links), 50))
+        page = await browser_session.must_get_current_page()
+        result = await page.evaluate(
+            """(limit) => {
+                const text = (document.body?.innerText || '').trim();
+                const links = Array.from(document.querySelectorAll('a'))
+                    .filter(a => a.offsetParent !== null)
+                    .slice(0, limit)
+                    .map(a => ({
+                        text: (a.innerText || a.getAttribute('aria-label') || '').trim(),
+                        href: a.href || ''
+                    }));
+                return {
+                    url: location.href,
+                    title: document.title || '',
+                    text: text.slice(0, 6000),
+                    links
+                };
+            }""",
+            bounded,
+        )
         return _result(
-            await asyncio.to_thread(
-                browser_controller.browser_page_snapshot,
-                bounded,
-            ),
+            {"success": True, "snapshot": json.loads(result)},
             "page_snapshot",
         )
 
     @tools.registry.action(
         description=(
             "Find visible text in the current page and return nearby readable "
-            "context. Use this for deterministic text verification."
+            "context for deterministic verification."
         )
     )
     async def jarvis_find_text(
+        browser_session,
         query: str,
         context_chars: int = 120,
         max_matches: int = 3,
     ):
+        requested = " ".join(str(query or "").split()).strip()
+        if not requested:
+            return ActionResult(error="Text query cannot be empty.")
+
+        context = max(40, min(int(context_chars), 500))
+        limit = max(1, min(int(max_matches), 10))
+        page = await browser_session.must_get_current_page()
+        result = await page.evaluate(
+            """(args) => {
+                const haystack = document.body?.innerText || '';
+                const needle = args.query.toLowerCase();
+                const source = haystack.toLowerCase();
+                const matches = [];
+                let cursor = 0;
+                while (matches.length < args.limit) {
+                    const index = source.indexOf(needle, cursor);
+                    if (index < 0) break;
+                    matches.push({
+                        text: haystack.slice(
+                            Math.max(0, index - args.context),
+                            Math.min(haystack.length, index + args.query.length + args.context)
+                        ),
+                        index
+                    });
+                    cursor = index + Math.max(1, args.query.length);
+                }
+                return {
+                    query: args.query,
+                    total_visible_matches: needle ? source.split(needle).length - 1 : 0,
+                    matches
+                };
+            }""",
+            {
+                "query": requested,
+                "context": context,
+                "limit": limit,
+            },
+        )
         return _result(
-            await asyncio.to_thread(
-                browser_controller.browser_find_text,
-                query,
-                max(40, min(int(context_chars), 500)),
-                max(1, min(int(max_matches), 10)),
-            ),
+            {"success": True, "result": json.loads(result)},
             "find_text",
         )
 
     @tools.registry.action(
         description=(
-            "Find a page element with JARVIS's hardened DOM locator logic. "
-            "Use selector, visible text, ARIA role, or accessible name."
+            "Find a page element using CSS selector, visible text, ARIA role, "
+            "or accessible name and return its basic DOM information."
         )
     )
     async def jarvis_find_element(
+        browser_session,
         selector: str = "",
         text: str = "",
         role: str = "",
         name: str = "",
     ):
-        return _result(
-            await asyncio.to_thread(
-                browser_controller.browser_find_element,
-                selector,
-                text,
-                role,
-                name,
-            ),
-            "find_element",
+        page = await browser_session.must_get_current_page()
+        result = await page.evaluate(
+            """(args) => {
+                let nodes = [];
+                if (args.selector) {
+                    try {
+                        nodes = Array.from(document.querySelectorAll(args.selector));
+                    } catch (error) {
+                        return {success: false, error: 'Invalid CSS selector: ' + error.message};
+                    }
+                } else {
+                    nodes = Array.from(document.querySelectorAll('*'));
+                }
+
+                const wantedText = (args.text || '').trim().toLowerCase();
+                const wantedRole = (args.role || '').trim().toLowerCase();
+                const wantedName = (args.name || '').trim().toLowerCase();
+
+                const visible = nodes.filter(node => {
+                    const style = window.getComputedStyle(node);
+                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+                    const nodeText = (node.innerText || node.textContent || '').trim().toLowerCase();
+                    const nodeRole = (node.getAttribute('role') || '').trim().toLowerCase();
+                    const nodeName = (
+                        node.getAttribute('aria-label')
+                        || node.getAttribute('name')
+                        || node.innerText
+                        || ''
+                    ).trim().toLowerCase();
+
+                    if (wantedText && !nodeText.includes(wantedText)) return false;
+                    if (wantedRole && nodeRole !== wantedRole) return false;
+                    if (wantedName && !nodeName.includes(wantedName)) return false;
+                    return true;
+                }).slice(0, 5);
+
+                return {
+                    success: true,
+                    count: visible.length,
+                    elements: visible.map(node => ({
+                        tag: node.tagName.toLowerCase(),
+                        text: (node.innerText || node.textContent || '').trim().slice(0, 500),
+                        role: node.getAttribute('role') || '',
+                        name: node.getAttribute('aria-label') || node.getAttribute('name') || ''
+                    }))
+                };
+            }""",
+            {
+                "selector": selector.strip(),
+                "text": text.strip(),
+                "role": role.strip(),
+                "name": name.strip(),
+            },
         )
+        return _result(json.loads(result), "find_element")
 
     @tools.registry.action(
         description=(
-            "Click a page element through JARVIS's hardened DOM controller. "
-            "Use only when the user task explicitly requires the click."
+            "Click a page element through the shared Browser Use element actor. "
+            "Use only when the user's task explicitly requires the click."
         )
     )
     async def jarvis_click_element(
+        browser_session,
         selector: str = "",
         text: str = "",
         role: str = "",
         name: str = "",
     ):
-        return _result(
-            await asyncio.to_thread(
-                browser_controller.browser_click_element,
-                selector,
-                text,
-                role,
-                name,
-            ),
-            "click_element",
+        page = await browser_session.must_get_current_page()
+        element = None
+
+        if selector.strip():
+            elements = await page.get_elements_by_css_selector(selector.strip())
+            if elements:
+                element = elements[0]
+        else:
+            prompt_parts = []
+            if text.strip():
+                prompt_parts.append(f"visible text '{text.strip()}'")
+            if role.strip():
+                prompt_parts.append(f"ARIA role '{role.strip()}'")
+            if name.strip():
+                prompt_parts.append(f"accessible name '{name.strip()}'")
+            prompt = "click the element matching " + ", ".join(
+                prompt_parts or ["the requested target"]
+            )
+            element = await page.get_element_by_prompt(prompt, llm)
+
+        if element is None:
+            return ActionResult(
+                error="JARVIS bridge could not find the requested element to click."
+            )
+
+        await element.click()
+        return ActionResult(
+            extracted_content="JARVIS bridge clicked the requested element.",
+            long_term_memory="JARVIS bridge click_element completed successfully.",
         )
 
     return tools
@@ -548,7 +669,7 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
         browser_tools = (
-            _build_jarvis_tools()
+            _build_jarvis_tools(llm)
             if settings["enable_jarvis_tools"]
             else None
         )
