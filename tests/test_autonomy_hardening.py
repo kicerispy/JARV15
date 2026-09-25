@@ -87,6 +87,32 @@ def test_architectural_benchmark_requires_design_workflow():
     assert workflow.requires_design is True
 
 
+def test_failed_code_test_is_explicitly_retryable(monkeypatch):
+    class Completed:
+        returncode = 1
+        stdout = "1 failed"
+        stderr = "assertion failed"
+
+    monkeypatch.setattr(
+        tools.subprocess,
+        "run",
+        lambda *args, **kwargs: Completed(),
+    )
+
+    result = tools.code_test(
+        json.dumps(
+            {
+                "mode": "pytest",
+                "path": "tests/test_superpowers_engine.py",
+            }
+        )
+    )
+
+    assert result["success"] is False
+    assert result["verified"] is False
+    assert result["retryable"] is True
+
+
 def test_code_test_git_diff_check_is_a_verified_tool_mode(monkeypatch):
     class Completed:
         returncode = 0
