@@ -812,26 +812,66 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         {"nodeIds": refs},
     )
 
-    if result.get("success") is not True:
-        return {
-            "success": False,
-            "message": str(result.get("message") or "get_node_types failed"),
-            "definitions": [],
-            "schema_errors": [],
-            "invalid_node_ids": [],
-            "deprecated_node_ids": [],
-            "schema_failures": [str(result.get("message") or "get_node_types failed")],
-        }
+    if result.get("success") is not True or not _schema_result_is_valid(result):
+        message = str(
+            result.get("message")
+            or "get_node_types returned no usable schema"
+        )
+        # Keep the historical discriminator-recovery behavior, but bound it to
+        # the already-selected node set. A failed batch becomes at most N small
+        # requests, never an unbounded discovery loop.
+        individual_definitions: List[Dict[str, Any]] = []
+        individual_texts: List[str] = []
+        individual_failures: List[str] = []
+        for ref in refs:
+            fallback = _call(
+                "get_node_types",
+                {"nodeIds": [{"nodeId": ref["nodeId"]}]},
+            )
+            if fallback.get("success") is not True or not _schema_result_is_valid(fallback):
+                individual_failures.append(
+                    f"{ref.get('nodeId')}: "
+                    f"{fallback.get('message') or message}"
+                )
+                continue
+            fallback_defs = _structured_result_list(
+                fallback,
+                ("nodeTypes", "definitions", "results"),
+            )
+            fallback_text = _result_text(
+                fallback,
+                ("definitions", "documentation", "content"),
+            )
+            if fallback_defs:
+                individual_definitions.extend(fallback_defs)
+            elif fallback_text:
+                individual_definitions.extend(
+                    _definition_items_from_text(fallback_text)
+                )
+            if fallback_text:
+                individual_texts.append(fallback_text)
 
-    if not _schema_result_is_valid(result):
+        if individual_definitions or individual_texts:
+            definition_text = "\n\n".join(individual_texts)
+            return {
+                "success": True,
+                "message": f"Retrieved schemas with bounded fallback after batch failure.",
+                "definitions": individual_definitions,
+                "definition_text": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
+                "schema_errors": [],
+                "invalid_node_ids": [],
+                "deprecated_node_ids": [],
+                "schema_failures": _unique_strings(individual_failures),
+            }
+
         return {
             "success": False,
-            "message": str(result.get("message") or "get_node_types returned no usable schema"),
+            "message": message,
             "definitions": [],
             "schema_errors": [],
             "invalid_node_ids": [],
             "deprecated_node_ids": [],
-            "schema_failures": [str(result.get("message") or "get_node_types returned no usable schema")],
+            "schema_failures": _unique_strings(individual_failures or [message]),
         }
 
     definitions = _structured_result_list(
