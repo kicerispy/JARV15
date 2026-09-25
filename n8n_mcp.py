@@ -533,13 +533,46 @@ def _score_workflow(request: str, workflow: Dict[str, Any]) -> float:
     return score
 
 
+def _workflow_search_queries(
+    request: str,
+    workflow_class: str,
+) -> List[str]:
+    """Build progressively broader queries for n8n's name/description search."""
+    request_text = " ".join(str(request or "").split()).strip()
+    class_text = " ".join(str(workflow_class or "").split()).strip()
+
+    queries: List[str] = []
+    if request_text:
+        queries.append(request_text)
+
+    stopwords = {
+        "a", "an", "and", "for", "from", "in", "into", "me", "my",
+        "of", "on", "please", "run", "the", "to", "use", "with",
+    }
+    keywords = [
+        token.strip(".,!?;:()[]{}\"'")
+        for token in request_text.split()
+        if token.strip(".,!?;:()[]{}\"'").lower() not in stopwords
+        and len(token.strip(".,!?;:()[]{}\"'")) >= 3
+    ]
+    if keywords:
+        keyword_query = " ".join(keywords)
+        if keyword_query not in queries:
+            queries.append(keyword_query)
+
+    if class_text and class_text not in queries:
+        queries.append(class_text)
+
+    return queries
+
+
 def _select_workflow(
     request: str,
     workflow_class: str,
 ) -> Optional[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
 
-    for query in (request, workflow_class):
+    for query in _workflow_search_queries(request, workflow_class):
         result = call_tool(
             "search_workflows",
             {
