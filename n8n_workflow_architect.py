@@ -482,10 +482,10 @@ def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, int, 
     )
 
     capability_hits = 0
-    for capability, markers in _required_capabilities(request):
+    for capability, _markers in _required_capabilities(request):
         if capability == "trigger":
             continue
-        if any(marker in haystack for marker in markers):
+        if _capability_matches_node(capability, item):
             capability_hits += 1
 
     trigger_bonus = 1 if _is_start_trigger_type(item.get("type")) else 0
@@ -956,25 +956,26 @@ def _capability_matches_node(capability: str, item: Dict[str, Any]) -> bool:
         )
 
     if capability == "summarization":
-        return bool(
-            {
+        return any(
+            marker in identity
+            for marker in (
                 "openai",
                 "gemini",
                 "claude",
                 "anthropic",
                 "grok",
                 "textgenerator",
-                "llm",
+                "text generator",
                 "basicllm",
-            }
-            & tokens
-        ) or "text generation" in identity
+                "basic llm",
+            )
+        ) or ("llm" in identity and "classifier" not in identity)
 
     if capability == "condition":
         return bool({"if", "switch", "filter", "router"} & tokens)
 
     if capability == "notification":
-        action_markers = {
+        action_markers = (
             "slack",
             "email",
             "gmail",
@@ -983,11 +984,14 @@ def _capability_matches_node(capability: str, item: Dict[str, Any]) -> bool:
             "teams",
             "twilio",
             "notification",
-        }
-        if not (action_markers & tokens):
+        )
+        if not any(marker in identity for marker in action_markers):
             return False
         # Trigger nodes monitor events; they should not satisfy a notification action.
-        if "trigger" in tokens and not ({"send", "message", "notification"} & tokens):
+        if "trigger" in tokens and not (
+            {"send", "message", "notification"} & tokens
+            or " send" in identity
+        ):
             return False
         return True
 
