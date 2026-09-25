@@ -4192,3 +4192,124 @@ def create_plan(command, *args, **kwargs):
         *args,
         **kwargs,
     )
+
+
+# ============================================================
+# DETERMINISTIC JARVIS QOL PREFLIGHT
+# ============================================================
+#
+# Simple self-observability requests should remain local and
+# instantaneous. Preserve normal model planning for everything else.
+
+_create_plan_original_qol = create_plan
+
+
+def _qol_plan(command):
+    text = str(command or "").strip()
+    lowered = text.lower()
+
+    if not lowered:
+        return None
+
+    quick_phrases = (
+        "is jarvis ready",
+        "is jarvis working",
+        "is jarvis healthy",
+        "check jarvis",
+        "jarvis health check",
+        "jarvis quick check",
+        "run a jarvis check",
+    )
+    if any(phrase in lowered for phrase in quick_phrases):
+        return {
+            "goal": "check jarvis readiness",
+            "steps": [{"tool": "jarvis_quickcheck", "argument": ""}],
+        }
+
+    if (
+        "cpu usage" in lowered
+        or "ram usage" in lowered
+        or "memory usage" in lowered
+        or "disk usage" in lowered
+        or "resource usage" in lowered
+        or "system resources" in lowered
+    ):
+        return {
+            "goal": "inspect system resources",
+            "steps": [{"tool": "resource_status", "argument": ""}],
+        }
+
+    if (
+        "top processes" in lowered
+        or "busiest processes" in lowered
+        or "what is using my cpu" in lowered
+        or "what is using the most cpu" in lowered
+        or "what is using my memory" in lowered
+        or "what is using the most memory" in lowered
+    ):
+        return {
+            "goal": "inspect active processes",
+            "steps": [{"tool": "process_snapshot", "argument": "8"}],
+        }
+
+    if (
+        "jarvis project status" in lowered
+        or "git status" in lowered
+        or "repo status" in lowered
+        or "repository status" in lowered
+    ):
+        return {
+            "goal": "inspect project status",
+            "steps": [{"tool": "project_snapshot", "argument": ""}],
+        }
+
+    if (
+        "is ollama running" in lowered
+        or "is n8n running" in lowered
+        or "check local services" in lowered
+        or "check ollama" in lowered
+    ):
+        service = "ollama"
+        if "n8n" in lowered and "ollama" not in lowered:
+            service = "n8n"
+        elif "local services" in lowered:
+            service = "all"
+
+        return {
+            "goal": "check local services",
+            "steps": [{"tool": "service_status", "argument": service}],
+        }
+
+    if (
+        "what keeps failing" in lowered
+        or "show healing hints" in lowered
+        or "show recovery hints" in lowered
+        or "what has jarvis learned from failures" in lowered
+    ):
+        return {
+            "goal": "inspect learned healing patterns",
+            "steps": [
+                {
+                    "tool": "healing_hints",
+                    "argument": json.dumps({"limit": 5}),
+                }
+            ],
+        }
+
+    return None
+
+
+def create_plan(command, *args, **kwargs):
+    qol = _qol_plan(command)
+    if qol is not None:
+        print(
+            "JARVIS DEBUG: deterministic QoL preflight -> "
+            f"{qol['steps'][0]['tool']}"
+        )
+        return qol
+
+    return _create_plan_original_qol(
+        command,
+        *args,
+        **kwargs,
+    )
