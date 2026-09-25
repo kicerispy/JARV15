@@ -6,6 +6,22 @@ import n8n_workflow_architect as architect
 
 class N8nWorkflowArchitectTests(unittest.TestCase):
 
+    def test_unspecified_alert_uses_local_alert_output_capability(self):
+        capabilities = architect._required_capabilities(
+            "Monitor GitHub issues, summarize bugs, and send me an alert"
+        )
+        ids = [item[0] for item in capabilities]
+        self.assertIn("alert_output", ids)
+        self.assertNotIn("notification", ids)
+
+    def test_explicit_email_requires_notification_capability(self):
+        capabilities = architect._required_capabilities(
+            "Monitor GitHub issues and send me an email alert"
+        )
+        ids = [item[0] for item in capabilities]
+        self.assertIn("notification", ids)
+        self.assertNotIn("alert_output", ids)
+
     def test_infer_techniques_prefers_relevant_workflow_patterns(self):
         techniques = architect._infer_techniques(
             "Monitor GitHub issues and send an email alert when a bug appears."
