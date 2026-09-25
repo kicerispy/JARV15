@@ -1262,6 +1262,18 @@ class MalformedRequiredReadPlanner:
         }
 
 
+def test_requested_file_target_strips_leading_article():
+    assert JarvisAgent._infer_requested_file_target(
+        "repair the browser_controller.py"
+    ) == "browser_controller.py"
+
+
+def test_requested_file_target_handles_named_issue_before_filename():
+    assert JarvisAgent._infer_requested_file_target(
+        "fix the browser automation issue in browser_controller.py"
+    ) == "browser_controller.py"
+
+
 def test_requested_file_target_extractor_preserves_multi_word_names():
     from agent_core import JarvisAgent
 
