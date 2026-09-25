@@ -48,6 +48,25 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertIn("subnodes: { model: openAiModel }", prompt)
         self.assertIn("const openAiModel = languageModel({", prompt)
 
+    def test_verified_node_allowlist_includes_common_runtime_nodes(self):
+        design = self._design()
+        allowed = builder._verified_node_types(design)
+        self.assertIn("n8n-nodes-base.set", allowed)
+        self.assertIn("n8n-nodes-base.httpRequest", allowed)
+        self.assertIn("@n8n/n8n-nodes-langchain.chainLlm", allowed)
+
+    def test_compiler_retry_instruction_for_unknown_nodes(self):
+        prompt = builder._compiler_prompt(
+            self._design(),
+            sdk_reference="workflow('id', 'name')",
+            validation_error=(
+                "These node types are not present in the verified live n8n schemas: "
+                "n8n-nodes-base.fake. Do not invent node types."
+            ),
+        )
+        self.assertIn("HARD REPAIR REQUIREMENT:", prompt)
+        self.assertIn("never invent a summarize node", prompt)
+
     def test_unknown_node_type_is_rejected_against_verified_schemas(self):
         code = (
             "import { workflow } from '@n8n/workflow-sdk';\n"
