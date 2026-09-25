@@ -18,7 +18,7 @@ import certifi
 import psutil
 
 from tool_result import ToolResult
-from tool_registry import BROWSER_TOOLS
+from tool_registry import ANIME_TOOLS, BROWSER_TOOLS
 from project_fs import iter_project_files
 
 import barehands_tools
@@ -2722,9 +2722,7 @@ PRODUCT_RESEARCH_TOOLS = {
 }
 
 
-ANIME_STREAMING_TOOLS = {
-    "anime_streaming_links",
-}
+ANIME_STREAMING_TOOLS = set(ANIME_TOOLS)
 
 
 N8N_TOOLS = {
@@ -3458,9 +3456,19 @@ def _run_tool_raw(
         )
 
     if tool_name in ANIME_STREAMING_TOOLS:
-        from anime_streaming import anime_streaming_links
+        from anime_streaming import (
+            anime_availability,
+            anime_provider_catalog,
+            anime_streaming_links,
+        )
 
-        return anime_streaming_links(argument)
+        if tool_name == "anime_streaming_links":
+            return anime_streaming_links(argument)
+
+        if tool_name == "anime_availability":
+            return anime_availability(argument)
+
+        return anime_provider_catalog(argument)
 
     if tool_name in EXTENDED_API_TOOLS:
         from extended_api_tools import run_extended_api_tool
