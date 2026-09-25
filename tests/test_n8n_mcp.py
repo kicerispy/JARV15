@@ -129,6 +129,45 @@ class N8nMcpTests(unittest.TestCase):
             "Weather",
         )
 
+    def test_list_tools_omits_initial_null_cursor_and_follows_next_cursor(self):
+        responses = [
+            {
+                "tools": [
+                    {
+                        "name": "search_workflows",
+                        "description": "Search workflows",
+                        "inputSchema": {"type": "object"},
+                    }
+                ],
+                "nextCursor": "page-2",
+            },
+            {
+                "tools": [
+                    {
+                        "name": "execute_workflow",
+                        "description": "Execute a workflow",
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
+            },
+        ]
+
+        with patch.object(n8n_mcp, "initialize", return_value={}),              patch.object(n8n_mcp, "_rpc", side_effect=responses) as mocked:
+            tools = n8n_mcp.list_tools(force=True)
+
+        self.assertEqual(
+            [item["name"] for item in tools],
+            ["search_workflows", "execute_workflow"],
+        )
+        self.assertEqual(
+            mocked.call_args_list[0].args,
+            ("tools/list",),
+        )
+        self.assertEqual(
+            mocked.call_args_list[1].args,
+            ("tools/list", {"cursor": "page-2"}),
+        )
+
     def test_status_fails_closed_without_token(self):
         with patch.object(n8n_mcp, "N8N_MCP_ENABLED", True), \
              patch.object(n8n_mcp, "_token", return_value=""):
