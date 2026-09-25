@@ -2794,6 +2794,7 @@ QOL_TOOLS = {
     "process_snapshot",
     "project_snapshot",
     "service_status",
+    "dependency_status",
     "healing_hints",
 }
 
@@ -3786,6 +3787,7 @@ def _run_tool_raw(
         "process_snapshot",
         "project_snapshot",
         "service_status",
+        "dependency_status",
     }:
 
         import qol_tools
