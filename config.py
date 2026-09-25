@@ -236,10 +236,10 @@ SAMPLE_RATE = 16000
 CHUNK_SIZE = 1024
 
 # Explicitly use the microphone we have already verified.
-MIC_DEVICE = 1
+MIC_DEVICE = int(\n    os.environ.get(\n        "JARVIS_MIC_DEVICE",\n        "1",\n    )\n)
 
 # voice.py currently manages the output device itself.
-OUTPUT_DEVICE = 5
+OUTPUT_DEVICE = int(\n    os.environ.get(\n        "JARVIS_OUTPUT_DEVICE",\n        "5",\n    )\n)
 
 
 # ============================================================
@@ -349,7 +349,7 @@ CLICK_BIAS_Y = 0
 # WEATHER
 # ============================================================
 
-DEFAULT_WEATHER_LOCATION = "Belvidere, IL"
+DEFAULT_WEATHER_LOCATION = os.environ.get(\n    "JARVIS_DEFAULT_WEATHER_LOCATION",\n    "Belvidere, IL",\n).strip()
 
 WEATHER_GEOCODING_URL = (
     "https://geocoding-api.open-meteo.com/v1/search"
