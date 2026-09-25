@@ -554,6 +554,58 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertIsNotNone(result["published"])
         self.assertEqual(calls[-1], "publish_workflow")
 
+    def test_activation_blocks_medium_reliability_findings(self):
+        graph = self._graph()
+        design = self._design()
+
+        def fake_call(name, args=None):
+            if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "data": {"reference": "SDK: workflow('id', 'name')"},
+                }
+            if name == "validate_workflow":
+                return {"success": True, "verified": True, "data": {"valid": True}}
+            if name == "create_workflow_from_code":
+                return {"success": True, "data": {"workflowId": "wf-123"}}
+            if name == "get_workflow_details":
+                return {"success": True, "data": {"workflow": graph}}
+            if name == "prepare_workflow_pin_data":
+                return {"success": True, "data": {"nodeSchemasToGenerate": {}, "nodesWithoutSchema": []}}
+            if name == "test_workflow":
+                return {"success": True, "data": {"status": "success"}}
+            if name == "publish_workflow":
+                raise AssertionError("publish must be blocked")
+            raise AssertionError(name)
+
+        with patch.object(builder, "design_workflow", return_value=design),              patch.object(builder, "_ollama_json", return_value={"name": "x", "code": self.VALID_CODE}),              patch.object(builder, "call_tool", side_effect=fake_call),              patch.object(
+                 builder,
+                 "audit_workflow",
+                 return_value={
+                     "success": True,
+                     "verified": True,
+                     "quality_gate": {"ready_to_publish": True},
+                     "findings": [
+                         {
+                             "severity": "medium",
+                             "id": "missing_error_strategy",
+                             "message": "No error strategy",
+                         }
+                     ],
+                 },
+             ):
+            result = builder.build_workflow({
+                "request": "Build it",
+                "test": True,
+                "activate": True,
+            })
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["stage"], "activate_gate")
+        self.assertFalse(result["audit"]["quality_gate"]["ready_to_publish"])
+        self.assertTrue(result["audit"]["activation_blockers"])
+
     def test_activation_is_blocked_when_test_fails(self):
         graph = self._graph()
         design = self._design()
