@@ -29,6 +29,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "n8n_run_workflow": "Delegate a workflow-class task to n8n. Argument is JSON with request, workflow_class, and optional context.",
     "n8n_mcp_status": "Check the direct n8n instance-level MCP connection.",
     "n8n_mcp_list_tools": "Discover the currently exposed n8n MCP workflow/tools available to JARVIS.",
+    "n8n_workflow_architect": "Design or audit an n8n workflow using live node discovery, exact node schemas, and n8n best-practice guidance. Argument is JSON; default mode is design, audit mode requires workflow_id.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -685,6 +686,7 @@ def _planner_tool_scope(
                 "n8n_run_workflow",
                 "n8n_mcp_status",
                 "n8n_mcp_list_tools",
+                "n8n_workflow_architect",
             }
             try:
                 import config as _config
@@ -926,6 +928,8 @@ creating a GitHub issue, updating a calendar, or controlling a supported media
 service). JARVIS should not recreate an integration locally when n8n can own it.
 - Use n8n_run_workflow with JSON containing request, workflow_class, and context.
 - When direct n8n MCP tools are available, they may be used for explicit workflow discovery or execution requests; dynamic tools use the prefix n8n_mcp__ and require JSON-object arguments.
+- Prefer n8n_workflow_architect for explicit workflow creation, redesign, optimization, hardening, or audit requests before mutation.
+- The architect is read-only: it should discover real n8n nodes, retrieve exact schemas, and identify quality gaps before any create/update/publish action.
 - Prefer n8n_mcp__ tools for direct workflow inspection/execution when the user's request names a specific n8n workflow or asks JARVIS to use n8n MCP directly.
 - Do not replace an n8n workflow with local wait loops or ad-hoc JARVIS code.
 - n8n owns workflow retries, waiting, branching, and external-service state.
