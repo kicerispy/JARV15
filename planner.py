@@ -37,6 +37,10 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "memory_recall": "Recall relevant local JARVIS memories. Argument is JSON with query, limit, and optional kind.",
     "memory_forget": "Forget matching local JARVIS memories. Argument is the memory query or JSON with query.",
     "ollama_models": "List locally available Ollama models and report configured models that are missing.",
+    "healing_history": "Show recent sanitized self-healing events. Argument is an optional integer limit.",
+    "tool_reset": "Reset the resilience/circuit state for one tool. Argument is the tool name or JSON with tool.",
+    "memory_status": "Show local semantic memory counts and storage information.",
+    "jarvis_capabilities": "List JARVIS tool capabilities grouped by browser, n8n, platform, and Roblox.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -728,6 +732,56 @@ def _deterministic_platform_plan(user_command: str) -> Optional[Dict[str, Any]]:
             "steps": [{"tool": "tool_health", "argument": ""}],
             "resolved_command": user_command,
         }
+
+    if normalized in {
+        "show healing history",
+        "show self healing history",
+        "what has self healing fixed",
+        "what failures has self healing seen",
+    }:
+        return {
+            "goal": "inspect JARVIS healing history",
+            "steps": [{"tool": "healing_history", "argument": "10"}],
+            "resolved_command": user_command,
+        }
+
+    if normalized in {
+        "memory status",
+        "show memory status",
+        "how many memories do you have",
+    }:
+        return {
+            "goal": "inspect JARVIS memory status",
+            "steps": [{"tool": "memory_status", "argument": ""}],
+            "resolved_command": user_command,
+        }
+
+    if normalized in {
+        "what tools do you have",
+        "what can you do",
+        "show your capabilities",
+        "list your tools",
+        "list capabilities",
+    }:
+        return {
+            "goal": "inspect JARVIS capabilities",
+            "steps": [{"tool": "jarvis_capabilities", "argument": ""}],
+            "resolved_command": user_command,
+        }
+
+    if normalized.startswith("reset tool "):
+        tool_name = user_command.strip()[len("reset tool "):].strip()
+        if tool_name:
+            return {
+                "goal": "reset JARVIS tool resilience state",
+                "steps": [
+                    {
+                        "tool": "tool_reset",
+                        "argument": json.dumps({"tool": tool_name}),
+                    }
+                ],
+                "resolved_command": user_command,
+            }
 
     if normalized in {
         "what models do you have",
