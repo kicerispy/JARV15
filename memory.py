@@ -2,6 +2,7 @@
 JARVIS persistent memory using SQLite.
 """
 import sqlite3
+import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -14,22 +15,28 @@ class Memory:
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = Path(db_path) if db_path else DATABASE_PATH
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.RLock()
         self.create_memory()
 
     @property
     def conn(self) -> sqlite3.Connection:
         """Get or create a database connection."""
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self.db_path))
+            self._conn = sqlite3.connect(
+                str(self.db_path),
+                check_same_thread=False,
+                timeout=10.0,
+            )
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
 
     def close(self) -> None:
         """Close the database connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def create_memory(self) -> None:
         """Initialize the memories table if it doesn't exist."""
@@ -53,11 +60,12 @@ class Memory:
     def memory_exists(self, text: str) -> bool:
         """Check if a memory already exists (case-insensitive)."""
         normalized = self._normalize(text)
-        cursor = self.conn.execute(
-            "SELECT 1 FROM memories WHERE LOWER(memory) = ? LIMIT 1",
-            (normalized,)
-        )
-        return cursor.fetchone() is not None
+        with self._lock:
+            cursor = self.conn.execute(
+                "SELECT 1 FROM memories WHERE LOWER(memory) = ? LIMIT 1",
+                (normalized,)
+            )
+            return cursor.fetchone() is not None
 
     def save_memory(self, text: str) -> bool:
         """Save a memory if it doesn't already exist."""
@@ -68,11 +76,12 @@ class Memory:
             return False
 
         try:
-            self.conn.execute(
-                "INSERT INTO memories (memory) VALUES (?)",
-                (text.strip(),)
-            )
-            self.conn.commit()
+            with self._lock:
+                self.conn.execute(
+                    "INSERT INTO memories (memory) VALUES (?)",
+                    (text.strip(),)
+                )
+                self.conn.commit()
             return True
         except sqlite3.IntegrityError:
             return False
@@ -96,30 +105,34 @@ class Memory:
             query += " OFFSET ?"
             params.append(offset)
 
-        cursor = self.conn.execute(query, params)
-        memories = cursor.fetchall()
+        with self._lock:
+            cursor = self.conn.execute(query, params)
+            memories = cursor.fetchall()
         memories.reverse()  # Return in chronological order
         return memories
 
     def delete_memory(self, memory_id: int) -> bool:
         """Delete a memory by ID."""
-        cursor = self.conn.execute(
-            "DELETE FROM memories WHERE id = ?",
-            (memory_id,)
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            cursor = self.conn.execute(
+                "DELETE FROM memories WHERE id = ?",
+                (memory_id,)
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
 
     def clear_all(self) -> int:
         """Delete all memories. Returns count deleted."""
-        cursor = self.conn.execute("DELETE FROM memories")
-        self.conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self.conn.execute("DELETE FROM memories")
+            self.conn.commit()
+            return cursor.rowcount
 
     def count(self) -> int:
         """Get total memory count."""
-        cursor = self.conn.execute("SELECT COUNT(*) FROM memories")
-        return cursor.fetchone()[0]
+        with self._lock:
+            cursor = self.conn.execute("SELECT COUNT(*) FROM memories")
+            return cursor.fetchone()[0]
 
 
 # Global memory instance
