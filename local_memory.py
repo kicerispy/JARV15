@@ -125,13 +125,33 @@ def remember(
 
 def recall(query: str, *, limit: int = 5, kind: str = "") -> List[Dict[str, Any]]:
     query_tokens = _tokens(query)
-    if not query_tokens:
-        return []
 
     with _LOCK:
         records = _load()
 
     wanted_kind = str(kind or "").strip().lower()
+
+    if not query_tokens:
+        recent = [
+            item
+            for item in records
+            if not wanted_kind
+            or str(item.get("kind", "")).lower() == wanted_kind
+        ]
+        recent.sort(
+            key=lambda item: float(item.get("timestamp", 0.0) or 0.0),
+            reverse=True,
+        )
+        return [
+            {
+                "kind": str(item.get("kind", "fact")),
+                "text": str(item.get("text", "")),
+                "tags": list(item.get("tags", [])),
+                "score": 0.0,
+            }
+            for item in recent[: max(1, int(limit))]
+        ]
+
     scored = []
 
     for item in records:
