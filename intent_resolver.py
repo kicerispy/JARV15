@@ -36,6 +36,14 @@ _DOMAIN_PATTERNS = {
         "amazon",
         "reddit",
     ),
+    "unreal": (
+        "unreal",
+        "unreal engine",
+        "unreal editor",
+        "unreal mcp",
+        "ue5",
+        "ue4",
+    ),
     "code": (
         "code",
         "python",
@@ -137,7 +145,7 @@ def _domain_for(text: str, active_context: Optional[Dict[str, Any]]) -> str:
         (active_context or {}).get("site", "") or ""
     ).strip().lower()
 
-    if context_site in {"roblox", "browser", "code", "system"}:
+    if context_site in {"roblox", "browser", "unreal", "code", "system"}:
         if context_site == "roblox" and any(
             token in text
             for token in ("browser", "chrome", "google", "bing", "youtube")
@@ -183,7 +191,7 @@ def _intent_for(text: str, mode: str, domain: str) -> str:
     if any(
         term in text
         for term in ("search ", "look for ", "find ")
-    ) and domain == "browser":
+    ) and domain in {"browser", "unreal"}:
         return "search"
 
     if any(
@@ -272,6 +280,13 @@ def resolve_intent(
     evidence_request = any(text.startswith(prefix) for prefix in evidence_verbs)
     action_request = any(text.startswith(prefix) for prefix in _ACTION_STARTS)
 
+    # Unreal capability searches are inherently information-bearing: the
+    # returned capabilities are the result the user asked to see.
+    unreal_search_request = (
+        domain == "unreal"
+        and any(text.startswith(prefix) for prefix in ("search ", "look for "))
+    )
+
     # A search can be both an action and an information request. Phrases such
     # as "tell me what you find" explicitly require JARVIS to return findings.
     report_request = any(
@@ -294,6 +309,7 @@ def resolve_intent(
         or explicit_answer
         or evidence_request
         or report_request
+        or unreal_search_request
     )
 
     # Common browser actions are not informational by themselves.
