@@ -130,8 +130,10 @@ def test_roblox_health_reads_top_level_plugin_state(monkeypatch):
         "_probe_socket",
         lambda url: (True, "127.0.0.1:58741 reachable"),
     )
+    import roblox_mcp
+
     monkeypatch.setattr(
-        health,
+        roblox_mcp,
         "roblox_mcp_status",
         lambda argument="": ToolResult(
             success=True,
