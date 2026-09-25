@@ -86,7 +86,7 @@ def test_internal_change_phase_bypasses_generic_deterministic_router(monkeypatch
     )
 
     assert calls
-    assert "CHANGE IMPLEMENTATION MODE" in calls[0][0][0]["content"]
+    assert "bounded software-change planner" in calls[0][0][0]["content"]
     assert calls[0][2] == {}
     assert [step["tool"] for step in plan["steps"]] == [
         "code_checkpoint",
