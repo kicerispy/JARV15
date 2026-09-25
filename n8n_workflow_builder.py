@@ -223,7 +223,7 @@ def _unknown_node_types(
     })
 
     found: List[str] = []
-    for match in re.finditer(r"\btype\s*:\s*['"]([^'"]+)['"]", source):
+    for match in re.finditer(r'\btype\s*:\s*[\'"]([^\'"]+)[\'"]', source):
         node_type = match.group(1).strip()
         if node_type.startswith(("n8n-nodes-base.", "@n8n/")) and node_type not in allowed:
             found.append(node_type)
