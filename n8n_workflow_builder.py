@@ -279,12 +279,19 @@ def _verified_node_versions(design: Dict[str, Any]) -> Dict[str, List[str]]:
         version = item.get("version")
         if version is None:
             version = item.get("typeVersion")
-        if not node_type or version is None:
-            continue
-        value = str(version).strip()
-        if not value:
-            continue
-        versions.setdefault(node_type, []).append(value)
+        if node_type and version is not None:
+            value = str(version).strip()
+            if value:
+                versions.setdefault(node_type, []).append(value)
+
+        # Some live schema responses expose the exact node version only inside
+        # the returned TypeScript definition text rather than as a top-level
+        # field. Reuse the same guarded parser so generic parameter fields such
+        # as type: 'string' are never treated as node versions.
+        content = item.get("content")
+        if isinstance(content, str) and content.strip():
+            for content_type, content_versions in _extract_node_versions(content).items():
+                versions.setdefault(content_type, []).extend(content_versions)
     return {key: list(dict.fromkeys(value)) for key, value in versions.items()}
 
 
