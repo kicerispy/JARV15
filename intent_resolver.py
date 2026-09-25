@@ -310,6 +310,28 @@ def resolve_intent(
         or evidence_request
         or report_request
         or unreal_search_request
+        or roblox_mcp_lifecycle_request
+    )
+
+    roblox_mcp_lifecycle_request = (
+        domain == "roblox"
+        and any(
+            phrase in text
+            for phrase in (
+                "roblox mcp status",
+                "roblox mcp health",
+                "check roblox mcp",
+                "check roblox status",
+                "is roblox mcp connected",
+                "is roblox connected",
+                "setup roblox mcp",
+                "set up roblox mcp",
+                "install roblox mcp",
+                "start roblox mcp",
+                "start the roblox mcp",
+                "repair roblox mcp",
+            )
+        )
     )
 
     # Common browser actions are not informational by themselves.
