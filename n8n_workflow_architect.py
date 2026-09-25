@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 MAX_TECHNIQUES = 3
-MAX_QUERIES = 14
+MAX_QUERIES = 18
 MAX_NODE_CANDIDATES = 8
 MAX_DISCOVERED_NODE_CANDIDATES = 32
 MAX_NODE_TYPE_REQUESTS = 8
@@ -135,12 +135,16 @@ def _search_queries(request: str, techniques: Sequence[str]) -> List[str]:
         queries.extend([
             "notification",
             "email slack discord",
+            "Slack notification",
+            "Email send",
         ])
 
     if any(marker in text for marker in ("summarize", "summary", "summarizes", "generate", "write")):
         queries.extend([
             "text generation",
             "AI text generation",
+            "OpenAI text generation",
+            "LLM text generation",
         ])
 
     if any(marker in text for marker in ("bug", "condition", "when", "if")):
@@ -612,7 +616,6 @@ def _deprecated_node_ids(
 
 def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     refs: List[Dict[str, Any]] = []
-
     for item in candidates:
         ref = _node_identity(item)
         if ref:
@@ -625,58 +628,82 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             "success": False,
             "message": "No node definitions were returned by search_nodes.",
             "definitions": [],
+            "schema_errors": [],
+            "invalid_node_ids": [],
+            "deprecated_node_ids": [],
         }
 
-    result = _call(
-        "get_node_types",
-        {"nodeIds": refs},
-    )
-
-    definitions = _structured_result_list(
-        result,
-        ("nodeTypes", "definitions", "results"),
-    )
-
-    definition_text = _result_text(
-        result,
-        ("definitions", "documentation", "content"),
-    )
-
-    if not definitions and definition_text:
-        parsed_definitions = _definition_items_from_text(definition_text)
-        if parsed_definitions:
-            definitions = parsed_definitions
-
+    definitions: List[Dict[str, Any]] = []
+    definition_texts: List[str] = []
     schema_errors: List[str] = []
     invalid_node_ids: List[str] = []
-    if definition_text:
-        error_pattern = re.compile(
-            r"Error:\s*Node ['\"]([^'\"]+)['\"] (?P<message>[^\n]+)",
-            re.IGNORECASE,
+    deprecated_node_ids: List[str] = []
+    successes = 0
+    messages: List[str] = []
+
+    for ref in refs:
+        result = _call(
+            "get_node_types",
+            {"nodeIds": [ref]},
         )
-        for match in error_pattern.finditer(definition_text):
-            node_id = _clean_text(match.group(1))
-            message = _clean_text(match.group("message"))
-            if node_id:
-                invalid_node_ids.append(node_id)
-            if message:
-                schema_errors.append(f"{node_id}: {message}")
+        if result.get("success") is not True:
+            messages.append(str(result.get("message") or "get_node_types failed"))
+            continue
+
+        successes += 1
+        structured = _structured_result_list(
+            result,
+            ("nodeTypes", "definitions", "results"),
+        )
+        definition_text = _result_text(
+            result,
+            ("definitions", "documentation", "content"),
+        )
+
+        if structured:
+            definitions.extend(structured)
+
+        if definition_text:
+            definition_texts.append(definition_text)
+            if not structured:
+                parsed_definitions = _definition_items_from_text(definition_text)
+                if parsed_definitions:
+                    definitions.extend(parsed_definitions)
+
+            error_pattern = re.compile(
+                r"Error:\s*Node ['\"]([^'\"]+)['\"] (?P<message>[^\n]+)",
+                re.IGNORECASE,
+            )
+            for match in error_pattern.finditer(definition_text):
+                node_id = _clean_text(match.group(1))
+                message = _clean_text(match.group("message"))
+                if node_id:
+                    invalid_node_ids.append(node_id)
+                if message:
+                    schema_errors.append(f"{node_id}: {message}")
+
+            deprecated_node_ids.extend(
+                _deprecated_node_ids(
+                    definition_text,
+                    [ref],
+                )
+            )
 
     invalid_node_ids = _unique_strings(invalid_node_ids)
     schema_errors = _unique_strings(schema_errors)
-    deprecated_node_ids = _deprecated_node_ids(
-        definition_text,
-        [
-            item for item in candidates
-            if isinstance(item, dict)
-        ],
-    )
+    deprecated_node_ids = _unique_strings(deprecated_node_ids)
 
     return {
-        "success": result.get("success") is True,
-        "message": result.get("message", ""),
+        "success": successes > 0,
+        "message": (
+            f"Retrieved schemas for {successes}/{len(refs)} requested nodes."
+            + (f" Failures: {' | '.join(messages[:3])}" if messages else "")
+        ),
         "definitions": definitions,
-        "definition_text": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
+        "definition_text": _clip(
+            "\n\n".join(definition_texts),
+            MAX_BEST_PRACTICE_CHARS,
+        ),
         "schema_errors": schema_errors,
         "invalid_node_ids": invalid_node_ids,
         "deprecated_node_ids": deprecated_node_ids,
