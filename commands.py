@@ -1526,6 +1526,98 @@ def build_browser_qol_plan(user_request):
 
 
 
+def build_context_and_skill_plan(user_request):
+    """Build deterministic routes for unified memory and Agent Skills."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    if text in {
+        "memory status",
+        "context status",
+        "check memory status",
+        "check context memory",
+        "check context backend",
+        "check memory backend",
+    }:
+        return {"steps": [{"tool": "context_backend_status", "argument": ""}]}
+
+    remember = re.match(
+        r"^(?:remember(?: that| this)?|please remember|save this|save that|don't forget|dont forget|do not forget)\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if remember:
+        return {
+            "steps": [{
+                "tool": "context_remember",
+                "argument": json.dumps({"content": remember.group(1).strip(), "type": "fact"}),
+            }]
+        }
+
+    recall = re.match(
+        r"^(?:recall|remember|what do you remember about|what do you know about)\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if recall:
+        query = recall.group(1).strip().rstrip("?.!,")
+        if query:
+            return {
+                "steps": [{
+                    "tool": "context_recall",
+                    "argument": json.dumps({"query": query, "limit": 8}),
+                }]
+            }
+
+    skill_search = re.match(
+        r"^(?:search|find|look for)\s+(?:an?\s+)?(?:agent\s+)?skill(?:s)?\s+(?:for|about)\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if skill_search:
+        return {
+            "steps": [{
+                "tool": "skills_search",
+                "argument": json.dumps({"query": skill_search.group(1).strip(), "limit": 12}),
+            }]
+        }
+
+    if text in {
+        "sync agent skills",
+        "sync skills",
+        "update agent skills",
+        "update skills",
+        "install agent skills",
+        "refresh agent skills",
+    }:
+        return {"steps": [{"tool": "skills_sync", "argument": ""}]}
+
+    if text in {
+        "agent skills status",
+        "skill status",
+        "skills status",
+        "list agent skill sources",
+    }:
+        return {"steps": [{"tool": "skills_status", "argument": ""}]}
+
+    openviking_read = re.match(
+        r"^(?:read|open)\s+(?:openviking\s+)?(viking://\S+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if openviking_read:
+        return {
+            "steps": [{
+                "tool": "context_read",
+                "argument": json.dumps({"uri": openviking_read.group(1).strip(), "limit": 12000}),
+            }]
+        }
+
+    return None
+
+
 def build_unreal_mcp_plan(user_request):
     """Build deterministic routes for the upstream Unreal_mcp gateway."""
     original = str(user_request or "").strip()
@@ -1864,6 +1956,15 @@ def deterministic_route(user_request, active_context=None):
         print("JARVIS: Software/gameplay follow-up detected.")
         return None
 
+
+    # ==================================================
+    # MEMORY / AGENT SKILLS
+    # ==================================================
+
+    context_skill_plan = build_context_and_skill_plan(user_request)
+    if context_skill_plan:
+        print("JARVIS: Context/Agent Skill route selected.")
+        return context_skill_plan
 
     # ==================================================
     # UNREAL ENGINE MCP
