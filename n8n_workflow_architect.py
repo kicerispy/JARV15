@@ -190,19 +190,19 @@ def _parse_json_text(value: str) -> Any:
 
 _DISCRIMINATOR_PATTERNS = {
     "resource": re.compile(
-        r"resource\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([A-Za-z0-9_.-]+)",
+        r"resource\s*(?:[:=]|=>|\()\s*[\"]?([A-Za-z0-9_.-]+)",
         re.IGNORECASE,
     ),
     "operation": re.compile(
-        r"operation\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([A-Za-z0-9_.-]+)",
+        r"operation\s*(?:[:=]|=>|\()\s*[\"]?([A-Za-z0-9_.-]+)",
         re.IGNORECASE,
     ),
     "mode": re.compile(
-        r"mode\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([A-Za-z0-9_.-]+)",
+        r"mode\s*(?:[:=]|=>|\()\s*[\"]?([A-Za-z0-9_.-]+)",
         re.IGNORECASE,
     ),
     "version": re.compile(
-        r"version\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([0-9]+(?:\\.[0-9]+)*)",
+        r"version\s*(?:[:=]|=>|\()\s*[\"]?([0-9]+(?:\.[0-9]+)*)",
         re.IGNORECASE,
     ),
 }
