@@ -280,10 +280,10 @@ def _memory_component() -> Dict[str, Any]:
             status = "READY"
             message = f"External Memory is using the {selected} backend."
         elif selected == "local":
-            status = "DEGRADED"
+            status = "READY"
             message = (
-                "External memory services are unavailable; JARVIS is using its "
-                "local SQLite memory fallback."
+                "Memory is ready using JARVIS's local SQLite fallback. "
+                "External memory services are currently unavailable."
             )
         else:
             status = "OFFLINE"
