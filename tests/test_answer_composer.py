@@ -123,3 +123,38 @@ def test_unreal_search_answer_surfaces_gateway_capabilities():
     assert "control_actor.spawn" in answer
     assert "I found 1 Unreal capability" in answer
     assert "success" not in answer.lower()
+
+
+class IntegrationHealthTask:
+    request = "what tools are working right now"
+    planner_result = {
+        "steps": [
+            {"tool": "integration_health", "argument": ""},
+        ]
+    }
+    evidence = [
+        {
+            "tool": "integration_health",
+            "success": True,
+            "verified": True,
+            "data": {
+                "message": "Integration health is degraded.",
+                "components": [
+                    {"name": "God's Eye View", "status": "NOT_READY"},
+                    {"name": "Browser", "status": "READY"},
+                    {"name": "Broken Tool", "status": "ERROR"},
+                ],
+            },
+        }
+    ]
+
+
+def test_integration_health_answer_includes_not_ready_and_error():
+    answer = compose_task_answer(
+        "what tools are working right now",
+        IntegrationHealthTask(),
+        active_context={},
+    )
+
+    assert "Not ready: God's Eye View." in answer
+    assert "Error: Broken Tool." in answer
