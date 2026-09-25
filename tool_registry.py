@@ -22,6 +22,7 @@ N8N_TOOLS = frozenset(
         "n8n_mcp_status",
         "n8n_mcp_list_tools",
         "n8n_workflow_architect",
+        "n8n_workflow_builder",
     }
 )
 
@@ -72,6 +73,7 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "n8n_mcp_status",
         "n8n_mcp_list_tools",
         "n8n_workflow_architect",
+        "n8n_workflow_builder",
         "browser_click_result",
         "browser_click_first_result",
         "browser_find_element",
