@@ -1887,6 +1887,7 @@ def code_test(argument=""):
             return {
                 "success": success,
                 "verified": success,
+                "retryable": not success,
                 "message": (
                     "Git diff whitespace validation passed."
                     if success
@@ -1903,6 +1904,7 @@ def code_test(argument=""):
             return {
                 "success": False,
                 "verified": False,
+                "retryable": True,
                 "message": f"Git diff check timed out after {timeout} seconds.",
                 "exit_code": None,
                 "stdout": "",
@@ -1915,6 +1917,7 @@ def code_test(argument=""):
             return {
                 "success": False,
                 "verified": False,
+                "retryable": True,
                 "message": f"Git diff check failed to start: {e}",
                 "exit_code": None,
                 "stdout": "",
@@ -1932,6 +1935,7 @@ def code_test(argument=""):
                 return {
                     "success": False,
                     "verified": False,
+                    "retryable": True,
                     "message": "Code validation failed: browser smoke test returned an invalid result.",
                     "mode": "browser_smoke",
                     "path": "browser_controller.py",
@@ -1945,6 +1949,7 @@ def code_test(argument=""):
             return {
                 "success": False,
                 "verified": False,
+                "retryable": True,
                 "message": f"Browser smoke test failed to start: {e}",
                 "mode": "browser_smoke",
                 "path": "browser_controller.py",
@@ -2028,6 +2033,7 @@ def code_test(argument=""):
         return {
             "success": success,
             "verified": success,
+            "retryable": not success,
             "message": message,
             "exit_code": completed.returncode,
             "stdout": stdout[:6000],
@@ -2040,6 +2046,7 @@ def code_test(argument=""):
         return {
             "success": False,
             "verified": False,
+            "retryable": True,
             "message": f"Code test timed out after {timeout} seconds.",
             "exit_code": None,
             "stdout": "",
@@ -2052,6 +2059,7 @@ def code_test(argument=""):
         return {
             "success": False,
             "verified": False,
+            "retryable": True,
             "message": f"Code test failed to start: {e}",
             "exit_code": None,
             "stdout": "",
