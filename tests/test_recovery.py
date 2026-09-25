@@ -4,6 +4,14 @@ import recovery
 from tool_result import ToolResult
 
 
+class FakeRecoveryModelManager:
+    def __init__(self, callback):
+        self._callback = callback
+
+    def recovery(self, messages, format="json"):
+        return self._callback(messages, format=format)
+
+
 def test_transient_exception_retries_without_recovery_model(monkeypatch):
     calls = {"run": 0, "model": 0}
 
@@ -21,7 +29,11 @@ def test_transient_exception_retries_without_recovery_model(monkeypatch):
             data={"ok": True},
         )
 
-    monkeypatch.setattr(recovery.MODEL_MANAGER, "recovery", fake_recovery)
+    monkeypatch.setattr(
+        recovery,
+        "MODEL_MANAGER",
+        FakeRecoveryModelManager(fake_recovery),
+    )
 
     result = recovery.retry_with_recovery(
         "web_search",
@@ -51,7 +63,11 @@ def test_browser_drift_escalates_without_argument_rewrite(monkeypatch):
             retryable=True,
         )
 
-    monkeypatch.setattr(recovery.MODEL_MANAGER, "recovery", fake_recovery)
+    monkeypatch.setattr(
+        recovery,
+        "MODEL_MANAGER",
+        FakeRecoveryModelManager(fake_recovery),
+    )
 
     result = recovery.retry_with_recovery(
         "browser_click_element",
@@ -96,7 +112,11 @@ def test_invalid_argument_can_use_recovery_model_even_when_tool_marks_failure_no
             data={"location": argument},
         )
 
-    monkeypatch.setattr(recovery.MODEL_MANAGER, "recovery", fake_recovery)
+    monkeypatch.setattr(
+        recovery,
+        "MODEL_MANAGER",
+        FakeRecoveryModelManager(fake_recovery),
+    )
 
     result = recovery.retry_with_recovery(
         "weather",
@@ -125,7 +145,11 @@ def test_code_regression_escalates_to_agent_core(monkeypatch):
             retryable=True,
         )
 
-    monkeypatch.setattr(recovery.MODEL_MANAGER, "recovery", fake_recovery)
+    monkeypatch.setattr(
+        recovery,
+        "MODEL_MANAGER",
+        FakeRecoveryModelManager(fake_recovery),
+    )
 
     result = recovery.retry_with_recovery(
         "code_test",
