@@ -36,7 +36,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
             ),
         )
         self.assertIn("ALLOWED NODE TYPES:", prompt)
-        self.assertIn("n8n-nodes-base.slack", prompt)
+        self.assertIn("@n8n/n8n-nodes-langchain.lmChatOpenAi", prompt)
         self.assertIn("HARD REPAIR REQUIREMENT:", prompt)
         self.assertIn("Remove every unknown node type", prompt)
 
