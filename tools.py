@@ -1611,6 +1611,31 @@ def _checkpoint_source_files():
         files.append(path)
 
     return files
+def git_task_branch(argument=""):
+    """Create or activate a task-scoped Git branch without destructive operations."""
+    import json
+    from autonomous_engineering import prepare_task_branch
+
+    raw = str(argument or "").strip()
+    branch = raw
+    if raw:
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                branch = str(payload.get("branch", "") or "").strip()
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not branch:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": "git_task_branch requires a branch name.",
+        }
+
+    return prepare_task_branch(branch)
+
 def code_checkpoint(argument=""):
     """Snapshot project source files before an autonomous edit."""
     import json
@@ -3410,6 +3435,10 @@ def _run_tool_raw(
     # --------------------------------------------------------
     # AUTONOMOUS CODE CHECKPOINTS
     # --------------------------------------------------------
+
+    elif tool_name == "git_task_branch":
+
+        return git_task_branch(argument)
 
     elif tool_name == "code_checkpoint":
 
