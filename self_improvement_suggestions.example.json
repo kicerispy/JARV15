@@ -1,0 +1,14 @@
+[
+  {
+    "id": "example",
+    "category": "persona",
+    "change_type": "adjust",
+    "target": "persona.formality",
+    "current_value": 0.8,
+    "suggested_value": 0.7,
+    "confidence": 0.5,
+    "rationale": "Example only; runtime suggestions stay local.",
+    "auto_applicable": false,
+    "timestamp": "2026-01-01T00:00:00"
+  }
+]
