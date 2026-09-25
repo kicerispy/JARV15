@@ -38,7 +38,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "openviking_add_resource": "Import a local or remote resource into OpenViking. Argument is JSON.",
     "openviking_add_skill": "Install a validated Agent Skill into OpenViking. Argument is JSON. Use only on explicit request.",
     "skills_status": "Report which external Agent Skill repositories are synchronized into JARVIS.",
-    "skills_sync": "Explicitly clone/update the configured Agent Skill repositories. Never auto-run downloaded scripts.",
+    "skills_sync": "Explicitly clone/update the configured Agent Skill repositories. Only use when the user explicitly asks to sync, install, refresh, or update the skill sources. Never auto-run downloaded scripts.",
     "skills_search": "Search the synchronized Agent Skill catalog for relevant procedural knowledge.",
     "skills_read": "Read one synchronized SKILL.md or indexed skill document.",
     "harness_review": "Review a proposed tool plan for verification, mutation, scope, and long-horizon harness issues.",
@@ -679,7 +679,6 @@ _CONTEXT_MEMORY_PLANNER_TOOLS = {
 
 _AGENT_SKILL_PLANNER_TOOLS = {
     "skills_status",
-    "skills_sync",
     "skills_search",
     "skills_read",
     "harness_review",
