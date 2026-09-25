@@ -80,7 +80,7 @@ def test_runtime_failure_starts_bounded_source_repair_bridge(tmp_path, monkeypat
                                 "TypeError: boom"
                             )
                         },
-                        retryable=True,
+                        retryable=False,
                         error="runtime TypeError",
                     ),
                     "Application runtime failed.",
