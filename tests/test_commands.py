@@ -239,3 +239,11 @@ def test_roblox_mcp_lifecycle_is_answer_bearing():
     result = resolve_intent("setup Roblox MCP")
     assert result["domain"] == "roblox"
     assert result["mode"] == "answer"
+
+
+def test_roblox_mcp_lifecycle_intent_scope_is_safe():
+    from intent_resolver import resolve_intent
+
+    result = resolve_intent("setup Roblox MCP")
+    assert result["domain"] == "roblox"
+    assert result["mode"] == "answer"
