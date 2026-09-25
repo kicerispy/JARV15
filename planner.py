@@ -669,12 +669,9 @@ _UNREAL_MCP_PLANNER_TOOLS = {
 
 _CONTEXT_MEMORY_PLANNER_TOOLS = {
     "context_backend_status",
-    "context_remember",
     "context_recall",
     "context_search",
     "context_read",
-    "openviking_add_resource",
-    "openviking_add_skill",
 }
 
 _AGENT_SKILL_PLANNER_TOOLS = {
@@ -838,30 +835,6 @@ def _planner_tool_scope(
         "ue project",
     )
 
-    skill_domain_signals = (
-        "skill",
-        "agent skill",
-        "cybersecurity",
-        "cyber security",
-        "threat hunting",
-        "incident response",
-        "security analysis",
-        "diagram",
-        "architecture diagram",
-        "flowchart",
-        "scientific",
-        "science",
-        "research workflow",
-        "bioinformatics",
-        "chemistry",
-        "biology",
-        "harness engineering",
-        "agent harness",
-    )
-
-    if any(signal in text for signal in skill_domain_signals):
-        return set(_AGENT_SKILL_PLANNER_TOOLS) | set(_CONTEXT_MEMORY_PLANNER_TOOLS)
-
     unreal_action_signals = (
         "build",
         "spawn",
@@ -901,6 +874,30 @@ def _planner_tool_scope(
         or "mcp" in text
     ):
         return _UNREAL_MCP_PLANNER_TOOLS
+
+    skill_domain_signals = (
+        "skill",
+        "agent skill",
+        "cybersecurity",
+        "cyber security",
+        "threat hunting",
+        "incident response",
+        "security analysis",
+        "diagram",
+        "architecture diagram",
+        "flowchart",
+        "scientific",
+        "science",
+        "research workflow",
+        "bioinformatics",
+        "chemistry",
+        "biology",
+        "harness engineering",
+        "agent harness",
+    )
+
+    if any(signal in text for signal in skill_domain_signals):
+        return set(_AGENT_SKILL_PLANNER_TOOLS) | set(_CONTEXT_MEMORY_PLANNER_TOOLS)
 
     code_signals = (
         "code",
