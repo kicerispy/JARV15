@@ -86,6 +86,11 @@ def test_read_only_code_explanation_is_not_misclassified_as_architectural():
     ) is None
 
 
+def test_read_only_python_file_inspection_does_not_invoke_superpowers():
+    assert classify_software_request(
+        "inspect main.py"
+    ) is None
+
 def test_architectural_signal_requires_a_real_word_boundary():
     workflow = classify_software_request(
         "integrate a new autonomous coding subsystem"
