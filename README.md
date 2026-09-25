@@ -142,6 +142,30 @@ This repository intentionally ignores:
 
 See [SECURITY.md](SECURITY.md) before adding credentials or external integrations.
 
+## Anime / anipy-cli
+
+JARVIS includes the upstream sdaqo/anipy-cli stack at an exact matching release:
+
+- anipy-api==3.10.1
+- anipy-cli==3.10.1
+
+The upstream packages are installed as published; JARVIS does not fork, strip, or replace their provider, player, tracker, download, remux, history, seasonal, AniList, MyAnimeList, Discord-presence, or native CLI functionality.
+
+JARVIS adds a thin orchestration layer around that upstream stack. The native CLI remains available through the anipy_cli tool, while structured JARVIS tools expose provider discovery, search, metadata, episode lookup, stream resolution, and episode downloads.
+
+Examples:
+
+```text
+"Run anipy-cli -D -s One Piece:1-3:sub"
+"Search anime One Piece"
+"List episodes for Cowboy Bebop"
+"Get stream link for Naruto episode 12"
+"Download Demon Slayer episodes 1-3"
+"Watch One Piece episode 1"
+```
+
+The native anipy-cli command continues to own its normal interactive configuration and player behavior. Download/remux operations that use the structured JARVIS tool use the same upstream Downloader, download-path formatting, retry logic, and post-download hook path. FFmpeg and any external player required by the selected upstream mode must be installed separately.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
