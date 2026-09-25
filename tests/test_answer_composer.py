@@ -223,3 +223,34 @@ def test_roblox_mcp_answer_does_not_speak_url():
 
     assert "plugin is connected" in answer.lower()
     assert "127.0.0.1:58741" not in answer
+
+
+def test_integration_health_answer_precedes_active_roblox_context():
+    class HealthTask:
+        request = "what tools are working right now"
+        planner_result = {
+            "steps": [{"tool": "integration_health", "argument": ""}]
+        }
+        evidence = [
+            {
+                "tool": "integration_health",
+                "success": True,
+                "verified": True,
+                "data": {
+                    "message": "Integration health is degraded.",
+                    "components": [
+                        {"name": "Roblox MCP", "status": "DEGRADED"},
+                        {"name": "Ollama", "status": "READY"},
+                    ],
+                },
+            }
+        ]
+
+    answer = compose_task_answer(
+        "what tools are working right now",
+        HealthTask(),
+        active_context={"site": "roblox"},
+    )
+
+    assert "Integration health is degraded." in answer
+    assert "Roblox inspection" not in answer
