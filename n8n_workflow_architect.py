@@ -105,10 +105,10 @@ def _search_queries(request: str, techniques: Sequence[str]) -> List[str]:
     if terms:
         queries.append(" ".join(terms[:6]))
 
+    queries.append("trigger")
+
     for technique in techniques:
         queries.append(technique.replace("_", " "))
-
-    queries.append("trigger")
 
     expanded = list(queries)
     for term in terms[:4]:
@@ -125,8 +125,18 @@ def _result_data(result: Dict[str, Any]) -> Dict[str, Any]:
 def _result_list(result: Dict[str, Any], keys: Sequence[str]) -> List[Dict[str, Any]]:
     data = _result_data(result)
 
-    for key in ("data", *keys):
-        value = data.get(key)
+    containers: List[Dict[str, Any]] = [data]
+    nested = data.get("data") if isinstance(data, dict) else None
+    if isinstance(nested, dict):
+        containers.append(nested)
+
+    for container in containers:
+        for key in keys:
+            value = container.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+
+        value = container.get("data")
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
 
@@ -204,7 +214,7 @@ def _discover_nodes(
         candidates.extend(values)
 
         if len(candidates) >= MAX_NODE_CANDIDATES:
-            break
+            continue
 
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in candidates:
@@ -215,7 +225,16 @@ def _discover_nodes(
         if key not in deduped:
             deduped[key] = item
 
-    return list(deduped.values())[:MAX_NODE_CANDIDATES], queries
+    ranked = sorted(
+        deduped.values(),
+        key=lambda item: (
+            1 if _is_start_trigger_type(item.get("type")) else 0,
+            str(item.get("name") or "").lower(),
+        ),
+        reverse=True,
+    )
+
+    return ranked[:MAX_NODE_CANDIDATES], queries
 
 
 def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -292,6 +311,9 @@ def _requirements(request: str, techniques: Sequence[str]) -> Dict[str, Any]:
             "delete",
             "publish",
             "notify",
+            "alert",
+            "alert me",
+            "message me",
         )
     )
 
