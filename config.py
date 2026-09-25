@@ -23,6 +23,13 @@ PLANNER_MODEL = os.environ.get(
     "qwen3.5:9b",
 )
 
+# Bounded software-change planning does not need the larger coding model.
+# Keep it configurable so advanced users can opt back into the coding model.
+CHANGE_PLANNER_MODEL = os.environ.get(
+    "JARVIS_CHANGE_PLANNER_MODEL",
+    PLANNER_MODEL,
+)
+
 CODING_MODEL = os.environ.get(
     "JARVIS_CODING_MODEL",
     "qwen2.5-coder:14b",
@@ -440,6 +447,13 @@ CHAT_NUM_PREDICT = int(
 PLANNER_NUM_PREDICT = int(
     os.environ.get(
         "JARVIS_PLANNER_NUM_PREDICT",
+        "512",
+    )
+)
+
+CHANGE_PLANNER_NUM_PREDICT = int(
+    os.environ.get(
+        "JARVIS_CHANGE_PLANNER_NUM_PREDICT",
         "512",
     )
 )
