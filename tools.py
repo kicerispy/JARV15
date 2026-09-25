@@ -2788,6 +2788,15 @@ SCREEN_MEMORY_TOOLS = {
     "screen_memory_recent",
 }
 
+QOL_TOOLS = {
+    "jarvis_quickcheck",
+    "resource_status",
+    "process_snapshot",
+    "project_snapshot",
+    "service_status",
+    "healing_hints",
+}
+
 API_TOOLS = API_TOOLS | EXTENDED_API_TOOLS
 
 
@@ -3450,6 +3459,13 @@ def _run_tool_raw(
             argument,
         )
 
+    if tool_name in QOL_TOOLS and tool_name != "healing_hints":
+        import qol_tools
+        handler = getattr(qol_tools, tool_name)
+        if tool_name in {"process_snapshot", "service_status"}:
+            return handler(argument)
+        return handler()
+
 
     # --------------------------------------------------------
     # FREE PUBLIC API HUB
@@ -3738,6 +3754,46 @@ def _run_tool_raw(
     elif tool_name == "memory_status":
 
         return local_memory.memory_status()
+
+    elif tool_name == "healing_hints":
+
+        raw = str(argument or "").strip()
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"error": raw}
+
+        from healing_kernel import healing_hints
+
+        return {
+            "success": True,
+            "verified": True,
+            "hints": healing_hints(
+                str(payload.get("tool", "") or ""),
+                category=str(payload.get("category", "") or ""),
+                error=str(payload.get("error", "") or ""),
+                limit=int(payload.get("limit", 5) or 5),
+            ),
+        }
+
+    elif tool_name in {
+        "jarvis_quickcheck",
+        "resource_status",
+        "process_snapshot",
+        "project_snapshot",
+        "service_status",
+    }:
+
+        import qol_tools
+
+        handler = getattr(qol_tools, tool_name)
+        if tool_name in {"process_snapshot", "service_status"}:
+            return handler(argument)
+        return handler()
 
     elif tool_name == "jarvis_capabilities":
 
