@@ -27,7 +27,8 @@ N8N_TOOLS = frozenset(
 )
 
 N8N_MCP_PREFIX = "n8n_mcp__"
-\nJARVIS_PLATFORM_TOOLS = frozenset(
+
+JARVIS_PLATFORM_TOOLS = frozenset(
     {
         "jarvis_doctor",
         "jarvis_quickcheck",
