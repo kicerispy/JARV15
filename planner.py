@@ -4326,6 +4326,8 @@ def _qol_plan(command):
         "regression status" in lowered
         or "which strategies regressed" in lowered
         or "what strategies are regressing" in lowered
+        or "which strategies are regressing" in lowered
+        or "show strategy regressions" in lowered
     ):
         return {
             "goal": "inspect learned strategy regressions",
