@@ -35,6 +35,10 @@ N8N_MCP_PREFIX = "n8n_mcp__"
         "memory_recall",
         "memory_forget",
         "ollama_models",
+        "healing_history",
+        "tool_reset",
+        "memory_status",
+        "jarvis_capabilities",
     }
 )
 
