@@ -53,7 +53,15 @@ from healing_kernel import (
     diagnose_failure,
     record_healing_event,
 )
-from postcondition_verifier import verify_postcondition
+from postcondition_verifier import (
+    verify_execution_trace,
+    verify_postcondition,
+)
+from strategy_selector import (
+    record_task_outcome,
+    select_learned_plan,
+    strategy_hints,
+)
 from planner import (
     assess_plan,
     create_plan,
@@ -299,6 +307,18 @@ class JarvisAgent:
                 error=task.error or "",
                 domain=domain,
             )
+
+            strategy_result = record_task_outcome(task)
+            regression = strategy_result.get("regression")
+            if isinstance(regression, dict) and regression.get("regressed"):
+                task.observations.append(
+                    "Learned-strategy regression detected: "
+                    + str(regression.get("reason", "")).strip()
+                )
+            if strategy_result.get("quarantined"):
+                task.observations.append(
+                    "The degraded learned strategy was quarantined for future planning."
+                )
         except Exception as exc:
             logger.debug(
                 f"JARVIS AGENT: experience-memory write skipped: {exc}"
@@ -406,6 +426,27 @@ class JarvisAgent:
             task.active_context["tool_health_hints"] = degraded_tools
             task.observations.append(
                 f"Loaded health hints for {len(degraded_tools)} degraded tool(s)."
+            )
+
+        # Surface known-good strategies as advisory evidence. The planner may
+        # reuse them only after the strategy selector confirms repeated success
+        # and sufficient similarity to the current request.
+        try:
+            learned_strategies = strategy_hints(
+                normalized_request,
+                context=task.active_context,
+                limit=3,
+            )
+        except Exception as exc:
+            learned_strategies = []
+            logger.debug(
+                f"JARVIS AGENT: strategy-memory lookup skipped: {exc}"
+            )
+
+        if learned_strategies:
+            task.active_context["strategy_hints"] = learned_strategies
+            task.observations.append(
+                f"Loaded {len(learned_strategies)} known-good strategy hint(s)."
             )
 
         self.state[
@@ -1975,6 +2016,47 @@ class JarvisAgent:
                 task.observations.append(
                     "Deterministic change entry point: explicit existing "
                     "target file was inspected without an LLM planning call."
+                )
+                return task
+
+        # Reuse a trusted, repeatedly verified local strategy before
+        # spending an Ollama generation on ordinary tasks. Software repair/change
+        # phases intentionally bypass this optimization because their evidence-first
+        # safety workflow must remain authoritative.
+        if (
+            planning_request is None
+            and task.replan_count == 0
+            and not require_repair_plan
+            and not require_change_plan
+            and not require_code_read
+            and not require_code_test
+            and not require_code_diagnose
+            and not is_software_repair_request(task.request)
+            and not is_software_change_request(task.request)
+            and getattr(config, "AUTONOMY_LEARNED_STRATEGY_ENABLED", True)
+        ):
+            try:
+                learned_plan = select_learned_plan(
+                    task.request,
+                    context=task.active_context,
+                )
+            except Exception as exc:
+                learned_plan = None
+                logger.debug(
+                    f"JARVIS AGENT: learned strategy selection skipped: {exc}"
+                )
+
+            if (
+                isinstance(learned_plan, dict)
+                and learned_plan.get("steps")
+            ):
+                task = self._install_phase_plan(
+                    task,
+                    learned_plan,
+                )
+                task.observations.append(
+                    "Reused a trusted learned strategy instead of regenerating "
+                    "the same plan from scratch."
                 )
                 return task
 
@@ -4239,6 +4321,41 @@ class JarvisAgent:
                     "JARVIS AGENT: Task completed "
                     f"after {task.replan_count} replan(s)."
                 )
+
+                if getattr(config, "AUTONOMY_AUTO_VERIFICATION_ENABLED", True):
+                    execution_verification = verify_execution_trace(task)
+                    task.active_context["_execution_verification"] = execution_verification
+
+                    # A structured trace containing an actual failed step is
+                    # stronger evidence than the executor's top-level "done".
+                    # Fail closed and re-enter the normal bounded recovery path.
+                    if (
+                        execution_verification.get("trace_available")
+                        and not execution_verification.get("ready", True)
+                        and execution_verification.get("failed_steps")
+                    ):
+                        reason = str(
+                            execution_verification.get(
+                                "reason",
+                                "Execution trace verification failed.",
+                            )
+                        )
+                        task.status = "failed"
+                        task.error = reason
+                        task.completed_at = time.time()
+                        self.state["last_result"] = None
+                        self.state["last_status"] = "failed"
+                        self.state["last_error"] = reason
+                        self._record_autonomy_episode(task)
+                        task_state.set_progress_callback(None)
+                        return task
+
+                    if not execution_verification.get("verified", False):
+                        task.observations.append(
+                            "Execution completed without explicit postcondition "
+                            "evidence; preserving the successful result with a "
+                            "lower verification confidence."
+                        )
 
                 # Autonomy Kernel v2: informational tasks are not complete
                 # until JARVIS has verified that concrete evidence exists and
