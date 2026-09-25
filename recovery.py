@@ -83,8 +83,6 @@ If you can fix it, provide the corrected argument."""
             format="json",
         )
 
-        import json
-
         result = json.loads(
             response.get(
                 "message",
