@@ -277,10 +277,14 @@ __all__ = [
 ]
 
 def strategy_history(request: str = "", limit: int = 10) -> list[dict[str, Any]]:
-    from plan_memory import find_strategies
+    from plan_memory import find_strategies, recent_strategies
+
+    text = str(request or "").strip()
+    if not text:
+        return recent_strategies(limit=limit)
 
     return find_strategies(
-        str(request or ""),
+        text,
         limit=max(1, min(int(limit), 20)),
         include_quarantined=True,
     )
