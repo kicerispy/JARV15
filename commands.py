@@ -1582,6 +1582,55 @@ def deterministic_route(user_request, active_context=None):
         return None
 
 
+    # Anime streaming/availability requests have a dedicated non-browser
+    # resolver. Keep them ahead of generic "find/search" DOM shortcuts.
+    anime_text = str(text or "").strip()
+    anime_lower = anime_text.lower()
+    anime_route = (
+        ("streaming links" in anime_lower or "streaming link" in anime_lower)
+        and ("anime" in anime_lower or "streaming links for" in anime_lower)
+    ) or (
+        ("where can i watch" in anime_lower or "where do i watch" in anime_lower)
+        and ("anime" in anime_lower or "episode" in anime_lower)
+    ) or (
+        ("anime availability" in anime_lower or "anime providers" in anime_lower)
+        and "anime" in anime_lower
+    )
+
+    if anime_route:
+        availability = (
+            "where can i watch" in anime_lower
+            or "where do i watch" in anime_lower
+            or "availability" in anime_lower
+            or "providers" in anime_lower
+        )
+        argument = anime_text
+        for prefix in (
+            "find streaming links for ",
+            "find streaming link for ",
+            "anime streaming links for ",
+            "anime streaming link for ",
+            "where can i watch ",
+            "where do i watch ",
+            "find anime availability for ",
+            "show anime providers for ",
+        ):
+            if anime_lower.startswith(prefix):
+                argument = anime_text[len(prefix):].strip()
+                break
+        argument = argument.rstrip("?.!,").strip()
+
+        tool = "anime_availability" if availability else "anime_streaming_links"
+        print(f"JARVIS: Anime streaming route selected: {tool}.")
+        return {
+            "steps": [
+                {
+                    "tool": tool,
+                    "argument": argument,
+                }
+            ]
+        }
+
     # Project filename lookups must run before generic browser "find/search" routes.
     project_file_plan = build_project_file_lookup_plan(user_request)
 
