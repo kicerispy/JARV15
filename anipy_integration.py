@@ -631,7 +631,7 @@ def _run_download(argument: str) -> dict[str, Any]:
             stream = anime.get_video(
                 episode,
                 lang,
-                preferred_quality=payload.get("quality"),
+                preferred_quality=_quality(payload.get("quality")),
             )
             if stream is None:
                 raise RuntimeError(
