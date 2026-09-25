@@ -257,33 +257,55 @@ def list_tools(force: bool = False) -> List[Dict[str, Any]]:
 
     initialize()
 
-    result = _rpc("tools/list", {"cursor": None})
-    tools = result.get("tools", []) if isinstance(result, dict) else []
-
-    if not isinstance(tools, list):
-        raise RuntimeError("n8n MCP tools/list returned an invalid tool list.")
-
+    # MCP pagination params are optional. Do not send cursor: null on the
+    # first page because some servers (including n8n) reject explicit null.
+    result = _rpc("tools/list")
     sanitized: List[Dict[str, Any]] = []
-    for item in tools[:MAX_DYNAMIC_TOOLS]:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name", "") or "").strip()
-        if not name:
-            continue
 
-        sanitized.append(
-            {
-                "name": name,
-                "description": _bounded_text(item.get("description", "")),
-                "inputSchema": (
-                    item.get("inputSchema")
-                    if isinstance(item.get("inputSchema"), dict)
-                    else {}
-                ),
-            }
+    while True:
+        tools = result.get("tools", []) if isinstance(result, dict) else []
+        if not isinstance(tools, list):
+            raise RuntimeError("n8n MCP tools/list returned an invalid tool list.")
+
+        for item in tools:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "") or "").strip()
+            if not name:
+                continue
+
+            sanitized.append(
+                {
+                    "name": name,
+                    "description": _bounded_text(item.get("description", "")),
+                    "inputSchema": (
+                        item.get("inputSchema")
+                        if isinstance(item.get("inputSchema"), dict)
+                        else {}
+                    ),
+                }
+            )
+
+            if len(sanitized) >= MAX_DYNAMIC_TOOLS:
+                break
+
+        if len(sanitized) >= MAX_DYNAMIC_TOOLS:
+            break
+
+        next_cursor = (
+            result.get("nextCursor")
+            if isinstance(result, dict)
+            else None
+        )
+        if not isinstance(next_cursor, str) or not next_cursor:
+            break
+
+        result = _rpc(
+            "tools/list",
+            {"cursor": next_cursor},
         )
 
-    _TOOL_CACHE["tools"] = sanitized
+    _TOOL_CACHE["tools"] = sanitized[:MAX_DYNAMIC_TOOLS]
     _TOOL_CACHE["expires_at"] = now + max(
         0.0,
         float(N8N_MCP_DISCOVERY_TTL_SECONDS),
