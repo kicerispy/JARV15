@@ -11,6 +11,9 @@ JARVIS is a local-first personal AI assistant for Windows. It combines voice int
 - **Roblox:** Roblox Studio MCP integration
 - **Automation:** optional n8n delegation
 - **Coding/self-repair:** checkpoint → inspect → focused plan → edit → test → verification → bounded recovery
+- **Self-healing/runtime resilience:** persistent tool-health telemetry, bounded circuit breakers, sanitized failure signatures, and structured model-role fallbacks
+- **Local memory:** bounded semantic/preferences/procedure/lesson memory plus episodic failure lessons
+- **JARVIS Doctor:** read-only runtime/model/tool/Git diagnostics with optional compile and pytest probes
 - **Testing:** pytest regression suite plus GitHub Actions verification
 
 JARVIS remains the orchestrator; specialist models and tools are capabilities it can delegate to.
@@ -84,6 +87,15 @@ Pull only the models you actually want to run locally.
 
 All machine-specific values should live in environment variables rather than source edits. See [.env.example](.env.example).
 
+The resilience and memory layer stores local runtime state under `.jarvis_autonomy/`, which is ignored by Git. Relevant environment controls include:
+- `JARVIS_SELF_HEALING_ENABLED`
+- `JARVIS_SELF_HEALING_MAX_ATTEMPTS`
+- `JARVIS_TOOL_RESILIENCE_ENABLED`
+- `JARVIS_TOOL_CIRCUIT_BREAKER_ENABLED`
+- `JARVIS_TOOL_CIRCUIT_FAILURE_THRESHOLD`
+- `JARVIS_TOOL_CIRCUIT_COOLDOWN_SECONDS`
+- `JARVIS_MEMORY_ENABLED`
+
 Examples include:
 
 - model selection
@@ -104,6 +116,12 @@ Run the complete suite locally:
 ```powershell
 python -m pytest -q
 ```
+
+JARVIS also exposes deterministic self-service tools:
+- `jarvis_doctor` for read-only system/model/tool diagnostics
+- `tool_health` for reliability and circuit-breaker state
+- `ollama_models` for local model inventory
+- `memory_remember`, `memory_recall`, and `memory_forget` for explicit local memory control
 
 Run the public CI-focused set:
 
