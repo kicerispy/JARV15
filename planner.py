@@ -23,6 +23,13 @@ PLANNER_MODEL = MODEL_MANAGER.planner_model
 AVAILABLE_TOOLS: Dict[str, str] = {
     "n8n_status": "Check whether the configured n8n workflow orchestrator is enabled and reachable.",
     "n8n_run_workflow": "Delegate a workflow-class task to n8n. Argument is JSON with request, workflow_class, and optional context.",
+    "anipy_cli": "Run the upstream anipy-cli CLI unchanged. Argument is the native CLI argument string or JSON with args.",
+    "anipy_providers": "List the providers exposed by the installed anipy-api package.",
+    "anipy_search": "Search anime through anipy-api providers. Argument is JSON with query and optional provider/index/all_providers.",
+    "anipy_info": "Get detailed anime metadata through anipy-api. Argument is JSON selecting an anime by query/provider/identifier.",
+    "anipy_episodes": "Get available anime episodes through anipy-api. Argument is JSON with query/provider/identifier and language.",
+    "anipy_get_video": "Resolve an anime episode to an anipy-api video stream. Argument is JSON with anime selector, episode, language, and optional quality.",
+    "anipy_download": "Download anime using the upstream anipy-api Downloader and anipy-cli configuration semantics. Argument is JSON with anime selector, episode(s), language, quality, and optional location/container/ffmpeg.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -628,6 +635,17 @@ def _roblox_safe_fallback_plan(
     }
 
 
+
+_ANIPY_PLANNER_TOOLS = {
+    "anipy_cli",
+    "anipy_providers",
+    "anipy_search",
+    "anipy_info",
+    "anipy_episodes",
+    "anipy_get_video",
+    "anipy_download",
+}
+
 def _planner_tool_scope(
     user_command: str,
     active_context: Optional[Dict[str, Any]] = None,
@@ -710,6 +728,36 @@ def _planner_tool_scope(
             roblox_tools = set(get_roblox_planner_tools().keys())
             roblox_tools.add("roblox_mcp_status")
             return roblox_tools
+
+    anime_domain_signals = (
+        "anime",
+        "anipy",
+        "anilist",
+        "myanimelist",
+        "anime episode",
+        "anime episodes",
+    )
+
+    anime_action_signals = (
+        "watch",
+        "play",
+        "stream",
+        "download",
+        "search",
+        "find",
+        "episode",
+        "episodes",
+        "provider",
+        "seasonal",
+        "dub",
+        "sub",
+    )
+
+    if (
+        any(signal in text for signal in anime_domain_signals)
+        and any(signal in text for signal in anime_action_signals)
+    ):
+        return _ANIPY_PLANNER_TOOLS
 
     code_signals = (
         "code",
@@ -860,6 +908,14 @@ Tool-scope rule:
 - Do not invent tools or switch domains without evidence from the request.
 
 Rules:
+
+ANIPY-CLI RULES:
+
+- Preserve the upstream anipy-cli tool rather than recreating or disabling its native modes.
+- Use anipy_cli for the full native CLI, including watch, download, binge, seasonal, AniList, MyAnimeList, history, local-file/native-provider workflows, players, Discord presence, configuration, and command-line options.
+- Use anipy_search, anipy_info, anipy_episodes, and anipy_get_video for structured read-only anime operations.
+- Use anipy_download only when the request specifies an episode or explicit episode range; it uses the upstream Downloader/configuration path.
+- Do not route anime requests to generic browser tools when an anipy tool can satisfy the request.
 
 WINDOWS STARTUP AND RUNTIME STATUS:
 
