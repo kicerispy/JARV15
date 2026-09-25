@@ -7,6 +7,12 @@ from typing import Any, Dict, Optional
 
 from logger import logger
 from model_manager import ModelManager
+from healing_kernel import (
+    build_healing_evidence,
+    choose_recovery,
+    diagnose_failure,
+    record_healing_event,
+)
 
 
 MODEL_MANAGER = ModelManager()
@@ -166,10 +172,41 @@ def retry_with_recovery(
                     or "Tool returned an unsuccessful result."
                 )
 
-                # Respect the tool's explicit retry policy.
-                # Deterministic failures should not invoke
-                # the LLM recovery system.
-                if not result.retryable:
+                diagnosis = diagnose_failure(
+                    tool_name,
+                    last_error,
+                    argument=argument,
+                    result=result.data,
+                )
+                decision = choose_recovery(
+                    diagnosis,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    model_available=True,
+                )
+                record_healing_event(
+                    {
+                        **build_healing_evidence(
+                            tool_name,
+                            argument,
+                            last_error,
+                            diagnosis,
+                            attempt=attempt,
+                            result=result.data,
+                        ),
+                        "action": decision.action,
+                        "decision_reason": decision.reason,
+                    }
+                )
+
+                # Respect both the tool's explicit retry policy and the
+                # Healing Kernel's diagnosis. Browser drift, missing targets,
+                # and code defects belong to Agent Core's evidence/replan
+                # workflow rather than another blind local retry.
+                if (
+                    not result.retryable
+                    or decision.action in {"replan", "repair_code", "stop", "escalate"}
+                ):
                     return {
                         "success": False,
                         "error": last_error,
@@ -196,6 +233,40 @@ def retry_with_recovery(
                     ),
                 )
 
+                diagnosis = diagnose_failure(
+                    tool_name,
+                    last_error,
+                    argument=argument,
+                    result=result,
+                )
+                decision = choose_recovery(
+                    diagnosis,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    model_available=True,
+                )
+                record_healing_event(
+                    {
+                        **build_healing_evidence(
+                            tool_name,
+                            argument,
+                            last_error,
+                            diagnosis,
+                            attempt=attempt,
+                            result=result,
+                        ),
+                        "action": decision.action,
+                        "decision_reason": decision.reason,
+                    }
+                )
+
+                if decision.action in {"replan", "repair_code", "stop", "escalate"}:
+                    return {
+                        "success": False,
+                        "error": str(last_error),
+                        "attempts": attempt,
+                    }
+
             else:
                 return {
                     "success": True,
@@ -206,38 +277,83 @@ def retry_with_recovery(
         except Exception as e:
             last_error = str(e)
 
+            diagnosis = diagnose_failure(
+                tool_name,
+                last_error,
+                argument=argument,
+            )
+            decision = choose_recovery(
+                diagnosis,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                model_available=True,
+            )
+            record_healing_event(
+                {
+                    **build_healing_evidence(
+                        tool_name,
+                        argument,
+                        last_error,
+                        diagnosis,
+                        attempt=attempt,
+                    ),
+                    "action": decision.action,
+                    "decision_reason": decision.reason,
+                }
+            )
+
             logger.warning(
                 f"Tool {tool_name} failed "
                 f"(attempt {attempt}/{max_attempts}): "
-                f"{last_error}"
+                f"{last_error} "
+                f"[healing={decision.action}/{diagnosis.category}]"
             )
+
+            if decision.action in {"replan", "repair_code", "stop", "escalate"}:
+                break
 
         if attempt < max_attempts:
-
-            recovery = analyze_error(
+            diagnosis = diagnose_failure(
                 tool_name,
-                argument,
                 last_error or "",
-                attempt,
-                max_attempts,
+                argument=argument,
+            )
+            decision = choose_recovery(
+                diagnosis,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                model_available=True,
             )
 
-            if (
-                recovery
-                and recovery.get("new_argument")
-            ):
+            if decision.action == "retry":
                 logger.info(
-                    "Recovering with new argument: "
-                    f"{recovery['new_argument'][:100]}..."
+                    "JARVIS HEALING: retrying without model intervention: "
+                    f"{diagnosis.category}"
+                )
+                continue
+
+            if decision.action == "repair_argument":
+                recovery = analyze_error(
+                    tool_name,
+                    argument,
+                    last_error or "",
+                    attempt,
+                    max_attempts,
                 )
 
-                argument = recovery["new_argument"]
+                if recovery and recovery.get("new_argument"):
+                    logger.info(
+                        "Recovering with new argument: "
+                        f"{recovery['new_argument'][:100]}..."
+                    )
+                    argument = recovery["new_argument"]
+                    continue
 
-            else:
-                logger.info(
-                    "No recovery suggestion, stopping retries"
-                )
-                break
+            logger.info(
+                "JARVIS HEALING: local recovery stopped; escalating "
+                f"with action={decision.action}."
+            )
+            break
 
     return {
         "success": False,
