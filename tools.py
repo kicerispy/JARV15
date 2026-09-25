@@ -3908,3 +3908,11 @@ def run_tool(
         tool_name,
         result,
     )
+
+# Backward-compatible dispatcher alias for scripts and integrations that
+# historically called execute_tool(). The canonical API remains run_tool().
+def execute_tool(
+    tool_name: str,
+    argument: str = "",
+) -> ToolResult:
+    return run_tool(tool_name, argument)
