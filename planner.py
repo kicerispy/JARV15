@@ -3323,6 +3323,59 @@ Last tool: {active_context.get('last_tool', 'none')}
             f"JARVIS planner: Superpowers directives skipped: {exc}"
         )
 
+    tool_health_hints = active_context.get("tool_health_hints")
+    if isinstance(tool_health_hints, list) and tool_health_hints:
+        health_lines = []
+        for item in tool_health_hints[:5]:
+            if not isinstance(item, dict):
+                continue
+            tool = str(item.get("tool", "") or "").strip()
+            category = str(item.get("last_category", "") or "").strip()
+            rate = item.get("success_rate")
+            circuit_open = bool(item.get("circuit_open", False))
+            if not tool:
+                continue
+            health_lines.append(
+                f"- {tool}: success_rate={rate}, category={category or 'unknown'}, "
+                f"circuit_open={circuit_open}"
+            )
+        if health_lines:
+            context_str += (
+                "
+Current tool-health warnings:
+"
+                + "
+".join(health_lines)
+                + "
+Avoid repeatedly selecting a tool whose circuit is open or "
+                "whose recent failures match the current task; prefer a verified "
+                "alternative when one exists.
+"
+            )
+
+    memory_hints = active_context.get("memory_hints")
+    if isinstance(memory_hints, list) and memory_hints:
+        memory_lines = []
+        for item in memory_hints[:5]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "") or "").strip()
+            kind = str(item.get("kind", "fact") or "fact").strip()
+            if text:
+                memory_lines.append(f"- [{kind}] {text}")
+        if memory_lines:
+            context_str += (
+                "
+Relevant local memory hints:
+"
+                + "
+".join(memory_lines)
+                + "
+Treat memory as a hint, not proof; verify against current "
+                "tool results and live state before acting.
+"
+            )
+
     learned_hints = active_context.get("learned_hints")
     if isinstance(learned_hints, list) and learned_hints:
         cleaned_hints = [
