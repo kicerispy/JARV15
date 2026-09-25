@@ -119,7 +119,7 @@ class N8nBridgeTests(unittest.TestCase):
 
     def test_dispatch_prefers_native_mcp_when_enabled(self):
         with patch.object(n8n_bridge, "N8N_ENABLED", True), \
-             patch.object(n8n_bridge, "N8N_MCP_ENABLED", True):
+             patch("config.N8N_MCP_ENABLED", True):
             # The config symbol is imported lazily by run_n8n_workflow, so
             # patching the module import boundary keeps this test isolated.
             with patch(
