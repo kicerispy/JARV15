@@ -1595,9 +1595,20 @@ def deterministic_route(user_request, active_context=None):
     ) or (
         ("anime availability" in anime_lower or "anime providers" in anime_lower)
         and "anime" in anime_lower
+    ) or (
+        ("free anime" in anime_lower or "free streaming" in anime_lower
+         or "no subscription" in anime_lower or "without a subscription" in anime_lower)
+        and "anime" in anime_lower
     )
 
     if anime_route:
+        free_only = (
+            "free anime" in anime_lower
+            or "free streaming" in anime_lower
+            or "no subscription" in anime_lower
+            or "without a subscription" in anime_lower
+            or "free to watch" in anime_lower
+        )
         availability = (
             "where can i watch" in anime_lower
             or "where do i watch" in anime_lower
@@ -1620,7 +1631,13 @@ def deterministic_route(user_request, active_context=None):
                 break
         argument = argument.rstrip("?.!,").strip()
 
-        tool = "anime_availability" if availability else "anime_streaming_links"
+        tool = (
+            "anime_free_watch"
+            if free_only
+            else "anime_availability"
+            if availability
+            else "anime_streaming_links"
+        )
         print(f"JARVIS: Anime streaming route selected: {tool}.")
         return {
             "steps": [
