@@ -412,9 +412,9 @@ def _deterministic_n8n_plan(
             "resolved_command": user_command,
         }
 
-    # When MCP is enabled, let the model use n8n's native workflow
-    # management tools for explicit build/edit requests instead of collapsing
-    # them into the generic execution gateway.
+    # When MCP is enabled, leave explicit workflow build/edit requests
+    # to the native n8n MCP planner tools. This prevents the deterministic
+    # builder gateway from swallowing the dynamically exposed MCP actions.
     if config.N8N_MCP_ENABLED and any(
         phrase in normalized
         for phrase in (
@@ -429,39 +429,7 @@ def _deterministic_n8n_plan(
             "use the n8n mcp",
         )
     ):
-        activation_requested = any(
-            phrase in normalized
-            for phrase in (
-                "activate it",
-                "activate the workflow",
-                "publish it",
-                "publish the workflow",
-                "make it live",
-            )
-        )
-        return {
-            "goal": "build and validate an n8n workflow",
-            "steps": [
-                {
-                    "tool": "n8n_workflow_builder",
-                    "argument": json.dumps(
-                        {
-                            "request": str(user_command).strip(),
-                            "activate": activation_requested,
-                            "test": True,
-                            "context": (
-                                dict(active_context)
-                                if isinstance(active_context, dict)
-                                else {}
-                            ),
-                        },
-                        ensure_ascii=False,
-                    ),
-                }
-            ],
-            "resolved_command": user_command,
-            "execution_owner": "n8n",
-        }
+        return None
 
     try:
         from n8n_bridge import classify_n8n_request
