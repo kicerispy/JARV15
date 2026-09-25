@@ -103,6 +103,76 @@ class PlannerModelManagerTests(unittest.TestCase):
         self.assertIn("focused source-inspection planner", system)
         self.assertNotIn("REPAIR HANDOFF MODE", system)
 
+    def test_change_phase_uses_dedicated_fast_planner_model(self):
+        import planner
+
+        captured = {}
+
+        def fake_generate(
+            *,
+            model,
+            messages,
+            format=None,
+            options=None,
+            keep_alive=None,
+            think=None,
+        ):
+            captured.update(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "format": format,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                    "think": think,
+                }
+            )
+            return {
+                "message": {
+                    "content": (
+                        '{"goal":"change","steps":['
+                        '{"tool":"code_checkpoint","argument":""},'
+                        '{"tool":"edit_file","argument":"target.py|||old|||new"},'
+                        '{"tool":"code_test","argument":"{'
+                        '\\"mode\\":\\"pytest\\",'
+                        '\\"path\\":\\"tests/test_target.py\\"}"}]}'
+                    )
+                }
+            }
+
+        request = (
+            "[JARVIS_INTERNAL_PHASE:CHANGE]\n"
+            "Implement the verified bounded software change."
+        )
+
+        with patch.object(
+            planner.ModelManager,
+            "generate",
+            side_effect=fake_generate,
+        ):
+            result = planner.create_plan(request)
+
+        self.assertEqual(result.get("goal"), "change")
+        self.assertEqual(
+            captured.get("model"),
+            planner.ModelManager().change_planner_model,
+        )
+        self.assertEqual(
+            captured.get("options"),
+            {
+                "temperature": 0,
+                "num_predict": 512,
+            },
+        )
+        self.assertEqual(
+            captured.get("keep_alive"),
+            "10m",
+        )
+        self.assertFalse(captured.get("think"))
+        system = captured.get("messages", [{}])[0].get("content", "")
+        self.assertIn("bounded software-change planner", system)
+        self.assertNotIn("REPAIR HANDOFF MODE", system)
+
     def test_diagnostic_test_phase_uses_general_planner_model(self):
         import planner
 
