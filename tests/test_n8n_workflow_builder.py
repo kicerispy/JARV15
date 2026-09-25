@@ -5,6 +5,10 @@ import n8n_workflow_builder as builder
 
 
 class N8nWorkflowBuilderTests(unittest.TestCase):
+    VALID_CODE = (
+        "import { workflow } from '@n8n/workflow-sdk';\n"
+        "export default workflow('id', 'Test Workflow');"
+    )
     def test_sdk_shape_guard_rejects_common_model_failures(self):
         bad_codes = [
             "export default createWorkflow('Name', []);",
@@ -115,7 +119,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
                 }
             raise AssertionError(name)
 
-        with patch.object(builder, "design_workflow", return_value=design),              patch.object(builder, "_ollama_json", return_value={"name": "x", "code": "code"}),              patch.object(builder, "call_tool", side_effect=fake_call),              patch.object(
+        with patch.object(builder, "design_workflow", return_value=design),              patch.object(builder, "_ollama_json", return_value={"name": "x", "code": self.VALID_CODE}),              patch.object(builder, "call_tool", side_effect=fake_call),              patch.object(
                  builder,
                  "audit_workflow",
                  return_value={
@@ -275,7 +279,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
                  return_value={
                      "name": "GitHub Issue Alert",
                      "description": "Alerts on issues",
-                     "code": "export default {};",
+                     "code": self.VALID_CODE,
                  },
              ), \
              patch.object(builder, "call_tool", side_effect=fake_call), \
@@ -476,7 +480,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
             })
 
         self.assertFalse(result["success"])
-        self.assertEqual(result["stage"], "activate_gate")
+        self.assertEqual(result["stage"], "test_gate")
 
 
 if __name__ == "__main__":
