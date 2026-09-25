@@ -59,6 +59,16 @@ def detect_domain(request: str, context: dict[str, Any] | None = None) -> str:
     return "general"
 
 
+def _safe_argument(argument: Any) -> str:
+    text = str(argument or "").strip()
+    text = re.sub(
+        r"(?i)(authorization|api[_ -]?key|token|password|secret)\\s*[=:]\\s*\\S+",
+        r"\\1=<redacted>",
+        text,
+    )
+    return text[:1600]
+
+
 def _argument_shape(argument: Any) -> str:
     text = str(argument or "").strip()
     text = re.sub(r"https?://\S+", "<url>", text)
@@ -189,7 +199,7 @@ def record_strategy(
         steps.append(
             {
                 "tool": str(step.get("tool", "") or "").strip()[:120],
-                "argument": _argument_shape(step.get("argument", "")),
+                "argument": _safe_argument(step.get("argument", "")),
             }
         )
 
