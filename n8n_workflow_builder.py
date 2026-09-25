@@ -382,6 +382,19 @@ def _compiler_prompt(
             "unknown type merely because its name sounds plausible.\n"
         )
 
+
+    repair_rules = _schema_repair_instructions(
+        [line for line in validation_error.splitlines() if line.strip()]
+        if validation_error
+        else []
+    )
+    if repair_rules:
+        repair += (
+            "\nSCHEMA-SPECIFIC REPAIR REQUIREMENTS:\n"
+            + "\n".join(f"- {rule}" for rule in repair_rules)
+            + "\n"
+        )
+
     return f"""
 Build one new n8n workflow from the verified architecture below.
 
