@@ -1054,6 +1054,9 @@ def compose_task_answer(
     if "find_file" in executed_tools or "list_files" in executed_tools:
         return _project_file_answer(evidence)
 
+    if "integration_health" in executed_tools:
+        return _integration_health_answer(task, evidence)
+
     if "roblox_mcp_status" in executed_tools or "roblox_mcp_setup" in executed_tools:
         return _roblox_mcp_lifecycle_answer(task, evidence)
 
@@ -1062,9 +1065,6 @@ def compose_task_answer(
 
     if intent.get("domain") == "browser":
         return _browser_answer(task, evidence)
-
-    if "integration_health" in executed_tools:
-        return _integration_health_answer(task, evidence)
 
     if any(
         str(item.get("tool", "") or "").strip()
