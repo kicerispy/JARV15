@@ -39,6 +39,18 @@ def analyze_error(
     if attempt >= max_attempts:
         return None
 
+    hints = healing_hints(
+        tool_name,
+        error=error_message,
+        limit=3,
+    )
+    failure_hints = json.dumps(
+        hints,
+        ensure_ascii=True,
+    )
+    if not hints:
+        failure_hints = "No matching prior failure patterns."
+
     prompt = f"""You are JARVIS's error recovery system.
 
 A tool execution failed. Analyze the error and suggest a fix.
