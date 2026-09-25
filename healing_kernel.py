@@ -400,6 +400,9 @@ def healing_status() -> dict[str, Any]:
         "journal": str(_JOURNAL_PATH),
         "events": min(count, _MAX_JOURNAL_EVENTS),
         "source_mutation_requires_bounded_agent_flow": True,
+        "runtime_code_repair_bridge": bool(
+            getattr(config, "SELF_HEALING_ENABLED", True)
+        ),
     }
 
 
