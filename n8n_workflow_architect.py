@@ -556,6 +556,41 @@ def _discover_nodes(
         values = _result_list(result, ("nodes", "results", "items"))
         candidates.extend(values)
 
+    required_capabilities = [
+        capability
+        for capability, _markers in _required_capabilities(request)
+    ]
+
+    # The normal search/ranking pass can legitimately fill all eight slots with
+    # triggers or lookalike nodes. Backfill any required capability that is still
+    # absent with a targeted live n8n search before ranking the final set.
+    for capability in required_capabilities:
+        if any(
+            _capability_matches_node(capability, item)
+            for item in candidates
+        ):
+            continue
+
+        for query in _capability_search_queries(request, capability):
+            result = _call(
+                "search_nodes",
+                {
+                    "queries": [query],
+                    "usage": "workflow",
+                },
+            )
+            if result.get("success") is not True:
+                continue
+
+            values = _result_list(result, ("nodes", "results", "items"))
+            candidates.extend(values)
+
+            if any(
+                _capability_matches_node(capability, item)
+                for item in values
+            ):
+                break
+
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in candidates:
         ref = _node_identity(item)
@@ -579,7 +614,39 @@ def _discover_nodes(
         reverse=True,
     )
 
-    return ranked[:MAX_NODE_CANDIDATES], queries
+    selected: List[Dict[str, Any]] = []
+    selected_keys = set()
+
+    # Reserve capacity for the best live node satisfying each explicitly
+    # requested capability. This prevents a generic trigger or classifier from
+    # crowding out the actual LLM/condition/notification node we need.
+    for capability in required_capabilities:
+        matches = [
+            item
+            for item in ranked
+            if _capability_matches_node(capability, item)
+        ]
+        if not matches:
+            continue
+
+        best = matches[0]
+        ref = _node_identity(best)
+        key = json.dumps(ref, sort_keys=True, default=str) if ref else ""
+        if key and key not in selected_keys:
+            selected.append(best)
+            selected_keys.add(key)
+
+    for item in ranked:
+        ref = _node_identity(item)
+        key = json.dumps(ref, sort_keys=True, default=str) if ref else ""
+        if not key or key in selected_keys:
+            continue
+        selected.append(item)
+        selected_keys.add(key)
+        if len(selected) >= MAX_NODE_CANDIDATES:
+            break
+
+    return selected[:MAX_NODE_CANDIDATES], queries
 
 
 def _deprecated_node_ids(
@@ -838,6 +905,147 @@ def _required_capabilities(request: str) -> List[Tuple[str, Tuple[str, ...]]]:
     return capabilities
 
 
+
+def _node_search_text(item: Dict[str, Any]) -> str:
+    """Return stable node identity/configuration text, excluding noisy search excerpts."""
+    values = (
+        item.get("name"),
+        item.get("nodeId"),
+        item.get("type"),
+        item.get("resource"),
+        item.get("operation"),
+        item.get("mode"),
+        item.get("description"),
+    )
+    return " ".join(str(value or "") for value in values).strip().lower()
+
+
+def _node_tokens(item: Dict[str, Any]) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", _node_search_text(item)))
+
+
+def _capability_matches_node(capability: str, item: Dict[str, Any]) -> bool:
+    """Determine whether a discovered node actually satisfies a required capability."""
+    capability = str(capability or "").strip().lower()
+    tokens = _node_tokens(item)
+    identity = _node_search_text(item)
+    node_id = str(item.get("nodeId") or item.get("type") or "").lower()
+    resource = str(item.get("resource") or "").lower()
+    operation = str(item.get("operation") or "").lower()
+
+    if capability == "trigger":
+        return _is_start_trigger_type(node_id) or "trigger" in tokens
+
+    if capability == "github_source":
+        if "githubtrigger" in tokens:
+            return True
+        return (
+            "github" in tokens
+            and (
+                resource in {"issue", "issues"}
+                or operation in {
+                    "getissue",
+                    "getissues",
+                    "getmany",
+                    "getall",
+                    "search",
+                    "get",
+                    "list",
+                }
+            )
+        )
+
+    if capability == "summarization":
+        return bool(
+            {
+                "openai",
+                "gemini",
+                "claude",
+                "anthropic",
+                "grok",
+                "textgenerator",
+                "llm",
+                "basicllm",
+            }
+            & tokens
+        ) or "text generation" in identity
+
+    if capability == "condition":
+        return bool({"if", "switch", "filter", "router"} & tokens)
+
+    if capability == "notification":
+        action_markers = {
+            "slack",
+            "email",
+            "gmail",
+            "discord",
+            "telegram",
+            "teams",
+            "twilio",
+            "notification",
+        }
+        if not (action_markers & tokens):
+            return False
+        # Trigger nodes monitor events; they should not satisfy a notification action.
+        if "trigger" in tokens and not ({"send", "message", "notification"} & tokens):
+            return False
+        return True
+
+    return False
+
+
+def _capability_search_queries(
+    request: str,
+    capability: str,
+) -> List[str]:
+    """Return bounded, capability-specific searches used to fill discovery gaps."""
+    capability = str(capability or "").strip().lower()
+    text = _clean_text(request).lower()
+
+    if capability == "github_source":
+        return _unique_strings(
+            [
+                "GitHub issue trigger",
+                "GitHub issues node",
+                "GitHub issue",
+            ]
+        )
+
+    if capability == "summarization":
+        return _unique_strings(
+            [
+                "OpenAI text generation",
+                "LLM text generation",
+                "AI text generation",
+            ]
+        )
+
+    if capability == "condition":
+        return _unique_strings(
+            [
+                "IF node",
+                "Switch node",
+                "conditional filter",
+            ]
+        )
+
+    if capability == "notification":
+        return _unique_strings(
+            [
+                "Slack send",
+                "Send Email",
+                "Telegram message",
+            ]
+        )
+
+    if capability == "trigger":
+        if "github" in text and "issue" in text:
+            return ["GitHub issue trigger", "trigger"]
+        return ["trigger"]
+
+    return []
+
+
 def _quality_gate(
     request: str,
     requirements: Dict[str, Any],
@@ -857,16 +1065,7 @@ def _quality_gate(
             found = has_trigger_candidate
         else:
             found = any(
-                any(
-                    marker in " ".join(
-                        [
-                            str(item.get("name") or ""),
-                            str(item.get("nodeId") or ""),
-                            str(item.get("type") or ""),
-                        ]
-                    ).lower()
-                    for marker in markers
-                )
+                _capability_matches_node(capability, item)
                 for item in candidates
             )
 
@@ -1029,6 +1228,10 @@ def design_workflow(
         "search_queries": queries,
         "requirements": requirements,
         "best_practices": guidance,
+        "required_capabilities": [
+            capability
+            for capability, _markers in _required_capabilities(request_text)
+        ],
         "node_candidates": [
             {
                 "name": item.get("name"),
