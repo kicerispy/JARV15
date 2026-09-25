@@ -29,8 +29,17 @@ _MAX_ARGUMENT = 800
 _LOCK = threading.RLock()
 
 _SECRET_PATTERNS = (
-    (re.compile(r"(?i)(api[_ -]?key|token|authorization|password|secret)\s*[=:]\s*[^\s,;]+"), r"\1=<redacted>"),
-    (re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer <redacted>"),
+    (
+        re.compile(
+            r"(?i)(authorization|api[_ -]?key|token|password|secret)"
+            r"\s*[=:]\s*(?:bearer\s+)?[^\s,;]+"
+        ),
+        r"\1=<redacted>",
+    ),
+    (
+        re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"),
+        "Bearer <redacted>",
+    ),
 )
 
 
