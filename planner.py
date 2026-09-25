@@ -30,6 +30,9 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "anipy_episodes": "Get available anime episodes through anipy-api. Argument is JSON with query/provider/identifier and language.",
     "anipy_get_video": "Resolve an anime episode to an anipy-api video stream. Argument is JSON with anime selector, episode, language, and optional quality.",
     "anipy_download": "Download anime using the upstream anipy-api Downloader and anipy-cli configuration semantics. Argument is JSON with anime selector, episode(s), language, quality, and optional location/container/ffmpeg.",
+    "unreal_mcp": "Call the upstream Unreal_mcp native MCP gateway. Argument is JSON using the upstream unreal gateway operations: search, describe, execute, or configure. Preserve upstream capability names and parameter contracts.",
+    "unreal_mcp_status": "Check whether the local Unreal_mcp native MCP endpoint is reachable, authenticated, and exposing the upstream unreal gateway.",
+    "unreal_mcp_setup": "Clone or refresh ChiR24/Unreal_mcp into JARVIS external-tools and report the Unreal plugin path. Do not silently modify an Unreal project.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -646,6 +649,12 @@ _ANIPY_PLANNER_TOOLS = {
     "anipy_download",
 }
 
+_UNREAL_MCP_PLANNER_TOOLS = {
+    "unreal_mcp",
+    "unreal_mcp_status",
+    "unreal_mcp_setup",
+}
+
 def _planner_tool_scope(
     user_command: str,
     active_context: Optional[Dict[str, Any]] = None,
@@ -697,6 +706,37 @@ def _planner_tool_scope(
         context_tool = str(
             active_context.get("last_tool", "") or ""
         ).strip().lower()
+
+    if (
+        context_site == "unreal"
+        or context_tool in {"unreal_mcp", "unreal_mcp_status"}
+    ):
+        unreal_followup_signals = (
+            "actor",
+            "asset",
+            "blueprint",
+            "level",
+            "world",
+            "material",
+            "mesh",
+            "component",
+            "physics",
+            "animation",
+            "sequencer",
+            "niagara",
+            "ai",
+            "audio",
+            "camera",
+            "viewport",
+            "inspect",
+            "create",
+            "delete",
+            "edit",
+            "build",
+            "test",
+        )
+        if any(signal in text for signal in unreal_followup_signals):
+            return _UNREAL_MCP_PLANNER_TOOLS
 
     if (
         context_site == "roblox"
@@ -758,6 +798,56 @@ def _planner_tool_scope(
         and any(signal in text for signal in anime_action_signals)
     ):
         return _ANIPY_PLANNER_TOOLS
+
+    unreal_domain_signals = (
+        "unreal",
+        "unreal engine",
+        "unreal editor",
+        "ue5",
+        "ue 5",
+        "ue editor",
+        "ue project",
+    )
+
+    unreal_action_signals = (
+        "build",
+        "spawn",
+        "actor",
+        "blueprint",
+        "asset",
+        "material",
+        "level",
+        "world",
+        "niagara",
+        "particle",
+        "animation",
+        "physics",
+        "sequencer",
+        "cinematic",
+        "audio",
+        "ai",
+        "behavior tree",
+        "pcg",
+        "geometry",
+        "networking",
+        "render",
+        "camera",
+        "viewport",
+        "play",
+        "playtest",
+        "test",
+        "inspect",
+        "import",
+        "delete",
+        "create",
+        "edit",
+    )
+
+    if any(signal in text for signal in unreal_domain_signals) and (
+        any(signal in text for signal in unreal_action_signals)
+        or "mcp" in text
+    ):
+        return _UNREAL_MCP_PLANNER_TOOLS
 
     code_signals = (
         "code",
@@ -916,6 +1006,15 @@ ANIPY-CLI RULES:
 - Use anipy_search, anipy_info, anipy_episodes, and anipy_get_video for structured read-only anime operations.
 - Use anipy_download only when the request specifies an episode or explicit episode range; it uses the upstream Downloader/configuration path.
 - Do not route anime requests to generic browser tools when an anipy tool can satisfy the request.
+
+UNREAL ENGINE / UNREAL_MCP RULES:
+
+- Use unreal_mcp for Unreal Engine actions through the upstream `unreal` gateway; do not recreate the upstream capability families in JARVIS.
+- Follow the upstream workflow: `search` capability -> `describe` the exact capability/parameters when needed -> `execute` the validated action.
+- Preserve exact upstream canonical capability names, legacy tool/action aliases, selectors, and parameter names returned by the gateway.
+- Do not invent Unreal asset paths, actor names, capability ids, or parameter names. Reuse values returned by Unreal MCP observations.
+- Use unreal_mcp_status for connection/authentication checks and unreal_mcp_setup only for explicit setup requests.
+- Unreal MCP execution is an external side effect inside the Unreal Editor. Do not retry destructive execute/configure operations automatically.
 
 WINDOWS STARTUP AND RUNTIME STATUS:
 

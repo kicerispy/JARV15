@@ -62,6 +62,7 @@ SAFE_RETRY_TOOLS = {
     "analyze_screen",
     "verify_screen",
     "barehands_board_state",
+    "unreal_mcp_status",
 
     "currency_convert",
     "location_lookup",

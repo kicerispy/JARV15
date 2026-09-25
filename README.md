@@ -9,6 +9,7 @@ JARVIS is a local-first personal AI assistant for Windows. It combines voice int
 - **Browser:** Playwright and optional Browser Use integration
 - **Computer control:** allowlisted Windows actions and verification
 - **Roblox:** Roblox Studio MCP integration
+- **Unreal Engine:** native Unreal_mcp MCP gateway integration
 - **Automation:** optional n8n delegation
 - **Coding/self-repair:** checkpoint → inspect → focused plan → edit → test → verification → bounded recovery
 - **Testing:** pytest regression suite plus GitHub Actions verification
@@ -165,6 +166,25 @@ Examples:
 ```
 
 The native anipy-cli command continues to own its normal interactive configuration and player behavior. Download/remux operations that use the structured JARVIS tool use the same upstream Downloader, download-path formatting, retry logic, and post-download hook path. FFmpeg and any external player required by the selected upstream mode must be installed separately.
+
+## Unreal Engine / Unreal_mcp
+
+JARVIS integrates with [ChiR24/Unreal_mcp](https://github.com/ChiR24/Unreal_mcp) through its native MCP Streamable HTTP gateway. The upstream project exposes one public `unreal` gateway with `search`, `describe`, `execute`, and `configure` operations, so JARVIS keeps the upstream capability catalog and execution semantics intact instead of copying the 23 Unreal capability families into Python.
+
+The current upstream `dev` branch documents native MCP at `http://127.0.0.1:3000/mcp`, with capability-token authentication and session-based HTTP/SSE. JARVIS reads the capability token from `JARVIS_UNREAL_MCP_TOKEN`, `JARVIS_UNREAL_MCP_TOKEN_FILE`, or `<UnrealProject>/Saved/MCP/capability-token` when `JARVIS_UNREAL_MCP_PROJECT_PATH` is configured.
+
+Useful commands include:
+
+```text
+"check Unreal MCP status"
+"search Unreal for spawning an actor"
+"describe Unreal capability manage_asset.import_asset"
+"execute Unreal capability manage_asset.import_asset"
+"set up Unreal MCP"
+```
+
+`unreal_mcp_setup` clones or refreshes the upstream `dev` branch under `.jarvis_external/Unreal_mcp` and reports the native plugin path. It does not silently modify an Unreal project. Install `plugins/McpAutomationBridge` into the target project, enable Native MCP on port 3000, and configure the JARVIS endpoint/token settings before executing Unreal actions.
+
 
 ## License
 

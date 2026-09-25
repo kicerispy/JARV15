@@ -18,7 +18,7 @@ import certifi
 import psutil
 
 from tool_result import ToolResult
-from tool_registry import BROWSER_TOOLS, ANIPY_TOOLS
+from tool_registry import BROWSER_TOOLS, ANIPY_TOOLS, UNREAL_MCP_TOOLS
 from project_fs import iter_project_files
 
 import barehands_tools
@@ -3296,6 +3296,14 @@ def _run_tool_raw(
         from anipy_integration import run_anipy_tool
 
         return run_anipy_tool(
+            tool_name,
+            argument,
+        )
+
+    if tool_name in UNREAL_MCP_TOOLS:
+        from unreal_mcp import run_unreal_mcp_tool
+
+        return run_unreal_mcp_tool(
             tool_name,
             argument,
         )
