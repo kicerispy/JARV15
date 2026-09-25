@@ -74,7 +74,7 @@ def _is_transient_generation_error(exc: BaseException) -> bool:
     return any(marker in text for marker in transient_markers)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ModelManager:
     """Single source of truth for JARVIS model roles and chat settings."""
 
