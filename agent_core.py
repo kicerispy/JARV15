@@ -987,7 +987,15 @@ class JarvisAgent:
                 str(direct_match.group(1)).strip().split()
             )
             candidate = candidate.rstrip(".,!?;:")
-            if candidate:
+
+            # Prefer the direct extraction only when it resolves to an actual
+            # project file. This prevents prose such as "the browser automation
+            # issue in browser_controller.py" from being mistaken for one
+            # filename while preserving real multi-word filenames.
+            if (
+                candidate
+                and JarvisAgent._requested_file_exists(candidate)
+            ):
                 return candidate
 
         # Recover an explicitly named nested project path first.
