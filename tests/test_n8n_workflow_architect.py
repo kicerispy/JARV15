@@ -495,6 +495,140 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(gate["missing"], [])
 
 
+    def test_capability_matching_rejects_lookalike_github_file_node(self):
+        github_file = {
+            "name": "GitHub",
+            "nodeId": "n8n-nodes-base.githubTool",
+            "type": "n8n-nodes-base.githubTool",
+            "resource": "file",
+            "operation": "create",
+        }
+        github_trigger = {
+            "name": "GitHub Trigger",
+            "nodeId": "n8n-nodes-base.githubTrigger",
+            "type": "n8n-nodes-base.githubTrigger",
+        }
+
+        self.assertFalse(
+            architect._capability_matches_node("github_source", github_file)
+        )
+        self.assertTrue(
+            architect._capability_matches_node("github_source", github_trigger)
+        )
+
+
+    def test_capability_matching_rejects_classifier_as_condition(self):
+        classifier = {
+            "name": "Text Classifier",
+            "nodeId": "@n8n/n8n-nodes-langchain.textClassifier",
+            "type": "@n8n/n8n-nodes-langchain.textClassifier",
+        }
+        switch = {
+            "name": "Switch",
+            "nodeId": "n8n-nodes-base.switch",
+            "type": "n8n-nodes-base.switch",
+        }
+
+        self.assertFalse(
+            architect._capability_matches_node("condition", classifier)
+        )
+        self.assertTrue(
+            architect._capability_matches_node("condition", switch)
+        )
+
+
+    def test_capability_matching_rejects_notification_trigger(self):
+        slack_trigger = {
+            "name": "Slack Trigger",
+            "nodeId": "n8n-nodes-base.slackTrigger",
+            "type": "n8n-nodes-base.slackTrigger",
+        }
+        slack = {
+            "name": "Slack",
+            "nodeId": "n8n-nodes-base.slack",
+            "type": "n8n-nodes-base.slack",
+        }
+
+        self.assertFalse(
+            architect._capability_matches_node("notification", slack_trigger)
+        )
+        self.assertTrue(
+            architect._capability_matches_node("notification", slack)
+        )
+
+
+    def test_discover_nodes_backfills_missing_required_capabilities(self):
+        request = "Monitor GitHub issues, summarize bugs, and send me an alert"
+
+        def fake_call(tool_name, arguments=None):
+            self.assertEqual(tool_name, "search_nodes")
+            query = arguments["queries"][0]
+
+            if query == "GitHub issue trigger":
+                nodes = [{
+                    "nodeId": "n8n-nodes-base.githubTrigger",
+                    "name": "GitHub Trigger",
+                    "type": "n8n-nodes-base.githubTrigger",
+                }]
+            elif query == "OpenAI text generation":
+                nodes = [{
+                    "nodeId": "@n8n/n8n-nodes-langchain.openAi",
+                    "name": "OpenAI",
+                    "type": "@n8n/n8n-nodes-langchain.openAi",
+                }]
+            elif query == "IF node":
+                nodes = [{
+                    "nodeId": "n8n-nodes-base.if",
+                    "name": "If",
+                    "type": "n8n-nodes-base.if",
+                }]
+            elif query == "Slack send":
+                nodes = [{
+                    "nodeId": "n8n-nodes-base.slack",
+                    "name": "Slack",
+                    "type": "n8n-nodes-base.slack",
+                }]
+            else:
+                nodes = [
+                    {
+                        "nodeId": "n8n-nodes-base.manualTrigger",
+                        "name": "Manual Trigger",
+                        "type": "n8n-nodes-base.manualTrigger",
+                    },
+                    {
+                        "nodeId": "n8n-nodes-base.githubTool",
+                        "name": "GitHub",
+                        "type": "n8n-nodes-base.githubTool",
+                        "resource": "file",
+                        "operation": "create",
+                    },
+                    {
+                        "nodeId": "@n8n/n8n-nodes-langchain.textClassifier",
+                        "name": "Text Classifier",
+                        "type": "@n8n/n8n-nodes-langchain.textClassifier",
+                    },
+                ]
+
+            return {"success": True, "data": {"nodes": nodes}}
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            nodes, _ = architect._discover_nodes(
+                request,
+                ["monitoring", "content_generation", "notification"],
+            )
+
+        node_ids = {item["nodeId"] for item in nodes}
+        self.assertIn("n8n-nodes-base.githubTrigger", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.openAi", node_ids)
+        self.assertIn("n8n-nodes-base.if", node_ids)
+        self.assertIn("n8n-nodes-base.slack", node_ids)
+        self.assertNotIn("n8n-nodes-base.githubTool", node_ids)
+        self.assertNotIn(
+            "@n8n/n8n-nodes-langchain.textClassifier",
+            node_ids,
+        )
+
+
     def test_deprecated_nodes_are_detected_from_type_definitions(self):
         definition_text = """
 /** @deprecated Do not use this node. */
