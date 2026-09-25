@@ -33,6 +33,16 @@ def test_anipy_explicit_cli_passthrough():
     }
 
 
+def test_anipy_cli_prefix_without_verb():
+    plan = build_anipy_plan("anipy-cli -H")
+    assert plan == {
+        "steps": [{
+            "tool": "anipy_cli",
+            "argument": "-H",
+        }]
+    }
+
+
 def test_anipy_download_routes_to_structured_downloader():
     plan = build_anipy_plan("download One Piece episodes 1-3 sub")
 
