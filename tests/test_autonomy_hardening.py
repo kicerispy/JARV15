@@ -196,7 +196,6 @@ class ChangeRecoveryExecutor:
             if tool == "read_file":
                 result = ToolResult(
                     success=True,
-                    verified=True,
                     tool=tool,
                     data="def existing_regression():\n    assert True\n",
                 )
@@ -212,7 +211,6 @@ class ChangeRecoveryExecutor:
                 self.failed_test_once = True
                 result = ToolResult(
                     success=False,
-                    verified=False,
                     tool=tool,
                     data={
                         "mode": "pytest",
@@ -231,7 +229,6 @@ class ChangeRecoveryExecutor:
             elif tool == "code_test" and "git_diff_check" in str(argument):
                 result = ToolResult(
                     success=True,
-                    verified=True,
                     tool=tool,
                     data={
                         "mode": "git_diff_check",
@@ -246,7 +243,6 @@ class ChangeRecoveryExecutor:
             else:
                 result = ToolResult(
                     success=True,
-                    verified=True,
                     tool=tool,
                     data={"message": "completed"},
                 )
