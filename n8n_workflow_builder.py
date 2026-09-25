@@ -33,7 +33,6 @@ KNOWN_NODE_TYPES = {
     "n8n-nodes-base.webhook",
     "n8n-nodes-base.if",
     "n8n-nodes-base.switch",
-    "n8n-nodes-base.filter",
     "n8n-nodes-base.set",
     "n8n-nodes-base.httpRequest",
     "n8n-nodes-base.slack",
@@ -247,10 +246,51 @@ def _unknown_node_types(
     return list(dict.fromkeys(found))
 
 
+def _extract_node_versions(code: str) -> Dict[str, List[str]]:
+    """Collect explicit node versions from Workflow SDK source."""
+    source = str(code or "")
+    versions: Dict[str, List[str]] = {}
+    pattern = re.compile(
+        r"type\\s*:\\s*['\"]([^'\"]+)['\"].{0,700}?"
+        r"(?:version|typeVersion)\\s*:\\s*([0-9]+(?:\\.[0-9]+)*)",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(source):
+        node_type = match.group(1).strip()
+        version = match.group(2).strip()
+        if not node_type or not version:
+            continue
+        versions.setdefault(node_type, []).append(version)
+    return {key: list(dict.fromkeys(value)) for key, value in versions.items()}
+
+
+def _verified_node_versions(design: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Return only node versions explicitly surfaced by verified architecture data."""
+    versions: Dict[str, List[str]] = {}
+    for item in (
+        list(design.get("node_candidates", []))
+        + list(design.get("node_definitions", []))
+    ):
+        if not isinstance(item, dict):
+            continue
+        node_type = str(item.get("nodeId") or item.get("type") or "").strip()
+        version = item.get("version")
+        if version is None:
+            version = item.get("typeVersion")
+        if not node_type or version is None:
+            continue
+        value = str(version).strip()
+        if not value:
+            continue
+        versions.setdefault(node_type, []).append(value)
+    return {key: list(dict.fromkeys(value)) for key, value in versions.items()}
+
+
 def _sdk_shape_errors(
     code: str,
     *,
     allowed_node_types: Optional[List[str]] = None,
+    verified_node_versions: Optional[Dict[str, List[str]]] = None,
 ) -> List[str]:
     """Reject common model-generated SDK shapes before spending an MCP call."""
     errors: List[str] = []
@@ -275,6 +315,24 @@ def _sdk_shape_errors(
 
     if "@n8n/workflow-sdk" not in source:
         errors.append("Import the Workflow SDK from @n8n/workflow-sdk.")
+
+    explicit_versions = _extract_node_versions(source)
+    known_versions = verified_node_versions or {}
+    for node_type, versions in explicit_versions.items():
+        verified_versions = [str(value) for value in known_versions.get(node_type, [])]
+        for version in versions:
+            if not verified_versions:
+                errors.append(
+                    f"Node type {node_type} specifies invented version {version}. "
+                    "The verified architecture did not provide an exact version; "
+                    "omit the version so n8n can use its installed default/latest version."
+                )
+            elif version not in verified_versions:
+                errors.append(
+                    f"Node type {node_type} specifies version {version}, but verified "
+                    f"versions are: {', '.join(verified_versions)}. Use one of the "
+                    "verified versions or omit the version."
+                )
 
     unknown_node_types = _unknown_node_types(source, allowed_node_types or [])
     if unknown_node_types:
@@ -413,6 +471,7 @@ Rules:
 - Do not emit export type, export interface, typeof default_, or other type-only exports.
 - Do not leave branch wiring as standalone statements after export default.
 - Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
+- NEVER invent a node version. Only specify a version when that exact version appears in the verified architecture/schema. Otherwise omit version/typeVersion and let n8n use the installed node version.
 - The ALLOWED NODE TYPES list below is a hard allowlist. Every workflow node type MUST match one of those exact strings.
 - Never invent semantic node types such as @n8n/n8n-nodes-langchain.summarize. For summarization, use a verified LLM/AI node or another verified processing node from the supplied schemas.
 - Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
@@ -532,10 +591,12 @@ def _validate_code(
     code: str,
     *,
     allowed_node_types: Optional[List[str]] = None,
+    verified_node_versions: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     shape_errors = _sdk_shape_errors(
         code,
         allowed_node_types=allowed_node_types,
+        verified_node_versions=verified_node_versions,
     )
     if shape_errors:
         return {
@@ -810,9 +871,11 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
             )
 
         allowed_node_types = _verified_node_types(design)
+        verified_node_versions = _verified_node_versions(design)
         validation = _validate_code(
             code,
             allowed_node_types=allowed_node_types,
+            verified_node_versions=verified_node_versions,
         )
         attempts.append({
             "attempt": attempt + 1,
