@@ -38,15 +38,14 @@ class N8nMcpTests(unittest.TestCase):
 
     def test_sse_parser_reads_first_json_event(self):
         raw = (
-            "event: message\\n"
-            "data: {\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true}}\\n"
-            "\\n"
+            "event: message\n"
+            "data: {\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true}}\n"
+            "\n"
         )
 
         parsed = n8n_mcp._parse_sse(raw)
 
         self.assertTrue(parsed["result"]["ok"])
-
     def test_initialize_sends_protocol_and_preserves_session(self):
         responses = [
             _FakeResponse(
