@@ -778,21 +778,6 @@ def run_workflow_request(
         context,
     )
 
-    if mode == "manual" and trigger.get("kind") != "manual":
-        return {
-            "success": False,
-            "verified": False,
-            "retryable": False,
-            "terminal": True,
-            "execution_owner": "n8n",
-            "workflow_id": workflow_id,
-            "workflow_name": workflow_data.get("name"),
-            "message": (
-                "The selected n8n workflow is not published. "
-                "Publish it for production execution, or give it a Manual Trigger."
-            ),
-        }
-
     params: Dict[str, Any] = {
         "workflowId": workflow_id,
         "executionMode": mode,
