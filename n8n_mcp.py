@@ -636,7 +636,6 @@ def _build_execution_inputs(
 
     if kind == "chat":
         return {
-            "type": "chat",
             "chatInput": request,
         }
 
@@ -647,18 +646,16 @@ def _build_execution_inputs(
             context.get("workflow_class") or ""
         )
         return {
-            "type": "webhook",
             "webhookData": {
                 "method": "POST",
                 "body": body,
-            },
+            }
         }
 
     if kind == "form":
         body = dict(context)
         body["request"] = request
         return {
-            "type": "form",
             "formData": body,
         }
 
