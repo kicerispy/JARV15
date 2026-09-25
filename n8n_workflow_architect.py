@@ -108,6 +108,8 @@ def _search_queries(request: str, techniques: Sequence[str]) -> List[str]:
     for technique in techniques:
         queries.append(technique.replace("_", " "))
 
+    queries.append("trigger")
+
     expanded = list(queries)
     for term in terms[:4]:
         expanded.append(term)
@@ -123,7 +125,7 @@ def _result_data(result: Dict[str, Any]) -> Dict[str, Any]:
 def _result_list(result: Dict[str, Any], keys: Sequence[str]) -> List[Dict[str, Any]]:
     data = _result_data(result)
 
-    for key in keys:
+    for key in ("data", *keys):
         value = data.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
@@ -146,6 +148,21 @@ def _call(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[st
         "verified": False,
         "message": "n8n MCP returned an invalid result.",
     }
+
+
+def _is_start_trigger_type(node_type: Any) -> bool:
+    value = str(node_type or "").lower()
+    return any(
+        marker in value
+        for marker in (
+            "manualtrigger",
+            "scheduletrigger",
+            "webhook",
+            "chattrigger",
+            "formtrigger",
+            "trigger",
+        )
+    )
 
 
 def _node_identity(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -318,8 +335,8 @@ def _quality_gate(
     definitions: Sequence[Dict[str, Any]],
 ) -> Dict[str, Any]:
     has_trigger_candidate = any(
-        "trigger" in str(item.get("name", "")).lower()
-        or "trigger" in str(item.get("type", "")).lower()
+        _is_start_trigger_type(item.get("type"))
+        or "trigger" in str(item.get("name", "")).lower()
         for item in candidates
     )
 
@@ -500,7 +517,10 @@ def audit_workflow(
         if isinstance(node, dict)
     ]
 
-    has_trigger = any("trigger" in node_type for node_type in node_types)
+    has_trigger = any(
+        _is_start_trigger_type(node_type)
+        for node_type in node_types
+    )
     has_error_node = any(
         "errortrigger" in node_type or "error trigger" in node_type
         for node_type in node_types
