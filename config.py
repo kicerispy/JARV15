@@ -564,6 +564,44 @@ MEMORY_ENABLED = os.environ.get(
 ).strip().lower() not in {"0", "false", "no", "off"}
 
 
+# ============================================================
+# LEARNED AUTONOMY
+# ============================================================
+#
+# Strategy reuse is deliberately conservative: a learned plan must have
+# repeated successful, verified executions before it can replace planning.
+AUTONOMY_LEARNED_STRATEGY_ENABLED = os.environ.get(
+    "JARVIS_AUTONOMY_LEARNED_STRATEGY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+AUTONOMY_AUTO_VERIFICATION_ENABLED = os.environ.get(
+    "JARVIS_AUTONOMY_AUTO_VERIFICATION_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+AUTONOMY_STRATEGY_QUARANTINE_SECONDS = float(
+    os.environ.get(
+        "JARVIS_AUTONOMY_STRATEGY_QUARANTINE_SECONDS",
+        "3600",
+    )
+)
+
+AUTONOMY_STRATEGY_MIN_SUCCESSES = int(
+    os.environ.get(
+        "JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESSES",
+        "3",
+    )
+)
+
+AUTONOMY_STRATEGY_MIN_SUCCESS_RATE = float(
+    os.environ.get(
+        "JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESS_RATE",
+        "0.75",
+    )
+)
+
+
 # Persistent failure signatures become bounded recovery hints so repeated
 # failures do not force JARVIS to rediscover the same fix from scratch.
 SELF_HEALING_FAILURE_MEMORY_ENABLED = os.environ.get(
