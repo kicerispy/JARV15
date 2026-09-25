@@ -1662,7 +1662,7 @@ def build_anipy_plan(user_request):
 
     match = re.match(
         r"^(?:watch|play|stream)\s+(?:the\s+)?(?:anime\s+)?(.+?)\s+"
-        r"episode\s+([0-9]+(?:\.[0-9]+)?(?:\s*-\s*[0-9]+(?:\.[0-9]+)?)?)"
+        r"episodes?\s+([0-9]+(?:\.[0-9]+)?(?:\s*-\s*[0-9]+(?:\.[0-9]+)?)?)"
         r"(?:\s+(sub|dub))?$",
         original,
         re.IGNORECASE,
