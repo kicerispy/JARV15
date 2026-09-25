@@ -3355,7 +3355,7 @@ class JarvisAgent:
                 # Runtime code defects can be repaired even when the originating
                 # tool marks the raw failure non-retryable.
                 if self._handle_runtime_self_healing_failure(task):
-                    continue
+                    return "healing_recovery"
 
                 if not retryable:
                     if retry_message:
@@ -3594,6 +3594,11 @@ class JarvisAgent:
                 task_state,
                 speak_callback,
             )
+
+            if result == "healing_recovery":
+                # _execute_once staged a new bounded self-healing phase.
+                # The outer execution loop owns the next iteration.
+                continue
 
             # ------------------------------------------------
             # Success
