@@ -27,6 +27,31 @@ class ModelResilienceTests(unittest.TestCase):
         self.assertEqual(generate.call_count, 2)
         self.assertEqual(generate.call_args_list[1].kwargs["model"], "fallback-coder")
 
+    def test_planner_falls_back_through_change_planner_to_chat(self):
+        manager = ModelManager(
+            planner_model="broken-planner",
+            change_planner_model="broken-change",
+            chat_model="chat-fallback",
+        )
+        sentinel = object()
+
+        with patch.object(
+            manager,
+            "generate",
+            side_effect=[
+                ModelGenerationError("planner down", attempts=2, retryable=True),
+                ModelGenerationError("change planner down", attempts=2, retryable=True),
+                sentinel,
+            ],
+        ) as generate:
+            result = manager.planner([{"role": "user", "content": "plan this"}])
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(
+            [call.kwargs["model"] for call in generate.call_args_list],
+            ["broken-planner", "broken-change", "chat-fallback"],
+        )
+
     def test_model_inventory_uses_ollama_tags_endpoint(self):
         manager = ModelManager()
 
