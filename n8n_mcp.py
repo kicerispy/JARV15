@@ -1,0 +1,867 @@
+"""Local MCP client for n8n instance-level MCP.
+
+JARVIS uses this module as a thin, dependency-free bridge to the
+self-hosted n8n MCP server. It supports streamable HTTP JSON-RPC,
+bearer-token authentication, bounded responses, tool discovery, and
+high-level workflow execution without exposing credentials to the model.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from config import (
+    N8N_MCP_DISCOVERY_TTL_SECONDS,
+    N8N_MCP_ENABLED,
+    N8N_MCP_EXECUTION_TIMEOUT_SECONDS,
+    N8N_MCP_MAX_RESPONSE_BYTES,
+    N8N_MCP_TIMEOUT_SECONDS,
+    N8N_MCP_TOKEN,
+    N8N_MCP_TOKEN_FILE,
+    N8N_MCP_URL,
+)
+
+MCP_PROTOCOL_VERSION = "2025-03-26"
+CLIENT_NAME = "JARVIS"
+CLIENT_VERSION = "1.0"
+
+MAX_TEXT_CHARS = 12000
+MAX_DYNAMIC_TOOLS = 100
+
+_TOOL_CACHE: Dict[str, Any] = {
+    "expires_at": 0.0,
+    "tools": [],
+}
+_SESSION_ID: Optional[str] = None
+_REQUEST_ID = 0
+
+
+def _next_request_id() -> int:
+    global _REQUEST_ID
+    _REQUEST_ID += 1
+    return _REQUEST_ID
+
+
+def _bounded_text(value: Any, limit: int = MAX_TEXT_CHARS) -> str:
+    text = str(value or "")
+    if len(text) > limit:
+        return text[:limit] + "...<truncated>"
+    return text
+
+
+def _token() -> str:
+    if N8N_MCP_TOKEN.strip():
+        return N8N_MCP_TOKEN.strip()
+
+    path = Path(os.path.expandvars(os.path.expanduser(N8N_MCP_TOKEN_FILE)))
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+    return value
+
+
+def _request_headers() -> Dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+        "Mcp-Method": "",
+        "Mcp-Name": CLIENT_NAME,
+        "User-Agent": f"{CLIENT_NAME}/{CLIENT_VERSION}",
+    }
+
+    token = _token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    if _SESSION_ID:
+        headers["Mcp-Session-Id"] = _SESSION_ID
+
+    return headers
+
+
+def _parse_sse(raw: str) -> Any:
+    """Parse the first JSON data event from an SSE response."""
+    for block in raw.replace("\r\n", "\n").split("\n\n"):
+        data_lines = []
+        for line in block.split("\n"):
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+        if not data_lines:
+            continue
+
+        payload = "\n".join(data_lines).strip()
+        if not payload or payload == "[DONE]":
+            continue
+
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+
+    raise ValueError("n8n MCP returned an SSE response without JSON data.")
+
+
+def _decode_response(response) -> Any:
+    global _SESSION_ID
+
+    session_id = response.headers.get("Mcp-Session-Id")
+    if session_id:
+        _SESSION_ID = session_id
+
+    raw = response.read(N8N_MCP_MAX_RESPONSE_BYTES + 1)
+    if len(raw) > N8N_MCP_MAX_RESPONSE_BYTES:
+        raise ValueError("n8n MCP response exceeded the configured size limit.")
+
+    text = raw.decode("utf-8", errors="replace").strip()
+    if not text:
+        return {}
+
+    content_type = str(
+        response.headers.get("Content-Type", "")
+    ).lower()
+
+    if "text/event-stream" in content_type:
+        return _parse_sse(text)
+
+    return json.loads(text)
+
+
+def _rpc(
+    method: str,
+    params: Optional[Dict[str, Any]] = None,
+    *,
+    notification: bool = False,
+) -> Any:
+    if not N8N_MCP_ENABLED:
+        raise RuntimeError("n8n MCP is disabled.")
+
+    if not N8N_MCP_URL:
+        raise RuntimeError("n8n MCP URL is not configured.")
+
+    request_id = _next_request_id()
+    body: Dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "method": method,
+    }
+
+    if not notification:
+        body["id"] = request_id
+
+    if params is not None:
+        body["params"] = params
+
+    headers = _request_headers()
+    headers["Mcp-Method"] = method
+
+    request = Request(
+        N8N_MCP_URL,
+        data=json.dumps(
+            body,
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urlopen(
+            request,
+            timeout=N8N_MCP_TIMEOUT_SECONDS,
+        ) as response:
+            result = _decode_response(response)
+
+        if notification:
+            return result
+
+        if not isinstance(result, dict):
+            raise RuntimeError("n8n MCP returned an invalid JSON-RPC response.")
+
+        if result.get("error"):
+            error = result["error"]
+            if isinstance(error, dict):
+                message = error.get("message") or "n8n MCP request failed."
+                code = error.get("code")
+                raise RuntimeError(
+                    f"{message}" + (f" (code {code})" if code is not None else "")
+                )
+            raise RuntimeError(str(error))
+
+        return result.get("result", result)
+
+    except HTTPError as exc:
+        detail = ""
+        try:
+            raw = exc.read(4096).decode("utf-8", errors="replace")
+            detail = f": {raw[:1000]}"
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"n8n MCP HTTP {exc.code}{detail}"
+        ) from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(
+            f"n8n MCP connection failed: {exc}"
+        ) from exc
+
+
+def initialize() -> Dict[str, Any]:
+    global _SESSION_ID, _TOOL_CACHE
+
+    _SESSION_ID = None
+    _TOOL_CACHE = {"expires_at": 0.0, "tools": []}
+
+    result = _rpc(
+        "initialize",
+        {
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {
+                "name": CLIENT_NAME,
+                "version": CLIENT_VERSION,
+            },
+        },
+    )
+
+    try:
+        _rpc(
+            "notifications/initialized",
+            notification=True,
+        )
+    except Exception:
+        # Some MCP servers accept initialization without a notification.
+        pass
+
+    return result if isinstance(result, dict) else {"result": result}
+
+
+def list_tools(force: bool = False) -> List[Dict[str, Any]]:
+    now = time.monotonic()
+
+    if (
+        not force
+        and isinstance(_TOOL_CACHE.get("tools"), list)
+        and _TOOL_CACHE.get("expires_at", 0.0) > now
+    ):
+        return list(_TOOL_CACHE["tools"])
+
+    initialize()
+
+    result = _rpc("tools/list", {"cursor": None})
+    tools = result.get("tools", []) if isinstance(result, dict) else []
+
+    if not isinstance(tools, list):
+        raise RuntimeError("n8n MCP tools/list returned an invalid tool list.")
+
+    sanitized: List[Dict[str, Any]] = []
+    for item in tools[:MAX_DYNAMIC_TOOLS]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "") or "").strip()
+        if not name:
+            continue
+
+        sanitized.append(
+            {
+                "name": name,
+                "description": _bounded_text(item.get("description", "")),
+                "inputSchema": (
+                    item.get("inputSchema")
+                    if isinstance(item.get("inputSchema"), dict)
+                    else {}
+                ),
+            }
+        )
+
+    _TOOL_CACHE["tools"] = sanitized
+    _TOOL_CACHE["expires_at"] = now + max(
+        0.0,
+        float(N8N_MCP_DISCOVERY_TTL_SECONDS),
+    )
+    return list(sanitized)
+
+
+def tool_descriptions() -> Dict[str, str]:
+    return {
+        f"n8n_mcp__{item['name']}": (
+            f"n8n MCP tool: {item.get('description') or item['name']}. "
+            "Argument must be a JSON object."
+        )
+        for item in list_tools()
+    }
+
+
+def is_known_tool(name: str) -> bool:
+    remote_name = str(name or "")
+    if remote_name.startswith("n8n_mcp__"):
+        remote_name = remote_name[len("n8n_mcp__"):]
+
+    try:
+        return any(
+            item.get("name") == remote_name
+            for item in list_tools()
+        )
+    except Exception:
+        return False
+
+
+def call_tool(
+    name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    remote_name = str(name or "")
+    if remote_name.startswith("n8n_mcp__"):
+        remote_name = remote_name[len("n8n_mcp__"):]
+
+    if not remote_name:
+        return {
+            "success": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "message": "n8n MCP tool name is empty.",
+        }
+
+    try:
+        if not is_known_tool(remote_name):
+            return {
+                "success": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": f"Unknown n8n MCP tool: {remote_name}",
+            }
+
+        result = _rpc(
+            "tools/call",
+            {
+                "name": remote_name,
+                "arguments": arguments if isinstance(arguments, dict) else {},
+            },
+        )
+
+        is_error = bool(
+            result.get("isError")
+            if isinstance(result, dict)
+            else False
+        )
+        parsed: Any = result
+
+        if isinstance(result, dict):
+            structured = result.get("structuredContent")
+            if structured is not None:
+                parsed = structured
+            else:
+                content = result.get("content")
+                if isinstance(content, list):
+                    text_parts = [
+                        item.get("text", "")
+                        for item in content
+                        if isinstance(item, dict)
+                        and item.get("type") == "text"
+                    ]
+                    if text_parts:
+                        combined = "\n".join(text_parts).strip()
+                        try:
+                            parsed = json.loads(combined)
+                        except json.JSONDecodeError:
+                            parsed = {"text": _bounded_text(combined)}
+
+        payload = parsed if isinstance(parsed, dict) else {"result": parsed}
+
+        return {
+            "success": not is_error,
+            "verified": not is_error,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "mcp_tool": remote_name,
+            "data": payload,
+            "message": (
+                f"n8n MCP tool {remote_name} completed."
+                if not is_error
+                else f"n8n MCP tool {remote_name} reported an error."
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "mcp_tool": remote_name,
+            "message": str(exc),
+        }
+
+
+def status() -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "success": False,
+        "verified": False,
+        "enabled": bool(N8N_MCP_ENABLED),
+        "configured": bool(N8N_MCP_URL and _token()),
+        "reachable": False,
+        "url": N8N_MCP_URL,
+        "execution_owner": "n8n",
+        "transport": "streamable_http",
+    }
+
+    if not N8N_MCP_ENABLED:
+        result["message"] = "n8n MCP is disabled."
+        return result
+
+    if not N8N_MCP_URL:
+        result["message"] = "n8n MCP URL is not configured."
+        return result
+
+    if not _token():
+        result["message"] = "n8n MCP token is not configured."
+        return result
+
+    try:
+        initialized = initialize()
+        result.update(
+            {
+                "success": True,
+                "verified": True,
+                "reachable": True,
+                "protocol_version": (
+                    initialized.get("protocolVersion")
+                    if isinstance(initialized, dict)
+                    else None
+                ),
+                "message": "n8n MCP is reachable and authenticated.",
+            }
+        )
+        return result
+    except Exception as exc:
+        result["message"] = str(exc)
+        return result
+
+
+def _score_workflow(request: str, workflow: Dict[str, Any]) -> float:
+    text = " ".join(
+        str(request or "").lower().split()
+    )
+    haystack = " ".join(
+        [
+            str(workflow.get("name") or ""),
+            str(workflow.get("description") or ""),
+            " ".join(
+                str(tag.get("name", ""))
+                for tag in workflow.get("tags", [])
+                if isinstance(tag, dict)
+            ),
+        ]
+    ).lower()
+
+    tokens = {
+        token.strip(".,!?;:()[]{}\"'")
+        for token in text.split()
+        if len(token) >= 3
+    }
+
+    score = float(sum(1 for token in tokens if token in haystack))
+
+    request_phrase = text.strip()
+    if request_phrase and request_phrase in haystack:
+        score += 8.0
+
+    for strong in (
+        "weather",
+        "email",
+        "calendar",
+        "github",
+        "discord",
+        "slack",
+        "spotify",
+        "monitor",
+        "schedule",
+        "automation",
+        "workflow",
+        "research",
+    ):
+        if strong in text and strong in haystack:
+            score += 2.0
+
+    return score
+
+
+def _select_workflow(
+    request: str,
+    workflow_class: str,
+) -> Optional[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+
+    for query in (request, workflow_class):
+        result = call_tool(
+            "search_workflows",
+            {
+                "query": query,
+                "limit": 50,
+                "sortBy": "updatedAt:desc",
+            },
+        )
+
+        if result.get("success") is not True:
+            continue
+
+        payload = result.get("data")
+        if isinstance(payload, dict):
+            values = payload.get("data", [])
+        else:
+            values = []
+
+        if isinstance(values, list):
+            candidates.extend(
+                item
+                for item in values
+                if isinstance(item, dict)
+                and item.get("availableInMCP") is True
+            )
+
+        if candidates:
+            break
+
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for workflow in candidates:
+        workflow_id = str(workflow.get("id") or "").strip()
+        if workflow_id:
+            deduped[workflow_id] = workflow
+
+    ranked = sorted(
+        deduped.values(),
+        key=lambda item: (
+            _score_workflow(request, item),
+            str(item.get("updatedAt") or ""),
+        ),
+        reverse=True,
+    )
+
+    if not ranked:
+        return None
+
+    return ranked[0]
+
+
+def _trigger_candidates(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
+    nodes = workflow.get("nodes", [])
+    if not isinstance(nodes, list):
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+
+        node_type = str(node.get("type") or "").lower()
+        name = str(node.get("name") or "").strip()
+
+        kind = None
+        if "chattrigger" in node_type or "chat trigger" in node_type:
+            kind = "chat"
+        elif node_type.endswith(".webhook") or node_type.endswith("/webhook") or "webhook" in node_type:
+            kind = "webhook"
+        elif "formtrigger" in node_type or "form trigger" in node_type:
+            kind = "form"
+        elif "scheduletrigger" in node_type or "schedule trigger" in node_type or node_type.endswith(".cron"):
+            kind = "schedule"
+        elif "manualtrigger" in node_type or "manual trigger" in node_type:
+            kind = "manual"
+
+        if kind:
+            candidates.append(
+                {
+                    "name": name,
+                    "kind": kind,
+                }
+            )
+
+    return candidates
+
+
+def _build_execution_inputs(
+    trigger: Dict[str, Any],
+    request: str,
+    context: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    kind = trigger.get("kind")
+
+    if kind == "chat":
+        return {
+            "type": "chat",
+            "chatInput": request,
+        }
+
+    if kind == "webhook":
+        body = dict(context)
+        body["request"] = request
+        body["workflow_class"] = str(
+            context.get("workflow_class") or ""
+        )
+        return {
+            "type": "webhook",
+            "webhookData": {
+                "method": "POST",
+                "body": body,
+            },
+        }
+
+    if kind == "form":
+        body = dict(context)
+        body["request"] = request
+        return {
+            "type": "form",
+            "formData": body,
+        }
+
+    return None
+
+
+def run_workflow_request(
+    request: str,
+    workflow_class: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Find and execute an MCP-enabled n8n workflow for a JARVIS request."""
+    context = dict(context or {})
+    context["workflow_class"] = workflow_class
+
+    workflow = _select_workflow(request, workflow_class)
+
+    if workflow is None:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "message": (
+                "No MCP-enabled n8n workflow matched the request. "
+                "Enable the intended workflow under Settings > Instance-level MCP."
+            ),
+        }
+
+    workflow_id = str(workflow.get("id") or "").strip()
+    details = call_tool(
+        "get_workflow_details",
+        {
+            "workflowId": workflow_id,
+            "detailLevel": "execution",
+        },
+    )
+
+    if details.get("success") is not True:
+        return details
+
+    payload = details.get("data")
+    if not isinstance(payload, dict):
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "message": "n8n returned invalid workflow details.",
+        }
+
+    workflow_data = payload.get("workflow")
+    if not isinstance(workflow_data, dict):
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "message": "n8n workflow details were missing workflow metadata.",
+        }
+
+    can_execute = workflow_data.get("canExecute")
+    if can_execute is False:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "message": f"You don't have permission to execute workflow {workflow_data.get('name') or workflow_id}.",
+        }
+
+    trigger_candidates = _trigger_candidates(workflow_data)
+    if not trigger_candidates:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "message": (
+                f"Workflow {workflow_data.get('name') or workflow_id} has no supported MCP trigger."
+            ),
+        }
+
+    if len(trigger_candidates) > 1:
+        input_candidates = [
+            item for item in trigger_candidates
+            if item["kind"] in {"chat", "webhook", "form"}
+        ]
+        if len(input_candidates) == 1:
+            trigger = input_candidates[0]
+        else:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "workflow_id": workflow_id,
+                "workflow_name": workflow_data.get("name"),
+                "message": (
+                    "Multiple eligible n8n triggers exist. "
+                    "Choose one explicitly: "
+                    + ", ".join(item["name"] for item in trigger_candidates)
+                ),
+            }
+    else:
+        trigger = trigger_candidates[0]
+
+    active = bool(workflow_data.get("active"))
+    mode = "production" if active else "manual"
+
+    inputs = _build_execution_inputs(
+        trigger,
+        request,
+        context,
+    )
+
+    if mode == "manual" and trigger.get("kind") != "manual":
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_id": workflow_id,
+            "workflow_name": workflow_data.get("name"),
+            "message": (
+                "The selected n8n workflow is not published. "
+                "Publish it for production execution, or give it a Manual Trigger."
+            ),
+        }
+
+    params: Dict[str, Any] = {
+        "workflowId": workflow_id,
+        "executionMode": mode,
+        "triggerNodeName": trigger.get("name"),
+    }
+
+    if inputs is not None:
+        params["inputs"] = inputs
+
+    execution = call_tool(
+        "execute_workflow",
+        params,
+    )
+
+    if execution.get("success") is not True:
+        return execution
+
+    execution_payload = execution.get("data")
+    if not isinstance(execution_payload, dict):
+        return execution
+
+    execution_id = execution_payload.get("executionId")
+    if not execution_id:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "workflow_id": workflow_id,
+            "workflow_name": workflow_data.get("name"),
+            "message": "n8n accepted the workflow call without an execution ID.",
+        }
+
+    deadline = time.monotonic() + max(
+        1.0,
+        float(N8N_MCP_EXECUTION_TIMEOUT_SECONDS),
+    )
+    terminal_statuses = {
+        "success",
+        "error",
+        "canceled",
+        "crashed",
+        "unknown",
+    }
+    execution_state = {}
+
+    while time.monotonic() < deadline:
+        check = call_tool(
+            "get_workflow_execution",
+            {
+                "workflowId": workflow_id,
+                "executionId": execution_id,
+                "includeData": True,
+                "truncateData": 50,
+            },
+        )
+
+        if check.get("success") is True:
+            check_payload = check.get("data")
+            if isinstance(check_payload, dict):
+                execution_state = check_payload.get("execution") or {}
+                status = str(
+                    execution_state.get("status") or ""
+                ).lower()
+
+                if status in terminal_statuses:
+                    return {
+                        "success": status == "success",
+                        "verified": status == "success",
+                        "retryable": False,
+                        "terminal": True,
+                        "execution_owner": "n8n",
+                        "workflow_id": workflow_id,
+                        "workflow_name": workflow_data.get("name"),
+                        "execution_id": execution_id,
+                        "execution_status": status,
+                        "data": check_payload.get("data"),
+                        "message": (
+                            f"n8n workflow {workflow_data.get('name') or workflow_id} "
+                            f"finished with status {status}."
+                        ),
+                    }
+
+        time.sleep(1.0)
+
+    return {
+        "success": True,
+        "verified": False,
+        "retryable": False,
+        "terminal": True,
+        "execution_owner": "n8n",
+        "workflow_id": workflow_id,
+        "workflow_name": workflow_data.get("name"),
+        "execution_id": execution_id,
+        "execution_status": str(
+            execution_state.get("status") or "running"
+        ),
+        "message": (
+            f"n8n started {workflow_data.get('name') or workflow_id}; "
+            "the execution did not finish before the bounded wait expired."
+        ),
+    }
