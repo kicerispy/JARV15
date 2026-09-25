@@ -30,6 +30,10 @@ import web_tools
 import runtime_health
 import startup_manager
 import task_memory
+import jarvis_doctor
+import local_memory
+import resilience_kernel
+from model_manager import ModelManager
 
 from config import (
     DEFAULT_WEATHER_LOCATION,
@@ -3585,6 +3589,130 @@ def _run_tool_raw(
         return code_diagnose(argument)
 
     # --------------------------------------------------------
+    # JARVIS PLATFORM / SELF-OBSERVABILITY
+    # --------------------------------------------------------
+
+    elif tool_name == "jarvis_doctor":
+
+        raw = str(argument or "").strip()
+        deep = raw.lower() in {"deep", "true", "1", "yes", "doctor"}
+        run_tests = False
+
+        if raw:
+            try:
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    deep = bool(payload.get("deep", deep))
+                    run_tests = bool(payload.get("run_tests", False))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        result = jarvis_doctor.run_doctor(
+            deep=deep,
+            run_tests=run_tests,
+        )
+        result["report"] = jarvis_doctor.format_doctor_report(result)
+        return result
+
+    elif tool_name == "tool_health":
+
+        return resilience_kernel.tool_health_status()
+
+    elif tool_name == "memory_remember":
+
+        raw = str(argument or "").strip()
+        payload = {}
+
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"text": raw}
+
+        return local_memory.remember(
+            str(payload.get("text", "") or ""),
+            kind=str(payload.get("kind", "fact") or "fact"),
+            tags=(
+                payload.get("tags")
+                if isinstance(payload.get("tags"), list)
+                else []
+            ),
+        )
+
+    elif tool_name == "memory_recall":
+
+        raw = str(argument or "").strip()
+        payload = {}
+
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"query": raw}
+
+        return {
+            "success": True,
+            "verified": True,
+            "query": str(payload.get("query", "") or ""),
+            "results": local_memory.recall(
+                str(payload.get("query", "") or ""),
+                limit=int(payload.get("limit", 5) or 5),
+                kind=str(payload.get("kind", "") or ""),
+            ),
+        }
+
+    elif tool_name == "memory_forget":
+
+        raw = str(argument or "").strip()
+        query = raw
+
+        if raw:
+            try:
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    query = str(payload.get("query", "") or "")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return local_memory.forget(query)
+
+    elif tool_name == "ollama_models":
+
+        manager = ModelManager()
+        models = manager.list_local_models()
+        names = sorted(
+            {
+                str(item.get("name") or item.get("model") or "").strip()
+                for item in models
+                if str(item.get("name") or item.get("model") or "").strip()
+            }
+        )
+
+        configured = {
+            "chat": manager.chat_model,
+            "planner": manager.planner_model,
+            "change_planner": manager.change_planner_model,
+            "coding": manager.coding_model,
+            "coding_fallback": manager.coding_fallback_model,
+        }
+
+        return {
+            "success": True,
+            "verified": True,
+            "configured": configured,
+            "available": names,
+            "missing_configured": {
+                role: model
+                for role, model in configured.items()
+                if model and model not in names
+            },
+        }
+
+    # --------------------------------------------------------
     # SYSTEM
     # --------------------------------------------------------
 
@@ -3896,21 +4024,71 @@ def run_tool(
     argument: str = "",
 ) -> ToolResult:
     """
-    Public JARVIS tool dispatcher.
+    Public JARVIS tool dispatcher with bounded reliability telemetry.
 
-    All tool results are normalized into the unified ToolResult
-    contract while preserving the original raw result in .data.
+    The resilience layer sits around the existing dispatcher so every tool
+    receives the same circuit-breaker and outcome-accounting behavior without
+    changing individual tool implementations.
     """
 
-    result = _run_tool_raw(
+    tool_name = str(tool_name or "").strip()
+    argument = str(argument or "")
+
+    resilience = resilience_kernel.get_resilience()
+    gate = resilience.before(tool_name)
+
+    if not gate.get("allowed", True):
+        return ToolResult(
+            success=False,
+            tool=tool_name,
+            error=str(
+                gate.get("reason")
+                or f"{tool_name} is temporarily unavailable."
+            ),
+            retryable=True,
+            observation=gate,
+        )
+
+    started = time.perf_counter()
+
+    try:
+        result = _run_tool_raw(
+            tool_name,
+            argument,
+        )
+        normalized = normalize_tool_result(
+            tool_name,
+            result,
+        )
+    except Exception as exc:
+        normalized = ToolResult(
+            success=False,
+            tool=tool_name,
+            error=str(exc),
+            retryable=True,
+        )
+
+    duration_ms = (time.perf_counter() - started) * 1000.0
+
+    telemetry = resilience.record(
         tool_name,
-        argument,
+        success=normalized.success,
+        retryable=normalized.retryable,
+        error=normalized.error,
+        duration_ms=duration_ms,
+        argument=argument,
     )
 
-    return normalize_tool_result(
-        tool_name,
-        result,
-    )
+    if isinstance(normalized.observation, dict):
+        observation = dict(normalized.observation)
+        observation["resilience"] = telemetry
+        normalized.observation = observation
+    else:
+        normalized.observation = {
+            "resilience": telemetry,
+        }
+
+    return normalized
 
 # Backward-compatible dispatcher alias for scripts and integrations that
 # historically called execute_tool(). The canonical API remains run_tool().
