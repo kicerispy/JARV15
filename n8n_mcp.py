@@ -660,7 +660,7 @@ def run_workflow_request(
         "get_workflow_details",
         {
             "workflowId": workflow_id,
-            "detailLevel": "execution",
+            "detailLevel": "full",
         },
     )
 
