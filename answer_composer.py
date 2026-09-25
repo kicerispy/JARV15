@@ -548,6 +548,249 @@ def _browser_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _unreal_result_payload(data: Any) -> Dict[str, Any]:
+    """Extract the useful upstream Unreal gateway payload from tool evidence."""
+    decoded = _decode_json_text(_unwrap(data))
+    if not isinstance(decoded, dict):
+        return {}
+
+    result = _decode_json_text(decoded.get("result", decoded))
+
+    if isinstance(result, dict) and isinstance(result.get("content"), list):
+        nested = _mapping_payload(result)
+        if nested:
+            result = nested
+
+    return result if isinstance(result, dict) else {}
+
+
+def _unreal_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return structured gateway rows from common search/describe result shapes."""
+    rows: List[Dict[str, Any]] = []
+
+    for key in (
+        "results",
+        "matches",
+        "items",
+        "capabilities",
+        "tools",
+        "actions",
+        "candidates",
+    ):
+        value = payload.get(key)
+
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and item not in rows:
+                    rows.append(item)
+        elif isinstance(value, dict):
+            for name, item in value.items():
+                if isinstance(item, dict):
+                    row = dict(item)
+                    row.setdefault("name", name)
+                    if row not in rows:
+                        rows.append(row)
+
+    return rows
+
+
+def _unreal_row_name(row: Dict[str, Any]) -> str:
+    tool = str(
+        row.get("tool")
+        or row.get("toolName")
+        or row.get("tool_name")
+        or ""
+    ).strip()
+    action = str(
+        row.get("action")
+        or row.get("actionName")
+        or row.get("action_name")
+        or ""
+    ).strip()
+
+    if tool and action:
+        return f"{tool}.{action}"
+
+    for key in (
+        "capability",
+        "capabilityId",
+        "capability_id",
+        "id",
+        "name",
+        "displayName",
+        "display_name",
+        "title",
+        "label",
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return ""
+
+
+def _unreal_operation(item: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    operation = str(
+        item.get("operation")
+        or payload.get("operation")
+        or ""
+    ).strip().lower()
+
+    if operation:
+        return operation
+
+    request = str(item.get("request") or "").lower()
+    for candidate in ("search", "describe", "execute", "configure"):
+        if candidate in request:
+            return candidate
+
+    return ""
+
+
+def _unreal_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
+    """Compose concise, user-facing summaries for the upstream Unreal gateway."""
+    status_items = [
+        item for item in evidence
+        if str(item.get("tool", "") or "").strip() == "unreal_mcp_status"
+    ]
+
+    if status_items:
+        payload = _mapping_payload(status_items[-1].get("data"))
+        connected = payload.get("connected") is True
+        gateway_present = "unreal" in (
+            payload.get("public_tools")
+            if isinstance(payload.get("public_tools"), list)
+            else []
+        )
+
+        if connected or gateway_present:
+            return (
+                "Unreal MCP is connected. The native server is authenticated "
+                "and the Unreal gateway is ready."
+            )
+
+        return (
+            "Unreal MCP responded, but the Unreal gateway was not advertised "
+            "as available."
+        )
+
+    gateway_items = [
+        item for item in evidence
+        if str(item.get("tool", "") or "").strip() == "unreal_mcp"
+    ]
+
+    if not gateway_items:
+        return "The Unreal MCP check completed successfully."
+
+    item = gateway_items[-1]
+    payload = _unreal_result_payload(item.get("data"))
+    operation = _unreal_operation(item, payload)
+
+    if operation == "search":
+        rows = _unreal_rows(payload)
+        names: List[str] = []
+
+        for row in rows:
+            name = _unreal_row_name(row)
+            if name and name not in names:
+                names.append(name)
+
+        if names:
+            preview = ", ".join(names[:6])
+            suffix = " and more" if len(names) > 6 else ""
+            noun = "capability" if len(names) == 1 else "capabilities"
+            return (
+                f"I found {len(names)} Unreal {noun}: "
+                f"{preview}{suffix}."
+            )
+
+        text_values = _meaningful_text(payload)
+        if text_values:
+            return _clip(
+                "The Unreal capability search completed. "
+                + text_values[0].rstrip(".")
+                + ".",
+                650,
+            )
+
+        return (
+            "The Unreal capability search completed, but it returned no "
+            "capability names I could summarize."
+        )
+
+    if operation == "describe":
+        rows = _unreal_rows(payload)
+        names = [
+            name
+            for name in (_unreal_row_name(row) for row in rows)
+            if name
+        ]
+
+        description = ""
+        for key in ("description", "summary", "details", "help"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                description = _clip(value, 420)
+                break
+
+        if names and description:
+            return f"I inspected {names[0]}. {description}"
+        if names:
+            return f"I inspected the Unreal capability {names[0]}."
+
+        if description:
+            return f"I inspected the requested Unreal capability. {description}"
+
+        return (
+            "The Unreal capability description was retrieved, but it did not "
+            "include a concise description."
+        )
+
+    if operation == "execute":
+        names = []
+        tool = str(
+            item.get("capability")
+            or payload.get("capability")
+            or payload.get("tool")
+            or ""
+        ).strip()
+        action = str(
+            item.get("action")
+            or payload.get("action")
+            or ""
+        ).strip()
+
+        if tool and action:
+            names.append(f"{tool}.{action}")
+        elif tool:
+            names.append(tool)
+
+        message = ""
+        for key in ("message", "summary", "statusMessage", "result"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                message = _clip(value, 500)
+                break
+
+        if names and message:
+            return f"I executed {names[0]}. {message}"
+        if names:
+            return f"I executed the Unreal action {names[0]} successfully."
+        if message:
+            return f"I executed the requested Unreal action. {message}"
+
+        return "The requested Unreal action completed successfully."
+
+    if operation == "configure":
+        return "The Unreal MCP configuration change completed successfully."
+
+    text_values = _meaningful_text(payload)
+    if text_values:
+        return _clip(text_values[0], 650)
+
+    return "The Unreal MCP request completed successfully."
+
+
 def _project_file_answer(evidence: Sequence[Dict[str, Any]]) -> str:
     """Summarize deterministic project-file lookup results."""
     values: List[str] = []
@@ -697,5 +940,12 @@ def compose_task_answer(
 
     if intent.get("domain") == "browser":
         return _browser_answer(task, evidence)
+
+    if any(
+        str(item.get("tool", "") or "").strip()
+        in {"unreal_mcp", "unreal_mcp_status"}
+        for item in evidence
+    ):
+        return _unreal_answer(task, evidence)
 
     return _generic_answer(task, evidence)
