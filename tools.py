@@ -1806,6 +1806,25 @@ def code_search(argument=""):
     if not query:
         return "Code search query cannot be empty."
 
+    try:
+        import code_index
+
+        indexed = code_index.search(
+            query,
+            limit=50,
+        )
+        if indexed.get("success"):
+            matches = indexed.get("matches") or []
+            if matches:
+                header = (
+                    f"Found {len(matches)} match(es) for "
+                    f"'{query}' via local code index:"
+                )
+                return header + "\n" + "\n".join(matches)
+    except Exception:
+        # The direct scan below remains the authoritative fallback.
+        pass
+
     base = __import__("pathlib").Path.cwd().resolve()
     matches = []
     query_lower = query.lower()
@@ -2788,6 +2807,16 @@ SCREEN_MEMORY_TOOLS = {
     "screen_memory_recent",
 }
 
+QOL_TOOLS = {
+    "jarvis_quickcheck",
+    "resource_status",
+    "process_snapshot",
+    "project_snapshot",
+    "service_status",
+    "dependency_status",
+    "healing_hints",
+}
+
 API_TOOLS = API_TOOLS | EXTENDED_API_TOOLS
 
 
@@ -2821,6 +2850,20 @@ def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
                     result.get("error")
                     or result.get("message")
                     or f"{tool_name} failed"
+                ),
+                retryable=bool(result.get("retryable", False)),
+                observation=result,
+            )
+        # Some legacy tools omit ``success`` and expose only verification or an error field. Explicit negative evidence must enter recovery.
+        if result.get("verified") is False or result.get("error"):
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                data=result,
+                error=str(
+                    result.get("error")
+                    or result.get("message")
+                    or f"{tool_name} returned an unverified result"
                 ),
                 retryable=bool(result.get("retryable", False)),
                 observation=result,
@@ -3436,6 +3479,13 @@ def _run_tool_raw(
             argument,
         )
 
+    if tool_name in QOL_TOOLS and tool_name != "healing_hints":
+        import qol_tools
+        handler = getattr(qol_tools, tool_name)
+        if tool_name in {"process_snapshot", "service_status"}:
+            return handler(argument)
+        return handler()
+
 
     # --------------------------------------------------------
     # FREE PUBLIC API HUB
@@ -3725,6 +3775,55 @@ def _run_tool_raw(
 
         return local_memory.memory_status()
 
+    elif tool_name == "healing_hints":
+
+        raw = str(argument or "").strip()
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"error": raw}
+
+        from healing_kernel import healing_hints
+
+        return {
+            "success": True,
+            "verified": True,
+            "hints": healing_hints(
+                str(payload.get("tool", "") or ""),
+                category=str(payload.get("category", "") or ""),
+                error=str(payload.get("error", "") or ""),
+                limit=int(payload.get("limit", 5) or 5),
+            ),
+        }
+
+    elif tool_name in {
+        "jarvis_quickcheck",
+        "resource_status",
+        "process_snapshot",
+        "project_snapshot",
+        "service_status",
+        "dependency_status",
+    }:
+
+        import qol_tools
+
+        handler = getattr(qol_tools, tool_name)
+        if tool_name in {"process_snapshot", "service_status"}:
+            return handler(argument)
+        return handler()
+
+    elif tool_name == "code_index_rebuild":
+        import code_index
+        return code_index.rebuild()
+
+    elif tool_name == "code_index_status":
+        import code_index
+        return code_index.status()
+
     elif tool_name == "jarvis_capabilities":
 
         from tool_registry import (
@@ -3737,6 +3836,10 @@ def _run_tool_raw(
             "browser": sorted(BROWSER_TOOLS),
             "n8n": sorted(N8N_TOOLS),
             "platform": sorted(JARVIS_PLATFORM_TOOLS),
+            "public_api": sorted(API_TOOLS),
+            "gods_eye": sorted(GODS_EYE_TOOLS),
+            "screen_memory": sorted(SCREEN_MEMORY_TOOLS),
+            "qol": sorted(QOL_TOOLS),
         }
 
         try:

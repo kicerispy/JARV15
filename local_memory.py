@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -24,6 +25,114 @@ _MEMORY_PATH = _MEMORY_DIR / "memory.jsonl"
 _MAX_RECORDS = 1000
 _MAX_TEXT = 700
 _LOCK = threading.RLock()
+
+
+def _index_path() -> Path:
+    """Return the optional SQLite FTS5 shadow index beside the JSONL journal."""
+    return _MEMORY_DIR / "memory_fts.sqlite3"
+
+
+def _fts_available() -> bool:
+    try:
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute(
+                "CREATE VIRTUAL TABLE fts_probe USING fts5(text)"
+            )
+            return True
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+def _rebuild_fts(records: List[Dict[str, Any]]) -> bool:
+    """Rebuild the bounded FTS5 cache from the durable JSONL records."""
+    if not _fts_available():
+        return False
+
+    try:
+        _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        path = _index_path()
+        temp = path.with_suffix(".tmp")
+        conn = sqlite3.connect(str(temp), timeout=5.0)
+        try:
+            conn.execute("DROP TABLE IF EXISTS memories")
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE memories USING fts5(
+                    fingerprint UNINDEXED,
+                    text,
+                    tags,
+                    kind UNINDEXED,
+                    timestamp UNINDEXED,
+                    tokenize='porter unicode61'
+                )
+                """
+            )
+            for item in records[-_MAX_RECORDS:]:
+                conn.execute(
+                    """
+                    INSERT INTO memories(
+                        fingerprint, text, tags, kind, timestamp
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(item.get("fingerprint", "")),
+                        str(item.get("text", "")),
+                        " ".join(str(tag) for tag in item.get("tags", [])),
+                        str(item.get("kind", "fact")),
+                        float(item.get("timestamp", 0.0) or 0.0),
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        temp.replace(path)
+        return True
+    except (OSError, sqlite3.Error):
+        return False
+
+
+def _fts_search(query: str, limit: int) -> list[tuple[str, float]]:
+    """Return fingerprint/rank pairs from the FTS5 cache, or [] on failure."""
+    if not _fts_available():
+        return []
+
+    tokens = sorted(_tokens(query))
+    if not tokens:
+        return []
+
+    match_query = " OR ".join(
+        '"' + token.replace('"', '""') + '"'
+        for token in tokens
+    )
+
+    try:
+        conn = sqlite3.connect(str(_index_path()), timeout=2.0)
+        try:
+            rows = conn.execute(
+                """
+                SELECT fingerprint, bm25(memories) AS rank
+                FROM memories
+                WHERE memories MATCH ?
+                ORDER BY bm25(memories)
+                LIMIT ?
+                """,
+                (match_query, max(1, int(limit))),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        return [
+            (str(row[0]), float(row[1]))
+            for row in rows
+            if str(row[0] or "")
+        ]
+    except (OSError, sqlite3.Error):
+        return []
 
 
 def _tokens(value: Any) -> set[str]:
@@ -112,6 +221,7 @@ def remember(
         }
         records.append(record)
         _save(records)
+        _rebuild_fts(records)
 
     return {
         "success": True,
@@ -128,6 +238,8 @@ def recall(query: str, *, limit: int = 5, kind: str = "") -> List[Dict[str, Any]
 
     with _LOCK:
         records = _load()
+        if records and not _index_path().exists():
+            _rebuild_fts(records)
 
     wanted_kind = str(kind or "").strip().lower()
 
@@ -152,6 +264,12 @@ def recall(query: str, *, limit: int = 5, kind: str = "") -> List[Dict[str, Any]
             for item in recent[: max(1, int(limit))]
         ]
 
+    fts_rows = _fts_search(query, max(10, int(limit) * 5))
+    fts_scores = {
+        fingerprint: abs(rank)
+        for fingerprint, rank in fts_rows
+    }
+
     scored = []
 
     for item in records:
@@ -161,11 +279,16 @@ def recall(query: str, *, limit: int = 5, kind: str = "") -> List[Dict[str, Any]
         text = str(item.get("text", ""))
         haystack = _tokens(text) | _tokens(" ".join(item.get("tags", [])))
         overlap = len(query_tokens & haystack)
-        if overlap <= 0:
+        fts_rank = fts_scores.get(
+            str(item.get("fingerprint", "")),
+            0.0,
+        )
+        if overlap <= 0 and not fts_rank:
             continue
 
         age_days = max(0.0, (time.time() - float(item.get("timestamp", time.time()))) / 86400)
-        score = overlap * 10.0 + min(3.0, 1.0 / max(0.25, age_days + 0.25))
+        recency = min(3.0, 1.0 / max(0.25, age_days + 0.25))
+        score = overlap * 10.0 + min(8.0, fts_rank) + recency
         scored.append((score, item))
 
     scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -205,6 +328,7 @@ def forget(query: str) -> Dict[str, Any]:
             kept.append(item)
 
         _save(kept)
+        _rebuild_fts(kept)
 
     return {
         "success": True,
@@ -229,6 +353,8 @@ def memory_status() -> Dict[str, Any]:
         "records": len(records),
         "by_kind": counts,
         "max_records": _MAX_RECORDS,
+        "fts5_enabled": _fts_available(),
+        "fts5_index": str(_index_path()),
     }
 
 

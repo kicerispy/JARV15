@@ -564,6 +564,28 @@ MEMORY_ENABLED = os.environ.get(
 ).strip().lower() not in {"0", "false", "no", "off"}
 
 
+# Persistent failure signatures become bounded recovery hints so repeated
+# failures do not force JARVIS to rediscover the same fix from scratch.
+SELF_HEALING_FAILURE_MEMORY_ENABLED = os.environ.get(
+    "JARVIS_SELF_HEALING_FAILURE_MEMORY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS = float(
+    os.environ.get(
+        "JARVIS_SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS",
+        "0.25",
+    )
+)
+
+SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS = float(
+    os.environ.get(
+        "JARVIS_SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS",
+        "4.0",
+    )
+)
+
+
 # ============================================================
 # DEBUG
 # ============================================================

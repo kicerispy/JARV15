@@ -32,6 +32,13 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "n8n_workflow_architect": "Design or audit an n8n workflow using live node discovery, exact node schemas, and n8n best-practice guidance. Argument is JSON; default mode is design, audit mode requires workflow_id.",
     "n8n_workflow_builder": "Build an n8n workflow from a verified architecture, validate it through n8n MCP, create it, verify the saved graph, test it with pin data, audit it, and optionally publish it when activate=true. Argument is JSON with request plus optional activate, test, project_id, folder_id, workflow_code, name, description, or context.",
     "jarvis_doctor": "Run a read-only JARVIS health doctor. Argument is optional JSON with deep and run_tests.",
+    "jarvis_quickcheck": "Fast deterministic JARVIS readiness check covering core runtime, tools, memory, healing, and resources.",
+    "resource_status": "Report CPU, RAM, disk, and available CPU cores without invoking the LLM.",
+    "process_snapshot": "Report the busiest local processes by CPU and memory. Argument is an optional result count.",
+    "project_snapshot": "Report the current JARVIS Git branch, worktree cleanliness, source/test counts, Python version, and platform.",
+    "service_status": "Probe local dependencies such as Ollama and n8n. Argument is ollama, n8n, or all.",
+    "dependency_status": "Check declared Python requirements against the active environment without invoking the LLM.",
+    "healing_hints": "Inspect learned recovery patterns from prior failures. Argument is JSON with optional tool, category, error, and limit.",
     "tool_health": "Show bounded tool reliability, failure categories, latency, and circuit-breaker state.",
     "memory_remember": "Store a local JARVIS memory item. Argument is JSON with text, kind, and optional tags.",
     "memory_recall": "Recall relevant local JARVIS memories. Argument is JSON with query, limit, and optional kind.",
@@ -151,6 +158,8 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "code_search": "Search project source files for a symbol, string, or error message.",
     "code_test": "Validate project code. argument = JSON such as {\"mode\":\"compile\",\"path\":\"main.py\"} or {\"mode\":\"pytest\",\"path\":\"tests/test_x.py\"}.",
     "code_diagnose": "Run a broader JARVIS project diagnostic pass: Python compilation, available tests, and optional static checks. Argument is JSON.",
+    "code_index_rebuild": "Rebuild the local SQLite FTS5 source index used to accelerate code discovery.",
+    "code_index_status": "Report local code-index health and indexed source count.",
     "dev_command": "Run an allowlisted developer command from the JARVIS project root. Argument is JSON such as {\"command\":\"python -m pytest tests/test_x.py -q\",\"timeout\":120}.",
     "git_task_branch": "Create or activate a safe task-scoped Git branch. Argument is JSON with branch.",
     "code_checkpoint": "Create a safe checkpoint of JARVIS project source files before autonomous edits.",
@@ -210,6 +219,8 @@ _CODE_PLANNER_TOOLS = {
     "edit_file",
     "delete_file",
     "code_search",
+    "code_index_rebuild",
+    "code_index_status",
     "code_test",
     "code_diagnose",
     "dev_command",
@@ -4182,6 +4193,138 @@ def create_plan(command, *args, **kwargs):
         return specialized
 
     return _create_plan_original_specialized_api(
+        command,
+        *args,
+        **kwargs,
+    )
+
+
+# ============================================================
+# DETERMINISTIC JARVIS QOL PREFLIGHT
+# ============================================================
+#
+# Simple self-observability requests should remain local and
+# instantaneous. Preserve normal model planning for everything else.
+
+_create_plan_original_qol = create_plan
+
+
+def _qol_plan(command):
+    text = str(command or "").strip()
+    lowered = text.lower()
+
+    if not lowered:
+        return None
+
+    quick_phrases = (
+        "is jarvis ready",
+        "is jarvis working",
+        "is jarvis healthy",
+        "check jarvis",
+        "jarvis health check",
+        "jarvis quick check",
+        "run a jarvis check",
+    )
+    if any(phrase in lowered for phrase in quick_phrases):
+        return {
+            "goal": "check jarvis readiness",
+            "steps": [{"tool": "jarvis_quickcheck", "argument": ""}],
+        }
+
+    if (
+        "cpu usage" in lowered
+        or "ram usage" in lowered
+        or "memory usage" in lowered
+        or "disk usage" in lowered
+        or "resource usage" in lowered
+        or "system resources" in lowered
+    ):
+        return {
+            "goal": "inspect system resources",
+            "steps": [{"tool": "resource_status", "argument": ""}],
+        }
+
+    if (
+        "top processes" in lowered
+        or "busiest processes" in lowered
+        or "what is using my cpu" in lowered
+        or "what is using the most cpu" in lowered
+        or "what is using my memory" in lowered
+        or "what is using the most memory" in lowered
+    ):
+        return {
+            "goal": "inspect active processes",
+            "steps": [{"tool": "process_snapshot", "argument": "8"}],
+        }
+
+    if (
+        "jarvis project status" in lowered
+        or "git status" in lowered
+        or "repo status" in lowered
+        or "repository status" in lowered
+    ):
+        return {
+            "goal": "inspect project status",
+            "steps": [{"tool": "project_snapshot", "argument": ""}],
+        }
+
+    if (
+        "check dependencies" in lowered
+        or "dependency status" in lowered
+        or "are my python packages installed" in lowered
+        or "are my dependencies installed" in lowered
+    ):
+        return {
+            "goal": "check Python dependencies",
+            "steps": [{"tool": "dependency_status", "argument": ""}],
+        }
+
+    if (
+        "is ollama running" in lowered
+        or "is n8n running" in lowered
+        or "check local services" in lowered
+        or "check ollama" in lowered
+    ):
+        service = "ollama"
+        if "n8n" in lowered and "ollama" not in lowered:
+            service = "n8n"
+        elif "local services" in lowered:
+            service = "all"
+
+        return {
+            "goal": "check local services",
+            "steps": [{"tool": "service_status", "argument": service}],
+        }
+
+    if (
+        "what keeps failing" in lowered
+        or "show healing hints" in lowered
+        or "show recovery hints" in lowered
+        or "what has jarvis learned from failures" in lowered
+    ):
+        return {
+            "goal": "inspect learned healing patterns",
+            "steps": [
+                {
+                    "tool": "healing_hints",
+                    "argument": json.dumps({"limit": 5}),
+                }
+            ],
+        }
+
+    return None
+
+
+def create_plan(command, *args, **kwargs):
+    qol = _qol_plan(command)
+    if qol is not None:
+        print(
+            "JARVIS DEBUG: deterministic QoL preflight -> "
+            f"{qol['steps'][0]['tool']}"
+        )
+        return qol
+
+    return _create_plan_original_qol(
         command,
         *args,
         **kwargs,
