@@ -3406,16 +3406,11 @@ Last tool: {active_context.get('last_tool', 'none')}
             )
         if health_lines:
             context_str += (
-                "
-Current tool-health warnings:
-"
-                + "
-".join(health_lines)
-                + "
-Avoid repeatedly selecting a tool whose circuit is open or "
+                "\nCurrent tool-health warnings:\n"
+                + "\n".join(health_lines)
+                + "\nAvoid repeatedly selecting a tool whose circuit is open or "
                 "whose recent failures match the current task; prefer a verified "
-                "alternative when one exists.
-"
+                "alternative when one exists.\n"
             )
 
     memory_hints = active_context.get("memory_hints")
@@ -3430,15 +3425,10 @@ Avoid repeatedly selecting a tool whose circuit is open or "
                 memory_lines.append(f"- [{kind}] {text}")
         if memory_lines:
             context_str += (
-                "
-Relevant local memory hints:
-"
-                + "
-".join(memory_lines)
-                + "
-Treat memory as a hint, not proof; verify against current "
-                "tool results and live state before acting.
-"
+                "\nRelevant local memory hints:\n"
+                + "\n".join(memory_lines)
+                + "\nTreat memory as a hint, not proof; verify against current "
+                "tool results and live state before acting.\n"
             )
 
     learned_hints = active_context.get("learned_hints")
