@@ -909,6 +909,51 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertIn("n8n-nodes-base.slack", node_ids)
 
 
+    def test_discover_nodes_falls_back_when_search_nodes_is_unavailable(self):
+        request = "Build a workflow that monitors GitHub issues, summarizes bugs, and sends me an alert"
+        calls = []
+
+        def fake_call(tool_name, arguments=None):
+            calls.append(tool_name)
+            if tool_name == "search_nodes":
+                return {
+                    "success": False,
+                    "message": "Unknown n8n MCP tool: search_nodes",
+                }
+            if tool_name == "get_node_types":
+                node_id = arguments["nodeIds"][0]["nodeId"]
+                return {
+                    "success": True,
+                    "data": {
+                        "definitions": [
+                            {
+                                "nodeId": node_id,
+                                "type": node_id,
+                                "content": f"interface {node_id.replace('.', '_').replace('@', '_')} {{}}",
+                            }
+                        ]
+                    },
+                }
+            if tool_name == "get_workflow_best_practices":
+                return {"success": True, "data": {"documentation": "Use explicit validation and error handling."}}
+            raise AssertionError(tool_name)
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect.design_workflow(request)
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["quality_gate"]["ready_to_build"])
+        self.assertEqual(result["schema_failures"], [])
+        node_ids = {item["nodeId"] for item in result["node_candidates"]}
+        self.assertIn("n8n-nodes-base.githubTrigger", node_ids)
+        self.assertIn("n8n-nodes-base.if", node_ids)
+        self.assertIn("n8n-nodes-base.slack", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.chainLlm", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.lmChatOllama", node_ids)
+        self.assertIn("get_node_types", calls)
+
+
     def test_deprecated_nodes_are_detected_from_type_definitions(self):
         definition_text = """
 /** @deprecated Do not use this node. */
