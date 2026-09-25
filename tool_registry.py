@@ -19,8 +19,16 @@ N8N_TOOLS = frozenset(
     {
         "n8n_status",
         "n8n_run_workflow",
+        "n8n_mcp_status",
+        "n8n_mcp_list_tools",
     }
 )
+
+N8N_MCP_PREFIX = "n8n_mcp__"
+
+
+def is_n8n_mcp_tool_name(name) -> bool:
+    return str(name or "").startswith(N8N_MCP_PREFIX)
 
 
 BROWSER_TOOLS = frozenset(
@@ -60,6 +68,8 @@ BROWSER_TOOLS = frozenset(
 JSON_ARGUMENT_TOOLS = frozenset(
     {
         "n8n_run_workflow",
+        "n8n_mcp_status",
+        "n8n_mcp_list_tools",
         "browser_click_result",
         "browser_click_first_result",
         "browser_find_element",
@@ -92,4 +102,5 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in JSON_ARGUMENT_TOOLS
         and str(name) not in N8N_TOOLS
         and not is_roblox_tool_name(name)
+        and not is_n8n_mcp_tool_name(name)
     )
