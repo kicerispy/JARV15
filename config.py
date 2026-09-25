@@ -516,6 +516,33 @@ CODING_MODEL_WARMUP_DELAY_SECONDS = float(
 
 
 # ============================================================
+# SELF-HEALING RUNTIME
+# ============================================================
+#
+# The Healing Kernel is deliberately bounded. Runtime failures may be
+# diagnosed/retried/replanned automatically, but source mutation still goes
+# through the existing checkpoint -> edit -> test -> diff-validation workflow.
+SELF_HEALING_ENABLED = os.environ.get(
+    "JARVIS_SELF_HEALING_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SELF_HEALING_MAX_ATTEMPTS = int(
+    os.environ.get(
+        "JARVIS_SELF_HEALING_MAX_ATTEMPTS",
+        "2",
+    )
+)
+
+# Keep automatic source mutation opt-in until the runtime self-heal bridge
+# has its own target-discovery and approval-grade regression coverage.
+SELF_HEALING_AUTO_CODE_REPAIR = os.environ.get(
+    "JARVIS_SELF_HEALING_AUTO_CODE_REPAIR",
+    "0",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+
+# ============================================================
 # DEBUG
 # ============================================================
 
