@@ -30,6 +30,12 @@ N8N_MCP_PREFIX = "n8n_mcp__"
 \nJARVIS_PLATFORM_TOOLS = frozenset(
     {
         "jarvis_doctor",
+        "jarvis_quickcheck",
+        "resource_status",
+        "process_snapshot",
+        "project_snapshot",
+        "service_status",
+        "healing_hints",
         "tool_health",
         "memory_remember",
         "memory_recall",
