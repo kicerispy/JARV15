@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 MAX_TECHNIQUES = 3
-MAX_QUERIES = 10
+MAX_QUERIES = 14
 MAX_NODE_CANDIDATES = 8
 MAX_DISCOVERED_NODE_CANDIDATES = 32
 MAX_NODE_TYPE_REQUESTS = 8
