@@ -200,6 +200,17 @@ def backend_status(timeout: float = 0.6, force: bool = False) -> Dict[str, Any]:
             selected = backend
             break
     status["selected_backend"] = selected
+
+    selected_entry = status["backends"].get(selected or "", {})
+    status["healthy"] = bool(selected_entry.get("healthy")) if selected else False
+    status["reachable"] = bool(selected_entry.get("reachable")) if selected else False
+    status["available"] = bool(selected)
+    status["message"] = (
+        f"Context memory backend '{selected}' is available."
+        if selected
+        else "No usable context-memory backend is available."
+    )
+
     _STATUS_CACHE = dict(status)
     _STATUS_CACHE_AT = now
     return status

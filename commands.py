@@ -1619,6 +1619,38 @@ def build_context_and_skill_plan(user_request):
 
 
 
+def build_roblox_mcp_plan(user_request):
+    """Build deterministic lifecycle routes for the local Roblox Studio MCP server."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text or "roblox" not in text:
+        return None
+
+    normalized = text.replace("roblox studio", "roblox").strip()
+
+    if any(phrase in normalized for phrase in (
+        "roblox mcp status",
+        "roblox mcp health",
+        "check roblox mcp",
+        "check roblox status",
+        "is roblox mcp connected",
+        "is roblox connected",
+    )):
+        return {"steps": [{"tool": "roblox_mcp_status", "argument": ""}]}
+
+    if any(phrase in normalized for phrase in (
+        "setup roblox mcp",
+        "set up roblox mcp",
+        "install roblox mcp",
+        "start roblox mcp",
+        "start the roblox mcp",
+        "repair roblox mcp",
+    )):
+        return {"steps": [{"tool": "roblox_mcp_setup", "argument": ""}]}
+
+    return None
+
+
 def build_integration_health_plan(user_request):
     """Build deterministic read-only health/status routes for JARVIS itself."""
     original = str(user_request or "").strip()
@@ -1698,6 +1730,9 @@ def build_screen_memory_plan(user_request):
     text = clean_text(original)
     if "screen memory" not in text and "screenpipe" not in text:
         return None
+
+    if any(token in text for token in ("set up", "setup", "install", "start", "launch", "repair")):
+        return {"steps": [{"tool": "screen_memory_setup", "argument": ""}]}
 
     if any(token in text for token in ("status", "health", "running", "online")):
         return {"steps": [{"tool": "screen_memory_status", "argument": ""}]}
@@ -2062,6 +2097,11 @@ def deterministic_route(user_request, active_context=None):
     # ==================================================
     # JARVIS / INTEGRATION HEALTH + OPTIONAL OBSERVABILITY
     # ==================================================
+
+    roblox_mcp_plan = build_roblox_mcp_plan(user_request)
+    if roblox_mcp_plan:
+        print("JARVIS: Roblox MCP lifecycle route selected.")
+        return roblox_mcp_plan
 
     health_plan = build_integration_health_plan(user_request)
     if health_plan:

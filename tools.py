@@ -23,6 +23,7 @@ from tool_registry import (
     ANIPY_TOOLS,
     BROWSER_TOOLS,
     CONTEXT_MEMORY_TOOLS,
+    ROBLOX_MCP_TOOLS,
     SYSTEM_HEALTH_TOOLS,
     UNREAL_MCP_TOOLS,
 )
@@ -3233,12 +3234,16 @@ def _run_tool_raw(
     # ROBLOX STUDIO MCP
     # --------------------------------------------------------
 
-    if tool_name == "roblox_mcp_status":
-        from roblox_mcp import roblox_mcp_status
-
-        return roblox_mcp_status(
-            argument
+    if tool_name in ROBLOX_MCP_TOOLS:
+        from roblox_mcp import (
+            roblox_mcp_setup,
+            roblox_mcp_status,
         )
+
+        if tool_name == "roblox_mcp_status":
+            return roblox_mcp_status(argument)
+
+        return roblox_mcp_setup(argument)
 
     if tool_name.startswith("roblox__"):
         from roblox_mcp import run_roblox_tool

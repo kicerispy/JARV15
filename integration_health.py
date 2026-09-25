@@ -25,6 +25,7 @@ from tool_registry import (
     CONTEXT_MEMORY_TOOLS,
     GODS_EYE_TOOLS,
     N8N_TOOLS,
+    ROBLOX_MCP_TOOLS,
     SCREEN_MEMORY_TOOLS,
     SYSTEM_HEALTH_TOOLS,
     UNREAL_MCP_TOOLS,
@@ -127,6 +128,7 @@ def _registry_counts() -> Dict[str, int]:
         "gods_eye": len(GODS_EYE_TOOLS),
         "screen_memory": len(SCREEN_MEMORY_TOOLS),
         "n8n": len(N8N_TOOLS),
+        "roblox_mcp": len(ROBLOX_MCP_TOOLS),
         "health": len(SYSTEM_HEALTH_TOOLS),
     }
 
@@ -199,11 +201,18 @@ def _anipy_component() -> Dict[str, Any]:
 def _screenpipe_component() -> Dict[str, Any]:
     try:
         from screen_memory import screen_memory_status
+
         result = screen_memory_status()
         data = result.get("data", {}) if isinstance(result, dict) else {}
-        configured = bool(data.get("key_configured"))
         reachable = bool(data.get("reachable"))
-        status = "READY" if reachable else ("OFFLINE" if configured else "NOT_CONFIGURED")
+        search_ready = bool(data.get("search_ready"))
+        if search_ready:
+            status = "READY"
+        elif reachable:
+            status = "DEGRADED"
+        else:
+            status = "OFFLINE"
+
         return _component(
             "Screenpipe Memory",
             status,
@@ -212,7 +221,13 @@ def _screenpipe_component() -> Dict[str, Any]:
             live=True,
         )
     except Exception as exc:
-        return _component("Screenpipe Memory", "ERROR", f"Screenpipe diagnostic failed: {exc}", tool_count=len(SCREEN_MEMORY_TOOLS), live=True)
+        return _component(
+            "Screenpipe Memory",
+            "ERROR",
+            f"Screenpipe diagnostic failed: {exc}",
+            tool_count=len(SCREEN_MEMORY_TOOLS),
+            live=True,
+        )
 
 
 def _gods_eye_component() -> Dict[str, Any]:
@@ -256,14 +271,44 @@ def _n8n_component() -> Dict[str, Any]:
 def _memory_component() -> Dict[str, Any]:
     try:
         from agent_context import backend_status
+
         result = backend_status(timeout=0.6)
-        selected = str(result.get("selected_backend") or result.get("backend") or "")
-        healthy = bool(result.get("healthy") or result.get("reachable") or result.get("available"))
-        status = "READY" if healthy else ("DEGRADED" if selected else "READY")
-        message = str(result.get("message") or (f"Context backend {selected or 'default'} is available."))
-        return _component("External Memory", status, message, tool_count=len(CONTEXT_MEMORY_TOOLS), live=True)
+        backends = result.get("backends", {}) if isinstance(result, dict) else {}
+        selected = str(result.get("selected_backend") or "").strip()
+
+        if selected in {"openviking", "agentmemory"}:
+            status = "READY"
+            message = f"External Memory is using the {selected} backend."
+        elif selected == "local":
+            status = "READY"
+            message = (
+                "Memory is ready using JARVIS's local SQLite fallback. "
+                "External memory services are currently unavailable."
+            )
+        else:
+            status = "OFFLINE"
+            message = "No usable context-memory backend is available."
+
+        for backend_name in ("openviking", "agentmemory"):
+            backend = backends.get(backend_name, {})
+            if backend.get("reachable") and backend.get("healthy"):
+                message += f" {backend_name} is reachable."
+
+        return _component(
+            "External Memory",
+            status,
+            message,
+            tool_count=len(CONTEXT_MEMORY_TOOLS),
+            live=True,
+        )
     except Exception as exc:
-        return _component("External Memory", "ERROR", f"Memory backend diagnostic failed: {exc}", tool_count=len(CONTEXT_MEMORY_TOOLS), live=True)
+        return _component(
+            "External Memory",
+            "ERROR",
+            f"Memory backend diagnostic failed: {exc}",
+            tool_count=len(CONTEXT_MEMORY_TOOLS),
+            live=True,
+        )
 
 
 def _unreal_component() -> Dict[str, Any]:
@@ -290,14 +335,73 @@ def _unreal_component() -> Dict[str, Any]:
 def _roblox_component() -> Dict[str, Any]:
     url = str(getattr(config, "ROBLOX_MCP_URL", "") or "").strip()
     if not url:
-        return _component("Roblox MCP", "NOT_CONFIGURED", "Roblox MCP endpoint is not configured.")
+        return _component(
+            "Roblox MCP",
+            "NOT_CONFIGURED",
+            "Roblox MCP endpoint is not configured.",
+        )
+
     reachable, detail = _probe_socket(url)
-    return _component(
-        "Roblox MCP",
-        "READY" if reachable else "OFFLINE",
-        f"Roblox MCP endpoint is reachable ({detail})." if reachable else f"Roblox MCP endpoint is not reachable: {detail}",
-        live=True,
-    )
+    if not reachable:
+        return _component(
+            "Roblox MCP",
+            "OFFLINE",
+            f"Roblox MCP endpoint is not reachable: {detail}",
+            live=True,
+        )
+
+    try:
+        from roblox_mcp import roblox_mcp_status
+
+        result = roblox_mcp_status('{"timeout":2}')
+        if not getattr(result, "success", False):
+            return _component(
+                "Roblox MCP",
+                "DEGRADED",
+                "Roblox MCP server is reachable, but its detailed status check failed.",
+                live=True,
+            )
+
+        data = result.data if isinstance(result.data, dict) else {}
+        status_payload = data.get("status")
+        plugin_connected = None
+        if isinstance(status_payload, dict):
+            for key in ("connected", "pluginConnected", "plugin_connected"):
+                if isinstance(status_payload.get(key), bool):
+                    plugin_connected = status_payload[key]
+                    break
+            plugin = status_payload.get("plugin")
+            if plugin_connected is None and isinstance(plugin, dict):
+                connected = plugin.get("connected")
+                if isinstance(connected, bool):
+                    plugin_connected = connected
+
+        if plugin_connected is False:
+            return _component(
+                "Roblox MCP",
+                "DEGRADED",
+                "Roblox MCP server is running, but the Roblox Studio plugin is not connected.",
+                live=True,
+            )
+
+        return _component(
+            "Roblox MCP",
+            "READY",
+            f"Roblox MCP server is reachable ({detail})."
+            + (
+                " Roblox Studio plugin is connected."
+                if plugin_connected is True
+                else " Roblox Studio connection could not be confirmed."
+            ),
+            live=True,
+        )
+    except Exception:
+        return _component(
+            "Roblox MCP",
+            "DEGRADED",
+            f"Roblox MCP server is reachable ({detail}), but detailed plugin status could not be confirmed.",
+            live=True,
+        )
 
 
 def _skills_component() -> Dict[str, Any]:
@@ -353,7 +457,12 @@ def _static_components() -> list[Dict[str, Any]]:
         _component("External Memory", "READY", "JARVIS context-memory integration is installed.", tool_count=len(CONTEXT_MEMORY_TOOLS)),
         _component("Agent Skills", "READY" if _module_available("skill_catalog") else "NOT_INSTALLED", "Agent Skills catalog is installed." if _module_available("skill_catalog") else "Agent Skills catalog is unavailable.", tool_count=len(AGENT_SKILL_TOOLS)),
         _component("Unreal MCP", "READY" if getattr(config, "UNREAL_MCP_URL", "") else "NOT_CONFIGURED", "Unreal MCP endpoint is configured." if getattr(config, "UNREAL_MCP_URL", "") else "Unreal MCP endpoint is not configured.", tool_count=len(UNREAL_MCP_TOOLS)),
-        _component("Roblox MCP", "READY" if getattr(config, "ROBLOX_MCP_URL", "") else "NOT_CONFIGURED", "Roblox MCP endpoint is configured." if getattr(config, "ROBLOX_MCP_URL", "") else "Roblox MCP endpoint is not configured."),
+        _component(
+            "Roblox MCP",
+            "READY" if getattr(config, "ROBLOX_MCP_URL", "") else "NOT_CONFIGURED",
+            "Roblox MCP endpoint is configured." if getattr(config, "ROBLOX_MCP_URL", "") else "Roblox MCP endpoint is not configured.",
+            tool_count=len(ROBLOX_MCP_TOOLS),
+        ),
         _component("n8n", "READY" if getattr(config, "N8N_ENABLED", False) else "DISABLED", "n8n delegation is configured." if getattr(config, "N8N_ENABLED", False) else "n8n delegation is disabled."),
     ]
 
@@ -388,10 +497,18 @@ def integration_health(argument: str = "") -> Dict[str, Any]:
         counts[status] = counts.get(status, 0) + 1
 
     ready = counts.get("READY", 0) + counts.get("RUNNING", 0)
-    unavailable = sum(counts.get(status, 0) for status in ("OFFLINE", "ERROR", "NOT_INSTALLED", "NOT_READY"))
+    degraded = counts.get("DEGRADED", 0)
+    unavailable = sum(
+        counts.get(status, 0)
+        for status in ("OFFLINE", "ERROR", "NOT_INSTALLED", "NOT_READY")
+    )
     disabled = counts.get("DISABLED", 0)
-    overall = "READY" if unavailable == 0 else "DEGRADED"
-    parts = [f"{ready} ready/running", f"{unavailable} unavailable"]
+    overall = "READY" if degraded == 0 and unavailable == 0 else "DEGRADED"
+    parts = [
+        f"{ready} ready/running",
+        f"{degraded} degraded",
+        f"{unavailable} unavailable",
+    ]
     if disabled:
         parts.append(f"{disabled} disabled")
 

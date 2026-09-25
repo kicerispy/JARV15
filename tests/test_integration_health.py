@@ -10,6 +10,7 @@ from tool_registry import (
     GODS_EYE_TOOLS,
     SCREEN_MEMORY_TOOLS,
     SYSTEM_HEALTH_TOOLS,
+    ROBLOX_MCP_TOOLS,
     validate_known_tools,
 )
 
@@ -31,11 +32,13 @@ def test_completion_tool_families_are_registered():
     }
     assert expected_gods_eye <= set(GODS_EYE_TOOLS)
     assert set(SCREEN_MEMORY_TOOLS) == {
+        "screen_memory_setup",
         "screen_memory_status",
         "screen_memory_search",
         "screen_memory_recent",
     }
     assert SYSTEM_HEALTH_TOOLS == {"integration_health"}
+    assert {"roblox_mcp_status", "roblox_mcp_setup"} <= set(ROBLOX_MCP_TOOLS)
     assert validate_known_tools(
         set(GODS_EYE_TOOLS)
         | set(SCREEN_MEMORY_TOOLS)
@@ -74,6 +77,9 @@ def test_gods_eye_routes():
 
 
 def test_screen_memory_routes():
+    assert build_screen_memory_plan("setup screen memory") == {
+        "steps": [{"tool": "screen_memory_setup", "argument": ""}]
+    }
     assert build_screen_memory_plan("screen memory status") == {
         "steps": [{"tool": "screen_memory_status", "argument": ""}]
     }
@@ -82,3 +88,34 @@ def test_screen_memory_routes():
     assert plan["steps"][0]["tool"] == "screen_memory_search"
     payload = json.loads(plan["steps"][0]["argument"])
     assert payload["query"] == "Unreal"
+
+
+def test_roblox_setup_routes_deterministically():
+    from commands import build_roblox_mcp_plan
+
+    assert build_roblox_mcp_plan("check Roblox MCP status") == {
+        "steps": [{"tool": "roblox_mcp_status", "argument": ""}]
+    }
+    assert build_roblox_mcp_plan("setup Roblox MCP") == {
+        "steps": [{"tool": "roblox_mcp_setup", "argument": ""}]
+    }
+
+
+def test_integration_health_reports_degraded_and_unavailable_counts(monkeypatch):
+    import integration_health as health
+
+    monkeypatch.setattr(health, "_ollama_component", lambda: health._component("Ollama", "READY", "ok"))
+    monkeypatch.setattr(health, "_browser_component", lambda: health._component("Browser", "READY", "ok"))
+    monkeypatch.setattr(health, "_browser_agent_component", lambda: health._component("Browser Agent", "READY", "ok"))
+    monkeypatch.setattr(health, "_anipy_component", lambda: health._component("Anipy", "READY", "ok"))
+    monkeypatch.setattr(health, "_memory_component", lambda: health._component("Memory", "DEGRADED", "fallback"))
+    monkeypatch.setattr(health, "_skills_component", lambda: health._component("Agent Skills", "READY", "ok"))
+    monkeypatch.setattr(health, "_unreal_component", lambda: health._component("Unreal MCP", "NOT_READY", "not ready"))
+    monkeypatch.setattr(health, "_roblox_component", lambda: health._component("Roblox MCP", "OFFLINE", "offline"))
+    monkeypatch.setattr(health, "_n8n_component", lambda: health._component("n8n", "READY", "ok"))
+
+    result = health.integration_health('{"include_optional": false}')
+    assert result["status"] == "DEGRADED"
+    assert result["counts"]["DEGRADED"] == 1
+    assert result["counts"]["NOT_READY"] == 1
+    assert result["counts"]["OFFLINE"] == 1

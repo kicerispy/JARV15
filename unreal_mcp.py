@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -307,18 +308,74 @@ def setup_unreal_mcp() -> dict[str, Any]:
             }
 
     plugin = destination / "plugins" / "McpAutomationBridge"
+    project = _project_path()
+    installed_plugin = None
+    install_message = (
+        "Set JARVIS_UNREAL_MCP_PROJECT_PATH to an Unreal project or .uproject "
+        "file and rerun setup to install the plugin automatically."
+    )
+
+    if project:
+        uproject_files = list(project.glob("*.uproject"))
+        if not uproject_files:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "tool": "unreal_mcp_setup",
+                "error": f"Configured Unreal project path has no .uproject file: {project}",
+            }
+
+        target = project / "Plugins" / "McpAutomationBridge"
+        try:
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(plugin, target)
+                installed_plugin = str(target)
+                install_message = (
+                    "Copied the MCP Automation Bridge plugin into the Unreal project."
+                )
+            elif target.is_dir():
+                installed_plugin = str(target)
+                install_message = (
+                    "MCP Automation Bridge is already installed in the Unreal project."
+                )
+            else:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "retryable": False,
+                    "terminal": True,
+                    "tool": "unreal_mcp_setup",
+                    "error": f"Cannot install plugin because the target path is not a directory: {target}",
+                }
+        except OSError as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "tool": "unreal_mcp_setup",
+                "error": f"Failed to install MCP Automation Bridge into {project}: {exc}",
+            }
+
+    verified = plugin.is_dir() and (installed_plugin is not None or project is None)
     return {
-        "success": plugin.is_dir(),
-        "verified": plugin.is_dir(),
+        "success": verified,
+        "verified": verified,
         "tool": "unreal_mcp_setup",
         "repository": UNREAL_MCP_REPOSITORY,
         "branch": UNREAL_MCP_BRANCH,
         "path": str(destination),
         "plugin_path": str(plugin),
+        "project_path": str(project) if project else None,
+        "installed_plugin_path": installed_plugin,
         "message": (
-            "Unreal_mcp source is ready. Install plugins/McpAutomationBridge "
-            "into the Unreal project, enable Native MCP on port 3000, then "
-            "configure JARVIS_UNREAL_MCP_URL and the capability token/project path."
+            "Unreal_mcp source is ready. "
+            + install_message
+            + " Enable the MCP Automation Bridge in Unreal, enable Native MCP "
+            "on port 3000, and let JARVIS read the capability token from the "
+            "project's Saved/MCP/capability-token file."
         ),
     }
 

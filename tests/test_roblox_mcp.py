@@ -142,3 +142,55 @@ def test_run_roblox_tool_uses_direct_json_route(monkeypatch):
         "/mcp/get_place_info"
     )
     assert captured["json"] == {}
+
+
+def test_roblox_mcp_setup_uses_npx_when_server_is_offline(monkeypatch):
+    calls = {}
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(
+        roblox_mcp,
+        "roblox_mcp_status",
+        lambda argument="": roblox_mcp.ToolResult(
+            success=False,
+            tool="roblox_mcp_status",
+            error="connection refused",
+            retryable=True,
+        ),
+    )
+    monkeypatch.setattr(
+        roblox_mcp.shutil,
+        "which",
+        lambda name: "C:/node/npx.cmd" if name == "npx.cmd" else None,
+    )
+
+    def fake_popen(command, **kwargs):
+        calls["command"] = command
+        return FakeProcess()
+
+    monkeypatch.setattr(roblox_mcp.subprocess, "Popen", fake_popen)
+
+    checks = iter([
+        roblox_mcp.ToolResult(
+            success=False,
+            tool="roblox_mcp_status",
+            error="still starting",
+            retryable=True,
+        ),
+        roblox_mcp.ToolResult(
+            success=True,
+            tool="roblox_mcp_status",
+            data={"server_url": roblox_mcp.ROBLOX_MCP_URL},
+            observation={},
+        ),
+    ])
+    monkeypatch.setattr(roblox_mcp, "roblox_mcp_status", lambda argument="": next(checks))
+
+    result = roblox_mcp.roblox_mcp_setup()
+
+    assert result.success is True
+    assert calls["command"][:2] == ["C:/node/npx.cmd", "-y"]
+    assert calls["command"][2] == "robloxstudio-mcp@latest"
