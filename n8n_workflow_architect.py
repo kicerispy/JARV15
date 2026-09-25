@@ -729,61 +729,95 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     messages: List[str] = []
 
     for ref in refs:
-        result = _call(
-            "get_node_types",
-            {"nodeIds": [ref]},
-        )
-        if result.get("success") is not True:
-            messages.append(
-                f"{ref.get('nodeId')}: "
-                f"{result.get('message') or 'get_node_types failed'}"
+        attempts = [ref]
+        fallback_ref = {"nodeId": ref["nodeId"]}
+        if fallback_ref != ref:
+            attempts.append(fallback_ref)
+
+        resolved = False
+        last_message = ""
+
+        for attempt_index, attempt_ref in enumerate(attempts):
+            result = _call(
+                "get_node_types",
+                {"nodeIds": [attempt_ref]},
             )
-            continue
 
-        if not _schema_result_is_valid(result):
-            messages.append(
-                f"{ref.get('nodeId')}: "
-                f"{result.get('message') or 'get_node_types returned no schema'}"
-            )
-            continue
-
-        successes += 1
-        structured = _structured_result_list(
-            result,
-            ("nodeTypes", "definitions", "results"),
-        )
-        definition_text = _result_text(
-            result,
-            ("definitions", "documentation", "content"),
-        )
-
-        if structured:
-            definitions.extend(structured)
-
-        if definition_text:
-            definition_texts.append(definition_text)
-            if not structured:
-                parsed_definitions = _definition_items_from_text(definition_text)
-                if parsed_definitions:
-                    definitions.extend(parsed_definitions)
-
-            error_pattern = re.compile(
-                r"Error:\s*Node ['\"]([^'\"]+)['\"] (?P<message>[^\n]+)",
-                re.IGNORECASE,
-            )
-            for match in error_pattern.finditer(definition_text):
-                node_id = _clean_text(match.group(1))
-                message = _clean_text(match.group("message"))
-                if node_id:
-                    invalid_node_ids.append(node_id)
-                if message:
-                    schema_errors.append(f"{node_id}: {message}")
-
-            deprecated_node_ids.extend(
-                _deprecated_node_ids(
-                    definition_text,
-                    [ref],
+            if result.get("success") is not True:
+                last_message = str(
+                    result.get("message")
+                    or "get_node_types failed"
                 )
+                if attempt_index + 1 < len(attempts):
+                    continue
+                messages.append(
+                    f"{ref.get('nodeId')}: {last_message}"
+                )
+                break
+
+            if not _schema_result_is_valid(result):
+                last_message = str(
+                    result.get("message")
+                    or "get_node_types returned no schema"
+                )
+                if attempt_index + 1 < len(attempts):
+                    continue
+                messages.append(
+                    f"{ref.get('nodeId')}: {last_message}"
+                )
+                break
+
+            successes += 1
+            structured = _structured_result_list(
+                result,
+                ("nodeTypes", "definitions", "results"),
+            )
+            definition_text = _result_text(
+                result,
+                ("definitions", "documentation", "content"),
+            )
+
+            if structured:
+                definitions.extend(structured)
+
+            if definition_text:
+                definition_texts.append(definition_text)
+                if not structured:
+                    parsed_definitions = _definition_items_from_text(
+                        definition_text
+                    )
+                    if parsed_definitions:
+                        definitions.extend(parsed_definitions)
+
+                error_pattern = re.compile(
+                    r"Error:\s*Node ['\"]([^'\"]+)['\"] "
+                    r"(?P<message>[^\n]+)",
+                    re.IGNORECASE,
+                )
+                for match in error_pattern.finditer(definition_text):
+                    node_id = _clean_text(match.group(1))
+                    message = _clean_text(match.group("message"))
+                    if node_id:
+                        invalid_node_ids.append(node_id)
+                    if message:
+                        schema_errors.append(
+                            f"{node_id}: {message}"
+                        )
+
+                deprecated_node_ids.extend(
+                    _deprecated_node_ids(
+                        definition_text,
+                        [ref],
+                    )
+                )
+
+            resolved = bool(structured or definition_text)
+            if resolved:
+                break
+
+        if not resolved and last_message:
+            messages.append(
+                f"{ref.get('nodeId')}: {last_message}"
             )
 
     invalid_node_ids = _unique_strings(invalid_node_ids)
