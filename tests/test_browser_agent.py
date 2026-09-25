@@ -25,6 +25,55 @@ class BrowserAgentTests(unittest.TestCase):
         module = importlib.import_module("browser_agent")
         self.assertNotIn("browser_use", module.__dict__)
 
+    def test_worker_defaults_to_conservative_settings(self):
+        module = importlib.import_module("browser_agent_worker")
+        settings = module._resolve_settings({})
+
+        self.assertFalse(settings["advanced"])
+        self.assertFalse(settings["use_vision"])
+        self.assertFalse(settings["use_thinking"])
+        self.assertFalse(settings["use_judge"])
+        self.assertFalse(settings["enable_planning"])
+        self.assertFalse(settings["loop_detection_enabled"])
+        self.assertFalse(settings["message_compaction"])
+        self.assertEqual(settings["max_actions_per_step"], 1)
+        self.assertEqual(settings["max_failures"], 2)
+        self.assertEqual(settings["max_history_items"], 8)
+
+    def test_worker_advanced_mode_enables_recovery_features(self):
+        module = importlib.import_module("browser_agent_worker")
+        settings = module._resolve_settings({"advanced": True})
+
+        self.assertTrue(settings["advanced"])
+        self.assertTrue(settings["enable_planning"])
+        self.assertTrue(settings["loop_detection_enabled"])
+        self.assertTrue(settings["message_compaction"])
+        self.assertEqual(settings["max_actions_per_step"], 3)
+        self.assertEqual(settings["max_failures"], 3)
+        self.assertEqual(settings["max_history_items"], 20)
+        self.assertEqual(settings["step_timeout"], 90)
+
+    def test_worker_request_options_override_advanced_defaults(self):
+        module = importlib.import_module("browser_agent_worker")
+        settings = module._resolve_settings(
+            {
+                "advanced": True,
+                "enable_planning": False,
+                "loop_detection_enabled": False,
+                "message_compaction": False,
+                "max_actions_per_step": 5,
+                "max_history_items": 12,
+                "step_timeout": 120,
+            }
+        )
+
+        self.assertFalse(settings["enable_planning"])
+        self.assertFalse(settings["loop_detection_enabled"])
+        self.assertFalse(settings["message_compaction"])
+        self.assertEqual(settings["max_actions_per_step"], 5)
+        self.assertEqual(settings["max_history_items"], 12)
+        self.assertEqual(settings["step_timeout"], 120)
+
     def test_status_reports_missing_worker_cleanly(self):
         module = importlib.import_module("browser_agent")
         fake_python = Path(module.BASE_DIR) / "missing-browser-python.exe"
@@ -158,12 +207,14 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertIn('"think": False', source)
         self.assertIn('"num_ctx": int(', source)
         self.assertIn('"keep_alive": "5m"', source)
-        self.assertIn("use_thinking=False", source)
-        self.assertIn("use_judge=False", source)
-        self.assertIn("enable_planning=False", source)
-        self.assertIn("max_history_items=8", source)
-        self.assertNotIn("max_history_items=3", source)
-        self.assertIn("step_timeout=DEFAULT_STEP_TIMEOUT", source)
+        self.assertIn('settings["use_thinking"]', source)
+        self.assertIn('settings["use_judge"]', source)
+        self.assertIn('settings["enable_planning"]', source)
+        self.assertIn('settings["loop_detection_enabled"]', source)
+        self.assertIn('settings["message_compaction"]', source)
+        self.assertIn('settings["max_actions_per_step"]', source)
+        self.assertIn('settings["max_history_items"]', source)
+        self.assertIn('settings["step_timeout"]', source)
 
     def test_page_title_uses_deterministic_fast_path_without_worker(self):
         import browser_controller
@@ -247,17 +298,18 @@ class BrowserAgentTests(unittest.TestCase):
             ),
         ):
             result = module.browser_agent_run(
-                '{"task":"inspect the current page","max_steps":4}'
+                '{"task":"inspect the current page","max_steps":4,'
+                '"advanced":true,"max_actions_per_step":4}'
             )
 
         self.assertTrue(result["success"])
         args = run_mock.call_args.args[0]
         self.assertEqual(str(args[0]), str(fake_python))
         self.assertTrue(str(args[1]).endswith("browser_agent_worker.py"))
-        self.assertEqual(
-            json.loads(run_mock.call_args.kwargs["input"])["max_steps"],
-            4,
-        )
+        worker_input = json.loads(run_mock.call_args.kwargs["input"])
+        self.assertEqual(worker_input["max_steps"], 4)
+        self.assertTrue(worker_input["advanced"])
+        self.assertEqual(worker_input["max_actions_per_step"], 4)
 
 
 if __name__ == "__main__":
