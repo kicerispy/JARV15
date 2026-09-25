@@ -301,6 +301,53 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertGreater(github[0], relevant[0])
 
 
+    def test_best_practice_guidance_can_augment_missing_capability_nodes(self):
+        candidates = [
+            {
+                "nodeId": "n8n-nodes-base.githubTrigger",
+                "type": "n8n-nodes-base.githubTrigger",
+                "name": "githubTrigger",
+            }
+        ]
+        guidance = [
+            {
+                "technique": "notification",
+                "guidance": (
+                    "Recommended nodes: n8n-nodes-base.if, "
+                    "n8n-nodes-base.slack, "
+                    "@n8n/n8n-nodes-langchain.openAi"
+                ),
+            }
+        ]
+
+        augmented = architect._augment_nodes_from_guidance(
+            "Monitor GitHub issues, summarize bugs, and send me an alert",
+            candidates,
+            guidance,
+        )
+
+        ids = {item["nodeId"] for item in augmented}
+        self.assertIn("n8n-nodes-base.githubTrigger", ids)
+        self.assertIn("n8n-nodes-base.if", ids)
+        self.assertIn("n8n-nodes-base.slack", ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.openAi", ids)
+
+
+    def test_node_relevance_prioritizes_multiple_requested_capabilities(self):
+        request = "Monitor GitHub issues, summarize bugs, and send me an alert"
+
+        github = architect._node_relevance(
+            request,
+            {"name": "GitHub Trigger", "nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
+        )
+        unrelated = architect._node_relevance(
+            request,
+            {"name": "SSE Trigger", "nodeId": "n8n-nodes-base.sseTrigger", "type": "n8n-nodes-base.sseTrigger"},
+        )
+
+        self.assertGreater(github[:3], unrelated[:3])
+
+
     def test_quality_gate_requires_requested_capabilities(self):
         candidates = [
             {"name": "GitHub Trigger", "nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
