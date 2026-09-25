@@ -90,6 +90,7 @@ BROWSER_TOOLS = frozenset(
 
 JSON_ARGUMENT_TOOLS = frozenset(
     {
+        "healing_hints",
         "n8n_run_workflow",
         "n8n_mcp_status",
         "n8n_mcp_list_tools",
