@@ -4385,6 +4385,11 @@ def _anime_streaming_plan(command):
         "streaming link",
         "watch anime",
         "anime watch",
+        "free anime",
+        "free streaming",
+        "no subscription",
+        "without a subscription",
+        "free to watch",
     )
 
     watch_markers = (
@@ -4416,11 +4421,28 @@ def _anime_streaming_plan(command):
             argument = text[len(prefix):].strip().rstrip("?.!,")
             break
 
+    free_only = any(
+        marker in lowered
+        for marker in (
+            "free anime",
+            "free streaming",
+            "no subscription",
+            "without a subscription",
+            "free to watch",
+        )
+    )
+
+    tool = "anime_free_watch" if free_only else "anime_streaming_links"
+
     return {
-        "goal": "find official anime streaming pages",
+        "goal": (
+            "find free official anime streaming pages"
+            if free_only
+            else "find official anime streaming pages"
+        ),
         "steps": [
             {
-                "tool": "anime_streaming_links",
+                "tool": tool,
                 "argument": argument,
             }
         ],
