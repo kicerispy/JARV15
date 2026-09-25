@@ -477,6 +477,54 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertGreater(github[:3], unrelated[:3])
 
 
+    def test_quality_gate_blocks_capability_without_schema(self):
+        candidates = [
+            {
+                "name": "GitHub Trigger",
+                "nodeId": "n8n-nodes-base.githubTrigger",
+                "type": "n8n-nodes-base.githubTrigger",
+            },
+            {
+                "name": "OpenAI",
+                "nodeId": "n8n-nodes-langchain.openAi",
+                "type": "n8n-nodes-langchain.openAi",
+            },
+            {
+                "name": "If",
+                "nodeId": "n8n-nodes-base.if",
+                "type": "n8n-nodes-base.if",
+            },
+            {
+                "name": "Slack",
+                "nodeId": "n8n-nodes-base.slack",
+                "type": "n8n-nodes-base.slack",
+            },
+        ]
+        requirements = architect._requirements(
+            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            ["monitoring", "content_generation", "notification"],
+        )
+        gate = architect._quality_gate(
+            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            requirements,
+            candidates,
+            [
+                {"nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
+                {"nodeId": "n8n-nodes-base.if", "type": "n8n-nodes-base.if"},
+                {"nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
+            ],
+        )
+
+        self.assertFalse(gate["ready_to_build"])
+        self.assertIn("summarization", gate["missing"])
+        summarization = next(
+            check
+            for check in gate["checks"]
+            if check["id"] == "summarization"
+        )
+        self.assertEqual(summarization["status"], "candidate")
+
+
     def test_quality_gate_requires_requested_capabilities(self):
         candidates = [
             {"name": "GitHub Trigger", "nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
@@ -492,7 +540,12 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             "Monitor GitHub issues, summarize bugs, and send me an alert.",
             requirements,
             candidates,
-            [{"content": "valid schema"}],
+            [
+                {"nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger", "content": "valid schema"},
+                {"nodeId": "n8n-nodes-langchain.openAi", "type": "n8n-nodes-langchain.openAi", "content": "valid schema"},
+                {"nodeId": "n8n-nodes-base.if", "type": "n8n-nodes-base.if", "content": "valid schema"},
+                {"nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack", "content": "valid schema"},
+            ],
         )
 
         self.assertTrue(gate["ready_to_build"])
