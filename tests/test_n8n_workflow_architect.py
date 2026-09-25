@@ -423,7 +423,11 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             },
         )
 
-        self.assertGreater(github[0], relevant[0])
+        # A generic GitHub node is still textually relevant, but it must not
+        # receive the strict github_source capability score without issue
+        # semantics/discriminators. The manual trigger has neither.
+        self.assertEqual(github[0], relevant[0])
+        self.assertGreater(github[1], relevant[1])
 
 
     def test_best_practice_guidance_can_augment_missing_capability_nodes(self):
