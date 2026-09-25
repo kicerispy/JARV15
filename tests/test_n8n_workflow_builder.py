@@ -48,6 +48,32 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertIn("subnodes: { model: openAiModel }", prompt)
         self.assertIn("const openAiModel = languageModel({", prompt)
 
+    def test_invented_node_version_is_rejected_when_schema_version_is_unknown(self):
+        code = (
+            "import { workflow, node } from '@n8n/workflow-sdk';\n"
+            "const filter = node({type: 'n8n-nodes-base.filter', version: 1.2, config: {name: 'Filter', parameters: {}}});\n"
+            "export default workflow('id', 'Workflow').add(filter);"
+        )
+        errors = builder._sdk_shape_errors(
+            code,
+            allowed_node_types=["n8n-nodes-base.filter"],
+            verified_node_versions={},
+        )
+        self.assertTrue(any("invented version 1.2" in error for error in errors))
+
+    def test_verified_node_version_passes_version_guard(self):
+        code = (
+            "import { workflow, node } from '@n8n/workflow-sdk';\n"
+            "const filter = node({type: 'n8n-nodes-base.filter', version: 2.3, config: {name: 'Filter', parameters: {}}});\n"
+            "export default workflow('id', 'Workflow').add(filter);"
+        )
+        errors = builder._sdk_shape_errors(
+            code,
+            allowed_node_types=["n8n-nodes-base.filter"],
+            verified_node_versions={"n8n-nodes-base.filter": ["2.3"]},
+        )
+        self.assertFalse(any("version 2.3" in error for error in errors))
+
     def test_verified_node_allowlist_includes_common_runtime_nodes(self):
         design = self._design()
         allowed = builder._verified_node_types(design)
