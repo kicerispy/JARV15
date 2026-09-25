@@ -681,6 +681,26 @@ def _deprecated_node_ids(
     return _unique_strings(deprecated)
 
 
+
+def _schema_result_is_valid(result: Dict[str, Any]) -> bool:
+    """Return True only when get_node_types produced an actual schema payload."""
+    if result.get("success") is not True:
+        return False
+
+    structured = _structured_result_list(
+        result,
+        ("nodeTypes", "definitions", "results"),
+    )
+    if structured:
+        return True
+
+    definition_text = _result_text(
+        result,
+        ("definitions", "documentation", "content"),
+    )
+    return _looks_like_node_schema(definition_text)
+
+
 def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     refs: List[Dict[str, Any]] = []
     for item in candidates:
@@ -714,7 +734,17 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             {"nodeIds": [ref]},
         )
         if result.get("success") is not True:
-            messages.append(str(result.get("message") or "get_node_types failed"))
+            messages.append(
+                f"{ref.get('nodeId')}: "
+                f"{result.get('message') or 'get_node_types failed'}"
+            )
+            continue
+
+        if not _schema_result_is_valid(result):
+            messages.append(
+                f"{ref.get('nodeId')}: "
+                f"{result.get('message') or 'get_node_types returned no schema'}"
+            )
             continue
 
         successes += 1
@@ -774,6 +804,7 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "schema_errors": schema_errors,
         "invalid_node_ids": invalid_node_ids,
         "deprecated_node_ids": deprecated_node_ids,
+        "schema_failures": messages[:MAX_NODE_TYPE_REQUESTS],
     }
 
 
