@@ -134,6 +134,28 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertEqual(len(blockers), 2)
         self.assertTrue(all(":" in item for item in blockers))
 
+    def test_structural_n8n_warnings_are_blockers_and_have_repair_rules(self):
+        validation = {
+            "success": True,
+            "data": {
+                "valid": True,
+                "warnings": [
+                    {"code": "SET_INVALID_ASSIGNMENT", "message": "assignments must be an object"},
+                    {"code": "INVALID_INPUT_INDEX", "message": "input index 0 is invalid"},
+                    {"code": "INVALID_OUTPUT_INDEX", "message": "output index 1 is invalid"},
+                    {"code": "INVALID_PARAMETER", "message": "Slack operation invalid"},
+                    {"code": "MISSING_EXPRESSION_PREFIX", "message": "expression without '='"},
+                ],
+            },
+        }
+        blockers = builder._validation_blockers(validation)
+        self.assertEqual(len(blockers), 5)
+        rules = builder._schema_repair_instructions(blockers)
+        self.assertGreaterEqual(len(rules), 4)
+        self.assertTrue(any("inner assignments array" in rule for rule in rules))
+        self.assertTrue(any("resource: 'message' and operation: 'post'" in rule for rule in rules))
+        self.assertTrue(any("output 0 to input 0" in rule for rule in rules))
+
     def test_select_trigger_detects_service_specific_trigger(self):
         graph = {
             "nodes": [
