@@ -672,6 +672,146 @@ def _deterministic_roblox_context_plan(
     return None
 
 
+def _deterministic_platform_plan(user_command: str) -> Optional[Dict[str, Any]]:
+    """Resolve common JARVIS self-service requests without an LLM."""
+    normalized = _normalized_words(user_command)
+
+    if normalized in {
+        "check yourself",
+        "check your health",
+        "diagnose jarvis",
+        "doctor jarvis",
+        "run a diagnostic on yourself",
+        "run a diagnostic on jarvis",
+        "run a full diagnostic",
+        "self diagnostic",
+        "self diagnose",
+        "self-diagnose",
+    }:
+        return {
+            "goal": "run JARVIS health doctor",
+            "steps": [
+                {
+                    "tool": "jarvis_doctor",
+                    "argument": '{"deep":true,"run_tests":false}',
+                }
+            ],
+            "resolved_command": user_command,
+        }
+
+    if normalized in {
+        "self test",
+        "run your tests",
+        "test yourself",
+        "run a full self test",
+    }:
+        return {
+            "goal": "run JARVIS full self-test",
+            "steps": [
+                {
+                    "tool": "jarvis_doctor",
+                    "argument": '{"deep":true,"run_tests":true}',
+                }
+            ],
+            "resolved_command": user_command,
+        }
+
+    if normalized in {
+        "tool health",
+        "check tool health",
+        "which tools are failing",
+        "what tools are failing",
+        "show degraded tools",
+    }:
+        return {
+            "goal": "inspect JARVIS tool health",
+            "steps": [{"tool": "tool_health", "argument": ""}],
+            "resolved_command": user_command,
+        }
+
+    if normalized in {
+        "what models do you have",
+        "which models do you have",
+        "list local models",
+        "list your models",
+        "ollama models",
+    }:
+        return {
+            "goal": "inspect local Ollama models",
+            "steps": [{"tool": "ollama_models", "argument": ""}],
+            "resolved_command": user_command,
+        }
+
+    if normalized in {
+        "what do you remember",
+        "what do you remember about me",
+        "show my memories",
+        "show my memory",
+        "list my memories",
+    }:
+        return {
+            "goal": "recall local JARVIS memory",
+            "steps": [
+                {
+                    "tool": "memory_recall",
+                    "argument": '{"query":"","limit":10}',
+                }
+            ],
+            "resolved_command": user_command,
+        }
+
+    if normalized.startswith("remember that "):
+        text = user_command.strip()[len("remember that "):].strip()
+        if text:
+            return {
+                "goal": "store JARVIS memory",
+                "steps": [
+                    {
+                        "tool": "memory_remember",
+                        "argument": json.dumps({
+                            "text": text,
+                            "kind": "fact",
+                        }),
+                    }
+                ],
+                "resolved_command": user_command,
+            }
+
+    if normalized.startswith("remember this "):
+        text = user_command.strip()[len("remember this "):].strip()
+        if text:
+            return {
+                "goal": "store JARVIS memory",
+                "steps": [
+                    {
+                        "tool": "memory_remember",
+                        "argument": json.dumps({
+                            "text": text,
+                            "kind": "fact",
+                        }),
+                    }
+                ],
+                "resolved_command": user_command,
+            }
+
+    for prefix in ("forget that ", "forget this ", "forget "):
+        if normalized.startswith(prefix):
+            query = user_command.strip()[len(prefix):].strip()
+            if query:
+                return {
+                    "goal": "forget JARVIS memory",
+                    "steps": [
+                        {
+                            "tool": "memory_forget",
+                            "argument": json.dumps({"query": query}),
+                        }
+                    ],
+                    "resolved_command": user_command,
+                }
+
+    return None
+
+
 def _roblox_safe_fallback_plan(
     user_command: str,
 ) -> Dict[str, Any]:
@@ -941,6 +1081,10 @@ Rules:
 
 WINDOWS STARTUP AND RUNTIME STATUS:
 
+- For explicit JARVIS self-health requests such as "check yourself", "diagnose JARVIS", or "run a self-test", use jarvis_doctor. For a full self-test, pass deep=true and run_tests=true.
+- Use tool_health to inspect repeated tool failures, latency, retryability, or open circuits.
+- Use ollama_models to inspect local model availability before diagnosing model-role failures.
+- Use memory_remember only when the user explicitly asks JARVIS to remember something. Use memory_recall for explicit memory questions and memory_forget when the user explicitly asks to forget something.
 - Use system_status when the user asks about computer or JARVIS subsystem health.
 - Use startup_status when the user asks whether JARVIS starts with Windows.
 - Use enable_startup when the user asks JARVIS to start automatically with Windows.
@@ -2462,6 +2606,14 @@ def create_plan(
     """
     if not user_command or not user_command.strip():
         return {"goal": "", "steps": []}
+
+    deterministic_platform = _deterministic_platform_plan(user_command)
+
+    if deterministic_platform is not None:
+        logger.info(
+            "JARVIS planner: deterministic platform self-service route selected."
+        )
+        return validate_plan(deterministic_platform)
 
     # Workflow-class requests belong to n8n because it is better at
     # persistent state, schedules, retries, branching, and external-service
