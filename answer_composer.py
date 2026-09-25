@@ -482,6 +482,8 @@ def _integration_health_answer(task: Any, evidence: Sequence[Dict[str, Any]]) ->
             ("DISABLED", "Disabled"),
             ("NOT_CONFIGURED", "Not configured"),
             ("NOT_INSTALLED", "Not installed"),
+            ("NOT_READY", "Not ready"),
+            ("ERROR", "Error"),
         ):
             names = names_for(status)
             if names:
