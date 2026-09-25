@@ -1019,8 +1019,13 @@ def _capability_search_queries(
         return _unique_strings(
             [
                 "OpenAI text generation",
+                "OpenAI",
+                "OpenAI node",
+                "OpenAI Chat Model",
                 "LLM text generation",
                 "AI text generation",
+                "language model",
+                "Basic LLM Chain",
             ]
         )
 
@@ -1029,6 +1034,7 @@ def _capability_search_queries(
             [
                 "IF node",
                 "Switch node",
+                "n8n IF",
                 "conditional filter",
             ]
         )
@@ -1037,8 +1043,11 @@ def _capability_search_queries(
         return _unique_strings(
             [
                 "Slack send",
+                "Slack",
                 "Send Email",
+                "email send",
                 "Telegram message",
+                "Telegram",
             ]
         )
 
@@ -1048,6 +1057,50 @@ def _capability_search_queries(
         return ["trigger"]
 
     return []
+
+
+
+def _definition_node_ids(
+    definitions: Sequence[Dict[str, Any]],
+) -> set[str]:
+    """Collect node ids represented by successfully retrieved schemas."""
+    ids: set[str] = set()
+
+    for item in definitions:
+        if not isinstance(item, dict):
+            continue
+
+        for key in ("nodeId", "nodeType", "type"):
+            value = _clean_text(item.get(key))
+            if value:
+                ids.add(value.lower())
+
+        content = str(item.get("content") or "")
+        ids.update(
+            match.lower()
+            for match in _NODE_ID_RE.findall(content)
+        )
+
+    return ids
+
+
+def _capability_is_schema_backed(
+    capability: str,
+    candidates: Sequence[Dict[str, Any]],
+    definition_ids: set[str],
+) -> bool:
+    """Require a real retrieved schema for the node satisfying a capability."""
+    for item in candidates:
+        node_id = _clean_text(
+            item.get("nodeId")
+            or item.get("type")
+            or item.get("id")
+        ).lower()
+        if not node_id or node_id not in definition_ids:
+            continue
+        if _capability_matches_node(capability, item):
+            return True
+    return False
 
 
 def _quality_gate(
@@ -1063,24 +1116,46 @@ def _quality_gate(
         for item in candidates
     )
 
+    definition_ids = _definition_node_ids(definitions)
     capability_checks: List[Dict[str, Any]] = []
-    for capability, markers in _required_capabilities(request):
-        if capability == "trigger":
-            found = has_trigger_candidate
-        else:
-            found = any(
+    for capability, _markers in _required_capabilities(request):
+        found_candidate = (
+            has_trigger_candidate
+            if capability == "trigger"
+            else any(
                 _capability_matches_node(capability, item)
                 for item in candidates
+            )
+        )
+        found_schema = _capability_is_schema_backed(
+            capability,
+            candidates,
+            definition_ids,
+        )
+
+        if found_schema:
+            status = "verified"
+            message = (
+                f"Required capability '{capability}' was discovered "
+                "and has a retrieved n8n node schema."
+            )
+        elif found_candidate:
+            status = "candidate"
+            message = (
+                f"Required capability '{capability}' was discovered, "
+                "but its exact n8n node schema was not retrieved."
+            )
+        else:
+            status = "missing"
+            message = (
+                f"Required capability '{capability}' was not discovered "
+                "from live n8n nodes."
             )
 
         capability_checks.append({
             "id": capability,
-            "status": "verified" if found else "missing",
-            "message": (
-                f"Required capability '{capability}' was discovered."
-                if found
-                else f"Required capability '{capability}' was not discovered from live n8n nodes."
-            ),
+            "status": status,
+            "message": message,
         })
 
     checks = capability_checks + [
@@ -1181,6 +1256,47 @@ def design_workflow(
         candidates,
         guidance,
     )
+
+    # Re-run targeted searches after guidance is available. Best-practice
+    # documentation often names the exact provider/node that should satisfy a
+    # capability even when search_nodes did not return it for the original query.
+    for capability, _markers in _required_capabilities(request_text):
+        if any(
+            _capability_matches_node(capability, item)
+            for item in candidates
+        ):
+            continue
+
+        for query in _capability_search_queries(request_text, capability):
+            result = _call(
+                "search_nodes",
+                {
+                    "queries": [query],
+                    "usage": "workflow",
+                },
+            )
+            if result.get("success") is not True:
+                continue
+
+            discovered = _result_list(
+                result,
+                ("nodes", "results", "items"),
+            )
+            if not discovered:
+                continue
+
+            candidates = _augment_nodes_from_guidance(
+                request_text,
+                list(candidates) + discovered,
+                guidance,
+            )
+
+            if any(
+                _capability_matches_node(capability, item)
+                for item in candidates
+            ):
+                break
+
     node_types = _get_node_types(candidates)
     requirements = _requirements(
         request_text,
