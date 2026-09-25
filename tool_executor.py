@@ -128,6 +128,20 @@ def _execute_with_safe_retry(
         argument,
     )
 
+    resilience_observation = (
+        result.observation.get("resilience")
+        if isinstance(result, ToolResult)
+        and isinstance(result.observation, dict)
+        else None
+    )
+
+    # A circuit-open result is already a deliberate "do not retry" signal.
+    # Respect it even when the tool's generic result is marked retryable.
+    if isinstance(resilience_observation, dict) and resilience_observation.get(
+        "circuit_open"
+    ):
+        return result
+
     if not (
         tool_name in SAFE_RETRY_TOOLS
         and isinstance(result, ToolResult)
