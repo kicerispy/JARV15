@@ -30,6 +30,18 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "anipy_episodes": "Get available anime episodes through anipy-api. Argument is JSON with query/provider/identifier and language.",
     "anipy_get_video": "Resolve an anime episode to an anipy-api video stream. Argument is JSON with anime selector, episode, language, and optional quality.",
     "anipy_download": "Download anime using the upstream anipy-api Downloader and anipy-cli configuration semantics. Argument is JSON with anime selector, episode(s), language, quality, and optional location/container/ffmpeg.",
+    "context_backend_status": "Report configured OpenViking, agentmemory, and local memory backend health and selected backend.",
+    "context_remember": "Persist a durable JARVIS fact, preference, lesson, or workflow. Argument is JSON.",
+    "context_recall": "Recall relevant durable JARVIS memory. Argument is JSON with query and optional limit.",
+    "context_search": "Build a compact context block from the configured memory backend. Argument is JSON with query and optional limit.",
+    "context_read": "Read an OpenViking viking:// context document. Argument is JSON with uri and optional limit.",
+    "openviking_add_resource": "Import a local or remote resource into OpenViking. Argument is JSON.",
+    "openviking_add_skill": "Install a validated Agent Skill into OpenViking. Argument is JSON. Use only on explicit request.",
+    "skills_status": "Report which external Agent Skill repositories are synchronized into JARVIS.",
+    "skills_sync": "Explicitly clone/update the configured Agent Skill repositories. Only use when the user explicitly asks to sync, install, refresh, or update the skill sources. Never auto-run downloaded scripts.",
+    "skills_search": "Search the synchronized Agent Skill catalog for relevant procedural knowledge.",
+    "skills_read": "Read one synchronized SKILL.md or indexed skill document.",
+    "harness_review": "Review a proposed tool plan for verification, mutation, scope, and long-horizon harness issues.",
     "unreal_mcp": "Call the upstream Unreal_mcp native MCP gateway. Argument is JSON using the upstream unreal gateway operations: search, describe, execute, or configure. Preserve upstream capability names and parameter contracts.",
     "unreal_mcp_status": "Check whether the local Unreal_mcp native MCP endpoint is reachable, authenticated, and exposing the upstream unreal gateway.",
     "unreal_mcp_setup": "Clone or refresh ChiR24/Unreal_mcp into JARVIS external-tools and report the Unreal plugin path. Do not silently modify an Unreal project.",
@@ -655,6 +667,20 @@ _UNREAL_MCP_PLANNER_TOOLS = {
     "unreal_mcp_setup",
 }
 
+_CONTEXT_MEMORY_PLANNER_TOOLS = {
+    "context_backend_status",
+    "context_recall",
+    "context_search",
+    "context_read",
+}
+
+_AGENT_SKILL_PLANNER_TOOLS = {
+    "skills_status",
+    "skills_search",
+    "skills_read",
+    "harness_review",
+}
+
 def _planner_tool_scope(
     user_command: str,
     active_context: Optional[Dict[str, Any]] = None,
@@ -849,6 +875,34 @@ def _planner_tool_scope(
     ):
         return _UNREAL_MCP_PLANNER_TOOLS
 
+    skill_domain_signals = (
+        "skill",
+        "agent skill",
+        "cybersecurity",
+        "cyber security",
+        "threat hunting",
+        "incident response",
+        "security analysis",
+        "diagram",
+        "architecture diagram",
+        "flowchart",
+        "scientific",
+        "science",
+        "research workflow",
+        "bioinformatics",
+        "chemistry",
+        "biology",
+        "harness engineering",
+        "agent harness",
+    )
+
+    if any(signal in text for signal in skill_domain_signals):
+        return (
+            set(_AGENT_SKILL_PLANNER_TOOLS)
+            | set(_CONTEXT_MEMORY_PLANNER_TOOLS)
+            | set(_CODE_PLANNER_TOOLS)
+        )
+
     code_signals = (
         "code",
         "coding",
@@ -916,7 +970,7 @@ def _planner_tool_scope(
     )
 
     if any(signal in text for signal in code_signals):
-        return _CODE_PLANNER_TOOLS
+        return set(_CODE_PLANNER_TOOLS) | set(_AGENT_SKILL_PLANNER_TOOLS) | {"context_recall", "context_search"}
 
     # Product/review/price research has its own orchestration tool. Keep the
     # planner from expanding one research request into dozens of fragile DOM steps.

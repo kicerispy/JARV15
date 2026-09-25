@@ -162,6 +162,61 @@ UNREAL_MCP_EXTERNAL_DIR = os.environ.get(
 ).strip()
 
 # ============================================================
+# EXTERNAL CONTEXT / MEMORY
+# ============================================================
+
+CONTEXT_MEMORY_BACKEND = os.environ.get(
+    "JARVIS_CONTEXT_MEMORY_BACKEND",
+    "auto",
+).strip().lower()
+
+AGENT_MEMORY_URL = os.environ.get(
+    "JARVIS_AGENTMEMORY_URL",
+    "http://127.0.0.1:3111",
+).strip().rstrip("/")
+
+AGENT_MEMORY_SECRET = os.environ.get(
+    "JARVIS_AGENTMEMORY_SECRET",
+    "",
+).strip()
+
+OPENVIKING_URL = os.environ.get(
+    "JARVIS_OPENVIKING_URL",
+    "http://127.0.0.1:1933",
+).strip().rstrip("/")
+
+OPENVIKING_API_KEY = os.environ.get(
+    "JARVIS_OPENVIKING_API_KEY",
+    "",
+).strip()
+
+OPENVIKING_ACCOUNT = os.environ.get(
+    "JARVIS_OPENVIKING_ACCOUNT",
+    "",
+).strip()
+
+OPENVIKING_USER = os.environ.get(
+    "JARVIS_OPENVIKING_USER",
+    "",
+).strip()
+
+AGENT_SKILLS_DIR = os.environ.get(
+    "JARVIS_AGENT_SKILLS_DIR",
+    str(BASE_DIR / ".jarvis_external" / "agent_skill_sources"),
+).strip()
+
+AGENT_SKILL_SOURCES_FILE = os.environ.get(
+    "JARVIS_AGENT_SKILL_SOURCES_FILE",
+    str(BASE_DIR / "skills_sources.json"),
+).strip()
+
+AGENT_SKILL_SYNC_DEPTH = max(
+    1,
+    int(os.environ.get("JARVIS_AGENT_SKILL_SYNC_DEPTH", "1")),
+)
+
+
+# ============================================================
 # SUPERPOWERS SOFTWARE WORKFLOW
 # ============================================================
 

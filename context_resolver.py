@@ -6,7 +6,10 @@ from typing import Any, Dict, Optional
 from ollama import chat
 
 from config import CHAT_MODEL
+from agent_context import recall as context_recall
 from logger import logger
+
+
 
 
 _CONTEXTUAL_PATTERNS = (
@@ -112,6 +115,14 @@ def resolve_followup(
     last_result_url = active_context.get("last_result_url") or "none"
     last_element = active_context.get("last_element") or "none"
 
+    external_memory = ""
+    try:
+        memory_result = context_recall(user_input, limit=4)
+        if memory_result.get("success"):
+            external_memory = str(memory_result.get("results") or "")[:5000]
+    except Exception as exc:
+        logger.debug(f"External memory lookup skipped: {exc}")
+
     prompt = f"""
 You are JARVIS's command-context resolver.
 
@@ -183,6 +194,10 @@ Last browser element:
 RECENT CONVERSATION:
 
 {history_text}
+
+RELEVANT LONG-TERM CONTEXT:
+
+{external_memory}
 
 LATEST COMMAND:
 

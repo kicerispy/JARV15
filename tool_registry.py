@@ -43,6 +43,30 @@ UNREAL_MCP_TOOLS = frozenset(
     }
 )
 
+CONTEXT_MEMORY_TOOLS = frozenset(
+    {
+        "context_backend_status",
+        "context_remember",
+        "context_recall",
+        "context_search",
+        "context_read",
+        "openviking_add_resource",
+        "openviking_add_skill",
+    }
+)
+
+
+AGENT_SKILL_TOOLS = frozenset(
+    {
+        "skills_status",
+        "skills_sync",
+        "skills_search",
+        "skills_read",
+        "harness_review",
+    }
+)
+
+
 
 BROWSER_TOOLS = frozenset(
     {
@@ -105,6 +129,15 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "anipy_get_video",
         "anipy_download",
         "unreal_mcp",
+        "context_remember",
+        "context_recall",
+        "context_search",
+        "context_read",
+        "openviking_add_resource",
+        "openviking_add_skill",
+        "skills_search",
+        "skills_read",
+        "harness_review",
     }
 )
 
@@ -121,5 +154,7 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in N8N_TOOLS
         and str(name) not in ANIPY_TOOLS
         and str(name) not in UNREAL_MCP_TOOLS
+        and str(name) not in CONTEXT_MEMORY_TOOLS
+        and str(name) not in AGENT_SKILL_TOOLS
         and not is_roblox_tool_name(name)
     )
