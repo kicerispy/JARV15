@@ -65,7 +65,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
             ),
         )
         self.assertIn("HARD REPAIR REQUIREMENT:", prompt)
-        self.assertIn("never invent a summarize node", prompt)
+        self.assertIn("Use only the exact node types listed under ALLOWED NODE TYPES", prompt)
 
     def test_unknown_node_type_is_rejected_against_verified_schemas(self):
         code = (
