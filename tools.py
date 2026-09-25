@@ -2701,6 +2701,8 @@ PRODUCT_RESEARCH_TOOLS = {
 N8N_TOOLS = {
     "n8n_status",
     "n8n_run_workflow",
+    "n8n_mcp_status",
+    "n8n_mcp_list_tools",
 }
 
 
@@ -3284,6 +3286,62 @@ def _run_tool_raw(
             request=str(payload.get("request") or "").strip(),
             workflow_class=str(payload.get("workflow_class") or "").strip(),
             context=payload.get("context") if isinstance(payload.get("context"), dict) else {},
+        )
+
+
+    if tool_name == "n8n_mcp_status":
+        from n8n_mcp import status
+        return status()
+
+    if tool_name == "n8n_mcp_list_tools":
+        from n8n_mcp import list_tools
+        try:
+            return {
+                "success": True,
+                "verified": True,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "tools": list_tools(),
+                "message": "n8n MCP tools discovered.",
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": str(exc),
+            }
+
+    if str(tool_name).startswith("n8n_mcp__"):
+        from n8n_mcp import call_tool
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n MCP tool arguments must be valid JSON.",
+            }
+
+        if not isinstance(payload, dict):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n MCP tool arguments must be a JSON object.",
+            }
+
+        return call_tool(
+            str(tool_name),
+            payload,
         )
 
     if tool_name in BROWSER_TOOLS:
