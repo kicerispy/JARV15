@@ -1021,20 +1021,47 @@ def _capability_matches_node(capability: str, item: Dict[str, Any]) -> bool:
         )
 
     if capability == "summarization":
-        return any(
-            marker in identity
-            for marker in (
-                "openai",
-                "gemini",
-                "claude",
-                "anthropic",
-                "grok",
-                "textgenerator",
-                "text generator",
-                "basicllm",
-                "basic llm",
+        # Prefer actual LLM/chat-model nodes and reject the legacy core
+        # OpenAI node when it is only a lookalike search result. The live
+        # n8n catalog exposes provider chat models under the LangChain package.
+        preferred_markers = (
+            "n8n-nodes-langchain.lmchatopenai",
+            "n8n-nodes-langchain.lmchatgooglegemini",
+            "n8n-nodes-langchain.lmchatanthropic",
+            "n8n-nodes-langchain.lmchatxaigrok",
+            "n8n-nodes-langchain.basicllmchain",
+            "n8n-nodes-langchain.openaichat",
+        )
+        if any(marker in identity for marker in preferred_markers):
+            return True
+
+        if (
+            "n8n-nodes-base.openai" in identity
+            and "n8n-nodes-langchain" not in identity
+        ):
+            return False
+
+        return (
+            "n8n-nodes-langchain" in identity
+            and any(
+                marker in identity
+                for marker in (
+                    "openai",
+                    "gemini",
+                    "claude",
+                    "anthropic",
+                    "grok",
+                    "textgenerator",
+                    "text generator",
+                    "basicllm",
+                    "basic llm",
+                    "llm",
+                )
             )
-        ) or ("llm" in identity and "classifier" not in identity)
+        ) or (
+            "llm" in identity
+            and "classifier" not in identity
+        )
 
     if capability == "condition":
         return bool({"if", "switch", "filter", "router"} & tokens)
@@ -1083,10 +1110,14 @@ def _capability_search_queries(
     if capability == "summarization":
         return _unique_strings(
             [
+                "OpenAI Chat Model",
+                "@n8n/n8n-nodes-langchain.lmChatOpenAi",
                 "OpenAI text generation",
                 "OpenAI",
                 "OpenAI node",
-                "OpenAI Chat Model",
+                "Google Gemini Chat Model",
+                "Anthropic Chat Model",
+                "xAI Grok Chat Model",
                 "LLM text generation",
                 "AI text generation",
                 "language model",
@@ -1149,13 +1180,49 @@ def _definition_node_ids(
     return ids
 
 
+def _definition_candidates(
+    definitions: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Turn retrieved schemas into lightweight node candidates."""
+    candidates: List[Dict[str, Any]] = []
+
+    for item in definitions:
+        if not isinstance(item, dict):
+            continue
+
+        node_ids = []
+        for key in ("nodeId", "nodeType", "type"):
+            value = _clean_text(item.get(key))
+            if value:
+                node_ids.append(value)
+
+        node_ids.extend(
+            _NODE_ID_RE.findall(str(item.get("content") or ""))
+        )
+
+        for node_id in _unique_strings(node_ids):
+            candidate = dict(item)
+            candidate["nodeId"] = node_id
+            candidate["type"] = node_id
+            candidate["name"] = (
+                candidate.get("name")
+                or node_id.rsplit(".", 1)[-1]
+            )
+            candidate["_source"] = "schema_definition"
+            candidates.append(candidate)
+
+    return candidates
+
+
 def _capability_is_schema_backed(
     capability: str,
     candidates: Sequence[Dict[str, Any]],
     definition_ids: set[str],
+    definitions: Sequence[Dict[str, Any]] = (),
 ) -> bool:
     """Require a real retrieved schema for the node satisfying a capability."""
-    for item in candidates:
+    schema_candidates = list(candidates) + _definition_candidates(definitions)
+    for item in schema_candidates:
         node_id = _clean_text(
             item.get("nodeId")
             or item.get("type")
@@ -1296,6 +1363,7 @@ def _quality_gate(
             capability,
             candidates,
             definition_ids,
+            definitions,
         )
 
         if found_schema:
@@ -1509,6 +1577,7 @@ def design_workflow(
             capability,
             candidates,
             _definition_node_ids(definitions),
+            definitions,
         ):
             continue
 
@@ -1524,6 +1593,23 @@ def design_workflow(
             guidance,
         )
         capability_schema_failures.extend(failures)
+
+    # A successful schema lookup is authoritative even when search ranking
+    # previously crowded that node out of the eight normal candidate slots.
+    # Re-inject schema-backed nodes so the eventual build layer has the exact
+    # verified node type available instead of only a prose schema reference.
+    schema_candidates = _definition_candidates(definitions)
+    merged_candidates: Dict[str, Dict[str, Any]] = {}
+    for item in candidates + schema_candidates:
+        node_id = _clean_text(
+            item.get("nodeId")
+            or item.get("type")
+            or item.get("id")
+        )
+        if not node_id:
+            continue
+        merged_candidates[node_id.lower()] = item
+    candidates = list(merged_candidates.values())
 
     quality = _quality_gate(
         request_text,
