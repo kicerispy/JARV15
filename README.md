@@ -11,9 +11,10 @@ JARVIS is a local-first personal AI assistant for Windows. It combines voice int
 - **Roblox:** Roblox Studio MCP integration
 - **Automation:** optional n8n delegation
 - **Coding/self-repair:** checkpoint → inspect → focused plan → edit → test → verification → bounded recovery
-- **Self-healing/runtime resilience:** persistent tool-health telemetry, bounded circuit breakers, sanitized failure signatures, and structured model-role fallbacks
-- **Local memory:** bounded semantic/preferences/procedure/lesson memory plus episodic failure lessons
+- **Self-healing/runtime resilience:** persistent tool-health telemetry, bounded circuit breakers, sanitized failure signatures, structured model-role fallbacks, and a persistent failure playbook that reuses prior recovery evidence
+- **Local memory:** bounded semantic/preferences/procedure/lesson memory plus episodic failure lessons, with a SQLite FTS5 shadow index for faster deterministic recall
 - **JARVIS Doctor:** read-only runtime/model/tool/Git diagnostics with optional compile and pytest probes
+- **QoL diagnostics:** deterministic quick-check, resource/process/project/service diagnostics that avoid an LLM round-trip
 - **Testing:** pytest regression suite plus GitHub Actions verification
 
 JARVIS remains the orchestrator; specialist models and tools are capabilities it can delegate to.
@@ -87,7 +88,7 @@ Pull only the models you actually want to run locally.
 
 All machine-specific values should live in environment variables rather than source edits. See [.env.example](.env.example).
 
-The resilience and memory layer stores local runtime state under `.jarvis_autonomy/`, which is ignored by Git. Relevant environment controls include:
+The resilience and memory layer stores local runtime state under `.jarvis_autonomy/`, which is ignored by Git. The healing journal remains JSONL for simple auditability, while repeated failure signatures are indexed in a small SQLite FTS5 playbook and the semantic-memory JSONL store can use a SQLite FTS5 shadow index for faster recall. Relevant environment controls include:
 - `JARVIS_SELF_HEALING_ENABLED`
 - `JARVIS_SELF_HEALING_MAX_ATTEMPTS`
 - `JARVIS_TOOL_RESILIENCE_ENABLED`
@@ -95,6 +96,9 @@ The resilience and memory layer stores local runtime state under `.jarvis_autono
 - `JARVIS_TOOL_CIRCUIT_FAILURE_THRESHOLD`
 - `JARVIS_TOOL_CIRCUIT_COOLDOWN_SECONDS`
 - `JARVIS_MEMORY_ENABLED`
+- `JARVIS_SELF_HEALING_FAILURE_MEMORY_ENABLED`
+- `JARVIS_SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS`
+- `JARVIS_SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS`
 
 Examples include:
 
@@ -122,6 +126,8 @@ JARVIS also exposes deterministic self-service tools:
 - `tool_health` for reliability and circuit-breaker state
 - `ollama_models` for local model inventory
 - `memory_remember`, `memory_recall`, and `memory_forget` for explicit local memory control
+- `healing_hints` and `healing_history` for inspecting what has failed and what recovery patterns JARVIS has learned
+- `jarvis_quickcheck`, `resource_status`, `process_snapshot`, `project_snapshot`, and `service_status` for fast deterministic diagnostics
 
 Run the public CI-focused set:
 
