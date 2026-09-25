@@ -265,6 +265,36 @@ def _result_list(result: Dict[str, Any], keys: Sequence[str]) -> List[Dict[str, 
     return []
 
 
+def _structured_result_list(
+    result: Dict[str, Any],
+    keys: Sequence[str],
+) -> List[Dict[str, Any]]:
+    """Extract structured list payloads without interpreting arbitrary strings."""
+    data = _result_data(result)
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+
+    containers: List[Dict[str, Any]] = [data]
+    while containers:
+        container = containers.pop(0)
+
+        for key in keys:
+            value = container.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+            if isinstance(value, dict):
+                containers.append(value)
+
+        for key in ("data", "result", "output", "content"):
+            nested = container.get(key)
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+            if isinstance(nested, dict):
+                containers.append(nested)
+
+    return []
+
+
 def _result_text(result: Dict[str, Any], keys: Sequence[str]) -> str:
     data = _result_data(result)
 
@@ -433,7 +463,7 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         {"nodeIds": refs},
     )
 
-    definitions = _result_list(
+    definitions = _structured_result_list(
         result,
         ("nodeTypes", "definitions", "results"),
     )
