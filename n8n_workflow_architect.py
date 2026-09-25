@@ -22,6 +22,84 @@ MAX_BEST_PRACTICE_CHARS = 12000
 MAX_DESCRIPTION_CHARS = 3000
 
 
+# Fallback node catalog used when an n8n instance exposes workflow-management
+# tools but omits the node-search tool from its MCP tool set. We still resolve
+# exact definitions through get_node_types before the architecture can pass.
+_FALLBACK_NODE_CANDIDATES = {
+    "trigger": [
+        {
+            "nodeId": "n8n-nodes-base.githubTrigger",
+            "type": "n8n-nodes-base.githubTrigger",
+            "name": "GitHub Trigger",
+            "version": 1.0,
+            "description": "GitHub repository event trigger.",
+        },
+        {
+            "nodeId": "n8n-nodes-base.manualTrigger",
+            "type": "n8n-nodes-base.manualTrigger",
+            "name": "Manual Trigger",
+            "description": "Manual workflow trigger.",
+        },
+    ],
+    "github_source": [
+        {
+            "nodeId": "n8n-nodes-base.github",
+            "type": "n8n-nodes-base.github",
+            "name": "GitHub",
+            "version": 1.1,
+            "resource": "repository",
+            "operation": "getIssues",
+            "description": "Retrieve repository issues.",
+        },
+    ],
+    "summarization": [
+        {
+            "nodeId": "@n8n/n8n-nodes-langchain.chainLlm",
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "name": "Basic LLM Chain",
+            "version": 1.0,
+            "description": "Run a prompt through a connected language model.",
+        },
+        {
+            "nodeId": "@n8n/n8n-nodes-langchain.lmChatOllama",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+            "name": "Ollama Chat Model",
+            "version": 1.0,
+            "description": "Local Ollama chat model for the LLM chain.",
+        },
+        {
+            "nodeId": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "name": "OpenAI Chat Model",
+            "version": 1.3,
+            "description": "OpenAI chat model for the LLM chain.",
+        },
+    ],
+    "condition": [
+        {
+            "nodeId": "n8n-nodes-base.if",
+            "type": "n8n-nodes-base.if",
+            "name": "If",
+            "description": "Route items based on a condition.",
+        },
+    ],
+    "notification": [
+        {
+            "nodeId": "n8n-nodes-base.slack",
+            "type": "n8n-nodes-base.slack",
+            "name": "Slack",
+            "description": "Send notifications to Slack.",
+        },
+        {
+            "nodeId": "n8n-nodes-base.emailSend",
+            "type": "n8n-nodes-base.emailSend",
+            "name": "Send Email",
+            "description": "Send an email notification.",
+        },
+    ],
+}
+
+
 _NODE_ID_RE = re.compile(
     r"(?:@n8n/n8n-nodes-[A-Za-z0-9_-]+|n8n-nodes-[A-Za-z0-9_-]+)\.[A-Za-z0-9_.-]+"
 )
@@ -646,6 +724,26 @@ def _discover_nodes(
         if len(selected) >= MAX_NODE_CANDIDATES:
             break
 
+    # If the live MCP endpoint does not expose search_nodes, seed only the
+    # capabilities implied by the request. The exact schema lookup below is
+    # still authoritative and the quality gate remains schema-backed.
+    required_capabilities = [
+        capability
+        for capability, _markers in _required_capabilities(request)
+    ]
+    for capability in required_capabilities:
+        if any(
+            _capability_matches_node(capability, item)
+            for item in selected
+        ):
+            continue
+        for fallback in _FALLBACK_NODE_CANDIDATES.get(capability, ()):
+            ref = _node_identity(fallback)
+            key = json.dumps(ref, sort_keys=True, default=str) if ref else ""
+            if key and key not in selected_keys:
+                selected.append(dict(fallback, _source="fallback_catalog"))
+                selected_keys.add(key)
+
     return selected[:MAX_NODE_CANDIDATES], queries
 
 
@@ -1047,6 +1145,7 @@ def _capability_matches_node(capability: str, item: Dict[str, Any]) -> bool:
                 marker in identity
                 for marker in (
                     "openai",
+                    "ollama",
                     "gemini",
                     "claude",
                     "anthropic",
