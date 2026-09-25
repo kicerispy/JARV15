@@ -186,6 +186,36 @@ class ModelManager:
             retryable=True,
         ) from last_error
 
+    def list_local_models(self, timeout: float = 2.0) -> list[dict]:
+        """Return the models currently visible to Ollama."""
+        import json
+        from urllib.request import Request, urlopen
+
+        request = Request(
+            config.OLLAMA_HOST.rstrip("/") + "/api/tags",
+            headers={"User-Agent": "JARVIS/1.0", "Accept": "application/json"},
+            method="GET",
+        )
+        with urlopen(request, timeout=max(0.25, float(timeout))) as response:
+            payload = json.loads(
+                response.read().decode("utf-8", errors="replace")
+            )
+        models = payload.get("models", [])
+        return [item for item in models if isinstance(item, dict)]
+
+    def model_available(self, model: str, *, timeout: float = 2.0) -> bool:
+        target = str(model or "").strip()
+        if not target:
+            return False
+        try:
+            names = {
+                str(item.get("name") or item.get("model") or "")
+                for item in self.list_local_models(timeout=timeout)
+            }
+            return target in names
+        except Exception:
+            return False
+
     def chat(self, messages: list):
         """Generate a normal conversational response using the chat model."""
         return self.generate(
@@ -267,18 +297,39 @@ class ModelManager:
         options: dict | None = None,
         model: str | None = None,
     ):
-        """Generate a coding/repair response with optional model override."""
-        return self.generate(
-            model=model or self.coding_model,
-            messages=messages,
-            format=format,
-            options=options or {
-                "temperature": 0,
-                "num_predict": 240,
-                "num_ctx": self.coding_num_ctx,
-            },
-            keep_alive=config.CODING_MODEL_KEEP_ALIVE,
-        )
+        """Generate a coding/repair response with bounded model fallback."""
+        selected = model or self.coding_model
+        generation_options = options or {
+            "temperature": 0,
+            "num_predict": 240,
+            "num_ctx": self.coding_num_ctx,
+        }
+
+        try:
+            return self.generate(
+                model=selected,
+                messages=messages,
+                format=format,
+                options=generation_options,
+                keep_alive=config.CODING_MODEL_KEEP_ALIVE,
+            )
+        except ModelGenerationError as primary_error:
+            fallback = str(self.coding_fallback_model or "").strip()
+            if not fallback or fallback == selected:
+                raise
+
+            logger.warning(
+                "JARVIS MODEL: coding model failed; trying configured "
+                f"fallback {fallback} after primary error: {primary_error}"
+            )
+
+            return self.generate(
+                model=fallback,
+                messages=messages,
+                format=format,
+                options=generation_options,
+                keep_alive=config.CODING_MODEL_KEEP_ALIVE,
+            )
 
     def warmup_coding_model(self) -> bool:
         """Load the coding model into Ollama's resident cache for fast repairs."""
