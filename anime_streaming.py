@@ -285,3 +285,130 @@ def anime_streaming_links(argument: str = "") -> dict:
         },
         f"Found {len(deduped)} official streaming page(s) for {anime}.",
     )
+
+
+def anime_availability(argument: str = "") -> dict:
+    """Return an anime's known official watch providers/pages.
+
+    This is an availability/discovery layer, not a media extractor. It may
+    include public JustWatch discovery pages plus known official provider
+    landing pages returned by AniList/web search.
+    """
+    try:
+        anime, episode, limit = _parse_argument(argument)
+    except (TypeError, ValueError) as exc:
+        return {
+            "success": False,
+            "tool": "anime_availability",
+            "error": str(exc),
+            "retryable": False,
+        }
+
+    combined: list[dict] = []
+    errors: list[str] = []
+
+    try:
+        # AniList gives the strongest structured signal when streaming
+        # metadata is available.
+        anilist = _anilist_links(anime, episode, min(limit, 10))
+        combined.extend(anilist)
+    except Exception as exc:
+        errors.append(f"AniList: {exc}")
+
+    try:
+        justwatch_results = web_search(
+            f'site:justwatch.com "{anime}" anime where to watch',
+            max_results=max(6, min(12, limit + 3)),
+        )
+        for result in justwatch_results:
+            url = str(result.get("url") or "").strip()
+            if "justwatch.com" not in url.lower():
+                continue
+            combined.append({
+                "anime": anime,
+                "episode": episode,
+                "title": str(result.get("title") or "").strip(),
+                "provider": "JustWatch",
+                "url": url,
+                "snippet": str(result.get("snippet") or "").strip()[:400],
+                "source": "justwatch_search",
+                "official_domain": False,
+                "availability_page": True,
+            })
+    except Exception as exc:
+        errors.append(f"JustWatch search: {exc}")
+
+    try:
+        official = _web_links(anime, episode, limit)
+        combined.extend(official)
+    except Exception as exc:
+        errors.append(f"web search: {exc}")
+
+    deduped: list[dict] = []
+    seen: set[str] = set()
+
+    for item in combined:
+        url = str(item.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+
+    providers: list[str] = []
+    seen_providers: set[str] = set()
+    for item in deduped:
+        provider = str(item.get("provider") or "").strip()
+        if provider and provider not in seen_providers:
+            seen_providers.add(provider)
+            providers.append(provider)
+
+    if not deduped:
+        detail = "No availability pages or official watch links found."
+        if errors:
+            detail += " " + " | ".join(errors[:2])
+        return {
+            "success": False,
+            "tool": "anime_availability",
+            "error": detail,
+            "retryable": bool(errors),
+        }
+
+    return {
+        "success": True,
+        "tool": "anime_availability",
+        "data": {
+            "anime": anime,
+            "episode": episode,
+            "providers": providers,
+            "results": deduped,
+            "count": len(deduped),
+            "official_only_for_watch_links": True,
+        },
+        "message": f"Found {len(deduped)} anime availability/watch page result(s) for {anime}.",
+    }
+
+
+def anime_provider_catalog(argument: str = "") -> dict:
+    """Return the official streaming providers JARVIS can discover."""
+    query = str(argument or "").strip().lower()
+    providers = [
+        {
+            "provider": provider,
+            "domain": domain,
+            "watch_page_discovery": True,
+        }
+        for domain, provider in OFFICIAL_STREAMING_DOMAINS.items()
+        if not query or query in provider.lower() or query in domain.lower()
+    ]
+
+    return {
+        "success": True,
+        "tool": "anime_provider_catalog",
+        "data": {
+            "providers": providers,
+            "count": len(providers),
+        },
+        "message": f"JARVIS knows {len(providers)} official anime-capable streaming provider domain(s).",
+    }
