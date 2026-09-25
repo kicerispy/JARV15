@@ -550,6 +550,13 @@ def _schema_repair_instructions(validation_blockers: List[str]) -> List[str]:
             "Use '={{ $json.foo }}', never '{{ $json.foo }}'."
         )
 
+    if "invented version" in text or "verified versions are" in text or "omit the version" in text:
+        instructions.append(
+            "Do not invent node versions. Remove the version/typeVersion field unless "
+            "the exact numeric version is present in the verified architecture/schema. "
+            "When verified versions are listed, use only one of those exact values."
+        )
+
     if "set_invalid_assignment" in text or "parameters.assignments" in text:
         instructions.append(
             "For n8n-nodes-base.set, parameters.assignments must be an object "
