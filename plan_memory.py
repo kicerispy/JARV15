@@ -107,8 +107,7 @@ def _connect() -> sqlite3.Connection:
     _DB_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(_DB_PATH), timeout=5.0)
     connection.row_factory = sqlite3.Row
-    if not _SCHEMA_READY:
-        connection.executescript(
+    connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS strategies (
                 fingerprint TEXT PRIMARY KEY,
@@ -146,7 +145,6 @@ def _connect() -> sqlite3.Connection:
             """
         )
         connection.commit()
-        _SCHEMA_READY = True
     return connection
 
 
@@ -384,6 +382,20 @@ def _similarity(query_key: str, domain: str, candidate: dict[str, Any]) -> float
     return min(1.0, score)
 
 
+def recent_strategies(limit: int = 10) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 20))
+    try:
+        with _LOCK:
+            with _connect() as connection:
+                rows = connection.execute(
+                    "SELECT * FROM strategies ORDER BY last_seen DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [_row_to_strategy(row) for row in rows]
+    except (OSError, sqlite3.Error, ValueError):
+        return []
+
+
 def find_strategies(
     request: str,
     *,
@@ -566,6 +578,7 @@ __all__ = [
     "plan_signature",
     "quarantine_strategy",
     "recent_events",
+    "recent_strategies",
     "record_strategy",
     "strategy_status",
 ]
