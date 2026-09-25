@@ -508,9 +508,6 @@ def _roblox_mcp_lifecycle_answer(
     else:
         answer = "Roblox MCP is reachable, but its detailed Studio connection state was not exposed."
 
-    if server_url:
-        answer += f" Server: {server_url}."
-
     if "setup" in request:
         answer = "Roblox MCP setup completed. " + answer[0].lower() + answer[1:]
 
