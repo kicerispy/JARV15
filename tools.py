@@ -3254,7 +3254,10 @@ def _run_tool_raw(
         from product_research import research_product
         return research_product(argument)
 
-    if tool_name in N8N_TOOLS:
+    # Only legacy workflow delegation belongs in this broad bridge branch.
+    # Specialized MCP tools below have their own handlers and must not be
+    # swallowed by n8n_bridge.run_n8n_workflow().
+    if tool_name in {"n8n_status", "n8n_run_workflow"}:
         from n8n_bridge import n8n_status, run_n8n_workflow
 
         if tool_name == "n8n_status":
