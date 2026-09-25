@@ -445,6 +445,77 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     # should still be compact enough for natural TTS.
     return "\n".join(lines)[:650]
 
+def _roblox_mcp_lifecycle_answer(
+    task: Any,
+    evidence: Sequence[Dict[str, Any]],
+) -> str:
+    """Summarize Roblox MCP setup/status evidence for the user."""
+    request = str(getattr(task, "request", "") or "").strip().lower()
+    item = next(
+        (
+            row for row in reversed(evidence)
+            if str(row.get("tool", "") or "").strip()
+            in {"roblox_mcp_status", "roblox_mcp_setup"}
+        ),
+        None,
+    )
+    if not item:
+        return "The Roblox MCP check completed, but no structured status was returned."
+
+    data = _mapping_payload(item.get("data"))
+    if not data:
+        detail = str(item.get("detail") or "").strip()
+        return detail or "The Roblox MCP check completed, but no structured status was returned."
+
+    server_url = str(data.get("server_url") or "").strip()
+    health = data.get("health")
+    status = data.get("status")
+
+    plugin_connected = None
+    candidates = []
+    if isinstance(status, dict):
+        candidates.append(status)
+        for key in ("plugin", "studio", "connection", "connections"):
+            value = status.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+    for candidate in candidates:
+        for key in (
+            "connected",
+            "pluginConnected",
+            "plugin_connected",
+            "studioConnected",
+            "studio_connected",
+        ):
+            value = candidate.get(key)
+            if isinstance(value, bool):
+                plugin_connected = value
+                break
+        if plugin_connected is not None:
+            break
+
+    healthy = isinstance(health, dict) and (
+        health.get("healthy") is True
+        or str(health.get("status") or "").lower() in {"ok", "healthy", "ready"}
+    )
+
+    if plugin_connected is True:
+        answer = "Roblox MCP is running and the Roblox Studio plugin is connected."
+    elif plugin_connected is False:
+        answer = "Roblox MCP is running, but the Roblox Studio plugin is not connected."
+    elif healthy:
+        answer = "Roblox MCP is running. The health endpoint is responding, but Studio connection status was not exposed."
+    else:
+        answer = "Roblox MCP is reachable, but its detailed Studio connection state was not exposed."
+
+    if server_url:
+        answer += f" Server: {server_url}."
+
+    if "setup" in request:
+        answer = "Roblox MCP setup completed. " + answer[0].lower() + answer[1:]
+
+    return _clip(answer, 800)
+
 def _integration_health_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     """Summarize the unified JARVIS tool/integration health sweep."""
     for item in reversed(evidence):
@@ -985,6 +1056,9 @@ def compose_task_answer(
 
     if "find_file" in executed_tools or "list_files" in executed_tools:
         return _project_file_answer(evidence)
+
+    if "roblox_mcp_status" in executed_tools or "roblox_mcp_setup" in executed_tools:
+        return _roblox_mcp_lifecycle_answer(task, evidence)
 
     if intent.get("domain") == "roblox":
         return _roblox_answer(task, evidence)
