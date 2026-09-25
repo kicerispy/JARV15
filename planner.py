@@ -11,7 +11,11 @@ from model_manager import ModelManager
 from logger import logger
 from project_fs import iter_project_files
 from autonomous_engineering import is_test_target, requires_regression_test
-from tool_registry import BROWSER_TOOLS, JSON_ARGUMENT_TOOLS
+from tool_registry import (
+    BROWSER_TOOLS,
+    JSON_ARGUMENT_TOOLS,
+    is_n8n_mcp_tool_name,
+)
 
 MODEL_MANAGER = ModelManager()
 PLANNER_MODEL = MODEL_MANAGER.planner_model
@@ -23,6 +27,8 @@ PLANNER_MODEL = MODEL_MANAGER.planner_model
 AVAILABLE_TOOLS: Dict[str, str] = {
     "n8n_status": "Check whether the configured n8n workflow orchestrator is enabled and reachable.",
     "n8n_run_workflow": "Delegate a workflow-class task to n8n. Argument is JSON with request, workflow_class, and optional context.",
+    "n8n_mcp_status": "Check the direct n8n instance-level MCP connection.",
+    "n8n_mcp_list_tools": "Discover the currently exposed n8n MCP workflow/tools available to JARVIS.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -654,10 +660,22 @@ def _planner_tool_scope(
                 )
             )
         ):
-            return {
+            tools = {
                 "n8n_status",
                 "n8n_run_workflow",
+                "n8n_mcp_status",
+                "n8n_mcp_list_tools",
             }
+            try:
+                import config as _config
+                if _config.N8N_MCP_ENABLED:
+                    from n8n_mcp import tool_descriptions
+                    tools.update(tool_descriptions().keys())
+            except Exception as exc:
+                logger.debug(
+                    f"JARVIS planner: n8n MCP discovery unavailable: {exc}"
+                )
+            return tools
     except Exception:
         pass
 
@@ -887,6 +905,8 @@ n8n-first even when they are a single action (for example, sending an email,
 creating a GitHub issue, updating a calendar, or controlling a supported media
 service). JARVIS should not recreate an integration locally when n8n can own it.
 - Use n8n_run_workflow with JSON containing request, workflow_class, and context.
+- When direct n8n MCP tools are available, they may be used for explicit workflow discovery or execution requests; dynamic tools use the prefix n8n_mcp__ and require JSON-object arguments.
+- Prefer n8n_mcp__ tools for direct workflow inspection/execution when the user's request names a specific n8n workflow or asks JARVIS to use n8n MCP directly.
 - Do not replace an n8n workflow with local wait loops or ad-hoc JARVIS code.
 - n8n owns workflow retries, waiting, branching, and external-service state.
 - JARVIS owns the real-time voice, browser, Roblox, computer-control, and code-repair loops.
@@ -2043,8 +2063,13 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
         argument = step.get("argument", "")
 
         is_dynamic_roblox_tool = is_roblox_tool_name(tool)
+        is_dynamic_n8n_mcp_tool = is_n8n_mcp_tool_name(tool)
 
-        if tool not in AVAILABLE_TOOLS and not is_dynamic_roblox_tool:
+        if (
+            tool not in AVAILABLE_TOOLS
+            and not is_dynamic_roblox_tool
+            and not is_dynamic_n8n_mcp_tool
+        ):
             logger.warning(f"Rejected unknown tool: {tool}")
             continue
 
@@ -2068,6 +2093,21 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
                 )
                 continue
 
+        if is_dynamic_n8n_mcp_tool:
+            try:
+                from n8n_mcp import is_known_tool
+
+                if not is_known_tool(tool):
+                    logger.warning(
+                        f"Rejected unknown n8n MCP tool: {tool}"
+                    )
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    f"n8n MCP tool validation unavailable: {exc}"
+                )
+                continue
+
         normalized_argument = (
             str(argument) if argument is not None else ""
         )
@@ -2077,7 +2117,11 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
         # object arguments at the planner boundary so every downstream
         # browser dispatcher receives one stable JSON representation.
         if (
-            (tool in JSON_ARGUMENT_TOOLS or is_roblox_tool_name(tool))
+            (
+                tool in JSON_ARGUMENT_TOOLS
+                or is_roblox_tool_name(tool)
+                or is_n8n_mcp_tool_name(tool)
+            )
             and normalized_argument.strip()
         ):
             raw_argument = normalized_argument.strip()
