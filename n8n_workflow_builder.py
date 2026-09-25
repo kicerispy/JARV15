@@ -46,7 +46,6 @@ KNOWN_NODE_TYPES = {
 AI_SUBNODE_PATTERN = """
 const openAiModel = languageModel({
   type: '@n8n/n8n-nodes-langchain.lmChatOpenAi',
-  version: 1.3,
   config: {
     name: 'OpenAI Model',
     parameters: {},
@@ -55,7 +54,6 @@ const openAiModel = languageModel({
 
 const aiAgent = node({
   type: '@n8n/n8n-nodes-langchain.agent',
-  version: 3.1,
   config: {
     name: 'AI Agent',
     parameters: { promptType: 'define', text: 'Process the input.' },
@@ -258,6 +256,11 @@ def _extract_node_versions(code: str) -> Dict[str, List[str]]:
         node_type = match.group(1).strip()
         version = match.group(2).strip()
         if not node_type or not version:
+            continue
+        # Only n8n node identifiers participate in the node-version guard.
+        # Workflow parameters can legitimately contain things such as
+        # type: 'string' alongside a numeric version-like field.
+        if not node_type.startswith(("n8n-nodes-base.", "@n8n/")):
             continue
         versions.setdefault(node_type, []).append(version)
     return {key: list(dict.fromkeys(value)) for key, value in versions.items()}
@@ -466,6 +469,7 @@ Rules:
 - workflow() requires TWO string arguments: a stable workflow id and a workflow name.
 - Put node parameters under config.parameters; do not put parameters directly beside config.
 - Use .add(...), .to(...), and the documented branch helpers to wire nodes.
+- For an IF node with two branches, use the exact chained shape `.add(trigger).to(ifNode).onTrue(trueNode).onFalse(falseNode)`. `.onFalse(...)` must immediately follow the IF node's `.to(ifNode)` chain; never emit `.onFalse(...)` as a detached statement or after unrelated nodes.
 - Do not use createWorkflow, workflow({...}), workflow([ ... ]), a one-argument workflow('name'), or raw workflow JSON.
 - Do not emit export type, export interface, typeof default_, or other type-only exports.
 - Do not leave branch wiring as standalone statements after export default.
@@ -474,7 +478,7 @@ Rules:
 - The ALLOWED NODE TYPES list below is a hard allowlist. Every workflow node type MUST match one of those exact strings.
 - Never invent semantic node types such as @n8n/n8n-nodes-langchain.summarize. For summarization, use a verified LLM/AI node or another verified processing node from the supplied schemas.
 - Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
-- For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
+- For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type. Omit version/typeVersion unless that exact numeric version appears in the verified architecture/schema. The AI subnode pattern below intentionally omits guessed versions.
 - Include a real trigger and connect every required stage.
 - For conditional bug/issue identification, prefer n8n-nodes-base.if. Do not choose n8n-nodes-base.filter unless its exact verified schema and version are supplied in the architecture.
 - For monitoring/polling workflows, prefer a manually testable Schedule Trigger unless the user explicitly requests an external event trigger.
@@ -589,6 +593,14 @@ def _schema_repair_instructions(validation_blockers: List[str]) -> List[str]:
             "Use ordinary main-output to main-input wiring only. .to(target) must "
             "use output 0 to input 0. Do not invent index 1 connections or error "
             "branches unless the source node explicitly supports them."
+        )
+
+    if "onfalse()" in text or "immediately follow adding a if node" in text:
+        instructions.append(
+            "For an IF branch, chain both branch helpers directly after the IF node: "
+            ".add(trigger).to(ifNode).onTrue(trueNode).onFalse(falseNode). "
+            "Do not place .onFalse(...) on its own line or after another chained "
+            "node. If only one branch is needed, omit the unused helper."
         )
 
     return instructions
