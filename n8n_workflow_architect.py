@@ -1030,7 +1030,25 @@ def _required_capabilities(request: str) -> List[Tuple[str, Tuple[str, ...]]]:
         ))
     if any(marker in text for marker in ("bug", "when", "if", "condition", "identify")):
         capabilities.append(("condition", ("if", "switch", "filter", "router")))
-    if any(marker in text for marker in ("alert", "notify", "notification", "message me")):
+    explicit_notification_target = any(
+        marker in text
+        for marker in (
+            "send email",
+            "email me",
+            "email alert",
+            "send a slack",
+            "slack message",
+            "slack alert",
+            "send to slack",
+            "discord message",
+            "discord alert",
+            "telegram message",
+            "telegram alert",
+            "teams message",
+            "teams alert",
+        )
+    )
+    if explicit_notification_target:
         capabilities.append((
             "notification",
             (
@@ -1043,6 +1061,9 @@ def _required_capabilities(request: str) -> List[Tuple[str, Tuple[str, ...]]]:
                 "notification",
             ),
         ))
+    elif any(marker in text for marker in ("alert", "notify", "notification", "message me")):
+        capabilities.append(("alert_output", ("set", "alert", "notification")))
+
 
     return capabilities
 
@@ -1157,13 +1178,19 @@ def _capability_matches_node(capability: str, item: Dict[str, Any]) -> bool:
         )
         if not any(marker in identity for marker in action_markers):
             return False
-        # Trigger nodes monitor events; they should not satisfy a notification action.
         if "trigger" in tokens and not (
             {"send", "message", "notification"} & tokens
             or " send" in identity
         ):
             return False
         return True
+
+    if capability == "alert_output":
+        return (
+            "n8n-nodes-base.set" in identity
+            or " alert" in identity
+            or "notification" in identity
+        )
 
     return False
 
