@@ -125,10 +125,22 @@ def select_learned_plan(
     except Exception:
         health = {}
 
+    min_successes = max(
+        1,
+        int(getattr(config, "AUTONOMY_STRATEGY_MIN_SUCCESSES", 3)),
+    )
+    min_success_rate = max(
+        0.0,
+        min(
+            1.0,
+            float(getattr(config, "AUTONOMY_STRATEGY_MIN_SUCCESS_RATE", 0.75)),
+        ),
+    )
     candidates = [
         item
         for item in candidates
-        if item.get("trusted")
+        if int(item.get("successes", 0) or 0) >= min_successes
+        and float(item.get("success_rate", 0.0) or 0.0) >= min_success_rate
         and float(item.get("similarity", 0.0) or 0.0) >= 0.55
     ]
 
@@ -258,6 +270,27 @@ __all__ = [
     "autonomy_status",
     "rank_strategy",
     "record_task_outcome",
+    "regression_status",
     "select_learned_plan",
+    "strategy_history",
     "strategy_hints",
 ]
+
+def strategy_history(request: str = "", limit: int = 10) -> list[dict[str, Any]]:
+    from plan_memory import find_strategies
+
+    return find_strategies(
+        str(request or ""),
+        limit=max(1, min(int(limit), 20)),
+        include_quarantined=True,
+    )
+
+
+def regression_status(request: str = "") -> dict[str, Any]:
+    from regression_detector import evaluate_request, detect_tool_regressions
+
+    return {
+        "request": str(request or "")[:800],
+        "evaluation": evaluate_request(str(request or "")) if str(request or "").strip() else {},
+        "tool_regressions": detect_tool_regressions(),
+    }
