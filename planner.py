@@ -30,6 +30,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "n8n_mcp_status": "Check the direct n8n instance-level MCP connection.",
     "n8n_mcp_list_tools": "Discover the currently exposed n8n MCP workflow/tools available to JARVIS.",
     "n8n_workflow_architect": "Design or audit an n8n workflow using live node discovery, exact node schemas, and n8n best-practice guidance. Argument is JSON; default mode is design, audit mode requires workflow_id.",
+    "n8n_workflow_builder": "Build an n8n workflow from a verified architecture, validate it through n8n MCP, create it, verify the saved graph, test it with pin data, audit it, and optionally publish it when activate=true. Argument is JSON with request plus optional activate, test, project_id, folder_id, workflow_code, name, description, or context.",
     "browser_connect": "Connect to the JARVIS-controlled Chrome browser.",
     "browser_search_google": "Search Google using the controlled browser.",
     "browser_search_bing": "Search Bing using the controlled browser.",
@@ -400,7 +401,6 @@ def _deterministic_n8n_plan(
             "create an n8n workflow",
             "build a workflow",
             "build an n8n workflow",
-            "edit a workflow",
             "edit the workflow",
             "modify a workflow",
             "update a workflow",
@@ -408,7 +408,39 @@ def _deterministic_n8n_plan(
             "use the n8n mcp",
         )
     ):
-        return None
+        activation_requested = any(
+            phrase in normalized
+            for phrase in (
+                "activate it",
+                "activate the workflow",
+                "publish it",
+                "publish the workflow",
+                "make it live",
+            )
+        )
+        return {
+            "goal": "build and validate an n8n workflow",
+            "steps": [
+                {
+                    "tool": "n8n_workflow_builder",
+                    "argument": json.dumps(
+                        {
+                            "request": str(user_command).strip(),
+                            "activate": activation_requested,
+                            "test": True,
+                            "context": (
+                                dict(active_context)
+                                if isinstance(active_context, dict)
+                                else {}
+                            ),
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+            "resolved_command": user_command,
+            "execution_owner": "n8n",
+        }
 
     try:
         from n8n_bridge import classify_n8n_request
