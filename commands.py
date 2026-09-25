@@ -1731,6 +1731,9 @@ def build_screen_memory_plan(user_request):
     if "screen memory" not in text and "screenpipe" not in text:
         return None
 
+    if any(token in text for token in ("set up", "setup", "install", "start", "launch", "repair")):
+        return {"steps": [{"tool": "screen_memory_setup", "argument": ""}]}
+
     if any(token in text for token in ("status", "health", "running", "online")):
         return {"steps": [{"tool": "screen_memory_status", "argument": ""}]}
 
