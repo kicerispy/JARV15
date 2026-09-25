@@ -491,6 +491,21 @@ def healing_history(limit: int = 10) -> list[dict[str, Any]]:
     ]
 
 
+def _playbook_status() -> dict[str, Any]:
+    """Return playbook stats without making the healing kernel depend on startup order."""
+    try:
+        from healing_playbook import playbook_status
+        return playbook_status()
+    except Exception as exc:
+        logger.debug(f"JARVIS HEALING: playbook status unavailable: {exc}")
+        return {
+            "enabled": False,
+            "records": 0,
+            "observations": 0,
+            "recoveries": 0,
+        }
+
+
 def healing_status() -> dict[str, Any]:
     """Return compact diagnostics for the local self-healing subsystem."""
     with _LOCK:
@@ -536,6 +551,7 @@ def healing_status() -> dict[str, Any]:
                 )
             ),
         },
+        "playbook": _playbook_status(),
     }
 
 
