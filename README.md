@@ -183,7 +183,7 @@ Useful commands include:
 "set up Unreal MCP"
 ```
 
-`unreal_mcp_setup` clones or refreshes the upstream `dev` branch under `external-tools/Unreal_mcp` and reports the native plugin path. It does not silently modify an Unreal project. Install `plugins/McpAutomationBridge` into the target project, enable Native MCP on port 3000, and configure the JARVIS endpoint/token settings before executing Unreal actions.
+`unreal_mcp_setup` clones or refreshes the upstream `dev` branch under `.jarvis_external/Unreal_mcp` and reports the native plugin path. It does not silently modify an Unreal project. Install `plugins/McpAutomationBridge` into the target project, enable Native MCP on port 3000, and configure the JARVIS endpoint/token settings before executing Unreal actions.
 
 
 ## License
