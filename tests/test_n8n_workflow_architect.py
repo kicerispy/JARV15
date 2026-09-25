@@ -136,6 +136,63 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(by_id["n8n-nodes-base.switch"]["version"], 3.4)
 
 
+    def test_get_node_types_retries_with_node_id_when_discriminator_lookup_fails(self):
+        calls = []
+
+        def fake_call(tool_name, arguments=None):
+            self.assertEqual(tool_name, "get_node_types")
+            ref = (arguments or {})["nodeIds"][0]
+            calls.append(ref)
+            if len(calls) == 1:
+                return {
+                    "success": False,
+                    "message": "stale version discriminator",
+                }
+            return {
+                "success": True,
+                "data": {
+                    "definitions": (
+                        "interface GithubTriggerParams { events: string[] }"
+                    )
+                },
+            }
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect._get_node_types(
+                [{
+                    "nodeId": "n8n-nodes-base.githubTrigger",
+                    "type": "n8n-nodes-base.githubTrigger",
+                    "version": 1.0,
+                }]
+            )
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["definitions"])
+        self.assertEqual(calls[0]["version"], 1.0)
+        self.assertEqual(calls[1], {"nodeId": "n8n-nodes-base.githubTrigger"})
+
+
+    def test_schema_result_validator_rejects_success_without_schema(self):
+        self.assertFalse(
+            architect._schema_result_is_valid({
+                "success": True,
+                "data": {
+                    "definitions": "n8n-nodes-base.githubTrigger",
+                },
+            })
+        )
+        self.assertTrue(
+            architect._schema_result_is_valid({
+                "success": True,
+                "data": {
+                    "definitions": (
+                        "interface GithubTriggerParams { events: string[] }"
+                    ),
+                },
+            })
+        )
+
+
     def test_get_node_types_isolates_invalid_node_from_valid_schema(self):
         calls = []
 
