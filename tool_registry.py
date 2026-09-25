@@ -35,6 +35,7 @@ N8N_MCP_PREFIX = "n8n_mcp__"
         "process_snapshot",
         "project_snapshot",
         "service_status",
+        "dependency_status",
         "healing_hints",
         "tool_health",
         "memory_remember",
