@@ -622,6 +622,49 @@ def _requirements(request: str, techniques: Sequence[str]) -> Dict[str, Any]:
     }
 
 
+def _required_capabilities(request: str) -> List[Tuple[str, Tuple[str, ...]]]:
+    text = _clean_text(request).lower()
+    capabilities: List[Tuple[str, Tuple[str, ...]]] = [
+        ("trigger", ("trigger",)),
+    ]
+
+    if "github" in text and "issue" in text:
+        capabilities.append(("github_source", ("github",)))
+    if any(marker in text for marker in ("summarize", "summarizes", "summary", "summarization")):
+        capabilities.append((
+            "summarization",
+            (
+                "openai",
+                "gemini",
+                "claude",
+                "grok",
+                "llm",
+                "language",
+                "textgenerator",
+                "text generator",
+                "basiclmn",
+                "basic llm",
+            ),
+        ))
+    if any(marker in text for marker in ("bug", "when", "if", "condition", "identify")):
+        capabilities.append(("condition", ("if", "switch", "filter", "router")))
+    if any(marker in text for marker in ("alert", "notify", "notification", "message me")):
+        capabilities.append((
+            "notification",
+            (
+                "slack",
+                "email",
+                "gmail",
+                "discord",
+                "telegram",
+                "teams",
+                "notification",
+            ),
+        ))
+
+    return capabilities
+
+
 def _quality_gate(
     request: str,
     requirements: Dict[str, Any],
@@ -635,7 +678,36 @@ def _quality_gate(
         for item in candidates
     )
 
-    checks = [
+    capability_checks: List[Dict[str, Any]] = []
+    for capability, markers in _required_capabilities(request):
+        if capability == "trigger":
+            found = has_trigger_candidate
+        else:
+            found = any(
+                any(
+                    marker in " ".join(
+                        [
+                            str(item.get("name") or ""),
+                            str(item.get("nodeId") or ""),
+                            str(item.get("type") or ""),
+                        ]
+                    ).lower()
+                    for marker in markers
+                )
+                for item in candidates
+            )
+
+        capability_checks.append({
+            "id": capability,
+            "status": "verified" if found else "missing",
+            "message": (
+                f"Required capability '{capability}' was discovered."
+                if found
+                else f"Required capability '{capability}' was not discovered from live n8n nodes."
+            ),
+        })
+
+    checks = capability_checks + [
         {
             "id": "trigger",
             "status": "candidate" if has_trigger_candidate else "missing",
