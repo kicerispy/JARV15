@@ -23,7 +23,7 @@ DEFAULT_MODEL = os.getenv("JARVIS_N8N_BUILDER_MODEL", os.getenv("JARVIS_CODING_M
 DEFAULT_TIMEOUT = 180
 MAX_ARCHITECT_CONTEXT = 10000
 MAX_SDK_REFERENCE_CHARS = 12000
-MAX_REPAIR_ATTEMPTS = 1
+MAX_REPAIR_ATTEMPTS = 2
 
 KNOWN_NODE_TYPES = {
     "n8n-nodes-base.githubTrigger",
@@ -440,6 +440,9 @@ def _validation_blockers(validation: Dict[str, Any]) -> List[str]:
         blocking_codes = {
             "INVALID_PARAMETER",
             "MISSING_EXPRESSION_PREFIX",
+            "SET_INVALID_ASSIGNMENT",
+            "INVALID_INPUT_INDEX",
+            "INVALID_OUTPUT_INDEX",
         }
         for warning in warnings:
             if not isinstance(warning, dict):
