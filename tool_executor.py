@@ -108,6 +108,11 @@ SAFE_RETRY_TOOLS = {
     "screen_memory_status",
     "screen_memory_search",
     "screen_memory_recent",
+    "anipy_providers",
+    "anipy_search",
+    "anipy_info",
+    "anipy_episodes",
+    "anipy_get_video",
     "n8n_status",
 }
 
