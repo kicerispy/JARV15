@@ -37,6 +37,8 @@ JARVIS_PLATFORM_TOOLS = frozenset(
         "project_snapshot",
         "service_status",
         "dependency_status",
+        "code_index_rebuild",
+        "code_index_status",
         "healing_hints",
         "tool_health",
         "memory_remember",
