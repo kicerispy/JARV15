@@ -74,6 +74,13 @@ def _resolve_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "advanced": advanced,
+        "enable_jarvis_tools": _coerce_bool(
+            payload.get("enable_jarvis_tools"),
+            _coerce_bool(
+                os.getenv("JARVIS_BROWSER_JARVIS_TOOLS"),
+                advanced,
+            ),
+        ),
         "use_vision": _coerce_bool(
             payload.get("use_vision"),
             _coerce_bool(os.getenv("JARVIS_BROWSER_USE_VISION"), False),
@@ -337,6 +344,137 @@ async def _navigate_directly_with_cdp(
         return False
 
 
+def _build_jarvis_tools():
+    """Expose deterministic JARVIS browser primitives to Browser Use.
+
+    The bridge is only attached when advanced mode enables it. Each action
+    calls the existing JARVIS browser controller so Browser Use can fall back
+    to the same hardened DOM/recovery logic used by deterministic routes.
+    """
+    from browser_use.agent.views import ActionResult
+    from browser_use.tools.service import Tools
+
+    import browser_controller
+
+    tools = Tools()
+
+    def _result(value: Any, label: str) -> ActionResult:
+        if isinstance(value, dict):
+            if not value.get("success", True):
+                return ActionResult(
+                    error=str(
+                        value.get("error")
+                        or value.get("message")
+                        or f"{label} failed."
+                    )
+                )
+            content = json.dumps(value, ensure_ascii=False)
+        else:
+            content = str(value)
+
+        return ActionResult(
+            extracted_content=content,
+            long_term_memory=f"JARVIS bridge {label}: {content[:1500]}",
+        )
+
+    @tools.registry.action(
+        description=(
+            "Read the current JARVIS-controlled browser page info "
+            "(URL, title, and status). Prefer this before repeating navigation."
+        )
+    )
+    async def jarvis_page_info():
+        return _result(
+            await asyncio.to_thread(browser_controller.browser_page_info),
+            "page_info",
+        )
+
+    @tools.registry.action(
+        description=(
+            "Read a bounded structured snapshot of the current page using "
+            "JARVIS's Playwright DOM observer."
+        )
+    )
+    async def jarvis_page_snapshot(max_links: int = 20):
+        bounded = max(1, min(int(max_links), 50))
+        return _result(
+            await asyncio.to_thread(
+                browser_controller.browser_page_snapshot,
+                bounded,
+            ),
+            "page_snapshot",
+        )
+
+    @tools.registry.action(
+        description=(
+            "Find visible text in the current page and return nearby readable "
+            "context. Use this for deterministic text verification."
+        )
+    )
+    async def jarvis_find_text(
+        query: str,
+        context_chars: int = 120,
+        max_matches: int = 3,
+    ):
+        return _result(
+            await asyncio.to_thread(
+                browser_controller.browser_find_text,
+                query,
+                max(40, min(int(context_chars), 500)),
+                max(1, min(int(max_matches), 10)),
+            ),
+            "find_text",
+        )
+
+    @tools.registry.action(
+        description=(
+            "Find a page element with JARVIS's hardened DOM locator logic. "
+            "Use selector, visible text, ARIA role, or accessible name."
+        )
+    )
+    async def jarvis_find_element(
+        selector: str = "",
+        text: str = "",
+        role: str = "",
+        name: str = "",
+    ):
+        return _result(
+            await asyncio.to_thread(
+                browser_controller.browser_find_element,
+                selector,
+                text,
+                role,
+                name,
+            ),
+            "find_element",
+        )
+
+    @tools.registry.action(
+        description=(
+            "Click a page element through JARVIS's hardened DOM controller. "
+            "Use only when the user task explicitly requires the click."
+        )
+    )
+    async def jarvis_click_element(
+        selector: str = "",
+        text: str = "",
+        role: str = "",
+        name: str = "",
+    ):
+        return _result(
+            await asyncio.to_thread(
+                browser_controller.browser_click_element,
+                selector,
+                text,
+                role,
+                name,
+            ),
+            "click_element",
+        )
+
+    return tools
+
+
 def _build_agent_task(task: str) -> str:
     return (
         "You are JARVIS's autonomous browser subagent. Complete the browser "
@@ -409,6 +547,12 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
                 explicit_url,
             )
 
+        browser_tools = (
+            _build_jarvis_tools()
+            if settings["enable_jarvis_tools"]
+            else None
+        )
+
         agent = Agent(
             task=_build_agent_task(
                 task
@@ -420,6 +564,7 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
             ),
             llm=llm,
             browser_session=browser_session,
+            tools=browser_tools,
             directly_open_url=False,
             use_vision=settings["use_vision"],
             use_thinking=settings["use_thinking"],
