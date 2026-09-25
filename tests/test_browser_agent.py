@@ -58,12 +58,13 @@ class BrowserAgentTests(unittest.TestCase):
         source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
 
         self.assertIn("def _build_jarvis_tools()", source)
-        self.assertIn("browser_controller.browser_page_info", source)
-        self.assertIn("browser_controller.browser_page_snapshot", source)
-        self.assertIn("browser_controller.browser_find_text", source)
-        self.assertIn("browser_controller.browser_find_element", source)
-        self.assertIn("browser_controller.browser_click_element", source)
+        self.assertIn("Browser Use's CDP page actor", source)
+        self.assertIn("browser_session.get_current_page_url()", source)
+        self.assertIn("browser_session.must_get_current_page()", source)
+        self.assertIn("page.get_elements_by_css_selector", source)
+        self.assertIn("page.get_element_by_prompt(prompt, llm)", source)
         self.assertIn('settings["enable_jarvis_tools"]', source)
+        self.assertNotIn("import browser_controller", source)
 
     def test_worker_request_options_override_advanced_defaults(self):
         module = importlib.import_module("browser_agent_worker")
