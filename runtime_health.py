@@ -56,6 +56,44 @@ def _tts_ready() -> bool:
         return False
 
 
+def _resilience_summary() -> dict[str, Any]:
+    try:
+        from resilience_kernel import tool_health_status
+        status = tool_health_status(limit=5)
+        return {
+            "degraded_tools": len(status.get("degraded_tools", [])),
+            "circuit_breaker_enabled": bool(
+                status.get("circuit_breaker_enabled", False)
+            ),
+        }
+    except Exception:
+        return {
+            "degraded_tools": 0,
+            "circuit_breaker_enabled": False,
+        }
+
+
+def _memory_summary() -> dict[str, Any]:
+    try:
+        from local_memory import memory_status
+        from autonomy_memory import autonomy_memory_status
+
+        semantic = memory_status()
+        episodic = autonomy_memory_status()
+
+        return {
+            "semantic_records": int(semantic.get("records", 0) or 0),
+            "experience_episodes": int(episodic.get("episodes", 0) or 0),
+            "experience_failures": int(episodic.get("failures", 0) or 0),
+        }
+    except Exception:
+        return {
+            "semantic_records": 0,
+            "experience_episodes": 0,
+            "experience_failures": 0,
+        }
+
+
 def _browser_status() -> str:
     module = sys.modules.get("browser_controller")
     if module is None:
@@ -84,6 +122,8 @@ def collect_health() -> Dict[str, Any]:
         "wake_word": _loaded_module("wakeword"),
         "browser": _browser_status(),
         "barehands": _loaded_module("barehands_tools"),
+        "resilience": _resilience_summary(),
+        "memory": _memory_summary(),
         "models": {
             "chat": CHAT_MODEL,
             "planner": PLANNER_MODEL,
@@ -119,6 +159,8 @@ def format_health(status: Dict[str, Any] | None = None) -> str:
         f"Wake word: {'READY' if status.get('wake_word') else 'STANDBY'}",
         f"Browser: {status.get('browser', 'STANDBY')}",
         f"Barehands: {'READY' if status.get('barehands') else 'STANDBY'}",
+        f"Degraded tools: {status.get('resilience', {}).get('degraded_tools', 0)}",
+        f"Local memory: {status.get('memory', {}).get('semantic_records', 0)} records",
         "",
         f"Chat model: {models.get('chat', 'unknown')}",
         f"Planner model: {models.get('planner', 'unknown')}",
