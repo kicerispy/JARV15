@@ -57,7 +57,7 @@ class BrowserAgentTests(unittest.TestCase):
     def test_worker_jarvis_bridge_is_backed_by_existing_controller(self):
         source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
 
-        self.assertIn("def _build_jarvis_tools()", source)
+        self.assertIn("def _build_jarvis_tools(llm)", source)
         self.assertIn("Browser Use's CDP page actor", source)
         self.assertIn("browser_session.get_current_page_url()", source)
         self.assertIn("browser_session.must_get_current_page()", source)
@@ -217,7 +217,7 @@ class BrowserAgentTests(unittest.TestCase):
         from pathlib import Path
 
         source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
-        self.assertIn('"think": False', source)
+        self.assertIn('"think": settings["use_thinking"]', source)
         self.assertIn('"num_ctx": int(', source)
         self.assertIn('"keep_alive": "5m"', source)
         self.assertIn('settings["use_thinking"]', source)
