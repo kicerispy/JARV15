@@ -35,7 +35,7 @@ def _read_frontmatter(text: str) -> Dict[str, str]:
         if not line or line.startswith("#") or ":" not in line:
             continue
         key, value = line.split(":", 1)
-        result[key.strip()] = value.strip().strip(""'")
+        result[key.strip()] = value.strip().strip("\"'")
     return result
 
 
