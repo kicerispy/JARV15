@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import subprocess
+import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+
+_SERVER_PROCESS: subprocess.Popen | None = None
 
 
 def _base_url() -> str:
@@ -72,6 +78,101 @@ def _health_probe() -> tuple[bool, str]:
         return False, f"Screenpipe health returned HTTP {exc.code}."
     except Exception as exc:
         return False, f"Screenpipe health probe failed: {exc}"
+
+
+def screen_memory_setup(argument: str = "") -> dict:
+    """Ensure Screenpipe is running and attempt to configure its local API key."""
+    del argument
+
+    global _SERVER_PROCESS
+
+    reachable, _ = _health_probe()
+    if not reachable:
+        executable = (
+            shutil.which("screenpipe.exe")
+            or shutil.which("screenpipe")
+        )
+        if not executable:
+            return {
+                "success": False,
+                "tool": "screen_memory_setup",
+                "message": (
+                    "Screenpipe is not installed or not on PATH. "
+                    "Install the Screenpipe desktop/CLI runtime first."
+                ),
+                "retryable": False,
+            }
+
+        if _SERVER_PROCESS is None or _SERVER_PROCESS.poll() is not None:
+            kwargs = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            }
+            if os.name == "nt":
+                kwargs["creationflags"] = (
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                )
+            _SERVER_PROCESS = subprocess.Popen(
+                [executable],
+                **kwargs,
+            )
+
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            reachable, _ = _health_probe()
+            if reachable:
+                break
+            time.sleep(0.5)
+
+    if not reachable:
+        return {
+            "success": False,
+            "tool": "screen_memory_setup",
+            "message": (
+                "Screenpipe was started, but its local API did not become "
+                "reachable on the configured endpoint."
+            ),
+            "retryable": True,
+        }
+
+    if not _api_key():
+        cli = (
+            shutil.which("screenpipe.exe")
+            or shutil.which("screenpipe")
+            or shutil.which("screenpipe.cmd")
+        )
+        if cli:
+            try:
+                token_result = subprocess.run(
+                    [cli, "auth", "token"],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+                if token_result.returncode == 0:
+                    candidates = [
+                        line.strip().strip('"').strip("'")
+                        for line in token_result.stdout.splitlines()
+                        if line.strip()
+                    ]
+                    if candidates:
+                        token = candidates[-1]
+                        token = re.sub(r"^(?:token|api[-_ ]?key)\s*[:=]\s*", "", token, flags=re.IGNORECASE).strip()
+                        if len(token) >= 12 and " " not in token:
+                            os.environ["SCREENPIPE_LOCAL_API_KEY"] = token
+            except Exception:
+                pass
+
+    status = screen_memory_status()
+    return {
+        "success": bool(status.get("data", {}).get("reachable")),
+        "tool": "screen_memory_setup",
+        "data": status.get("data", {}),
+        "message": str(status.get("message") or "Screenpipe setup completed."),
+        "retryable": not bool(status.get("data", {}).get("reachable")),
+    }
 
 
 def screen_memory_status(argument: str = "") -> dict:
@@ -209,6 +310,7 @@ def screen_memory_recent(argument: str = "") -> dict:
 
 
 DISPATCH = {
+    "screen_memory_setup": screen_memory_setup,
     "screen_memory_status": screen_memory_status,
     "screen_memory_search": screen_memory_search,
     "screen_memory_recent": screen_memory_recent,
