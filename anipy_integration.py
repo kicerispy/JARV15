@@ -77,6 +77,20 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _quality(value: Any) -> str | int | None:
+    """Match anipy-cli argparse behavior for best/worst/numeric quality."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    return text
+
+
 def _language(language: str | None):
     from anipy_api.provider import LanguageTypeEnum
 
@@ -444,7 +458,7 @@ def _run_get_video(argument: str) -> dict[str, Any]:
     stream = anime.get_video(
         episode,
         lang,
-        preferred_quality=payload.get("quality"),
+        preferred_quality=_quality(payload.get("quality")),
     )
 
     if stream is None:
