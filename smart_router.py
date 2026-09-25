@@ -23,6 +23,11 @@ class RouteDecision:
     reason: str = ""
     confidence: float = 1.0
 
+    @property
+    def mode(self) -> RouteKind:
+        """Backward-compatible alias for callers that use the legacy field name."""
+        return self.kind
+
 
 _FAST_PREFIXES = (
     "open ",
