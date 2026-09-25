@@ -505,6 +505,7 @@ def roblox_mcp_status(
 
         result = {
             "success": True,
+            "verified": True,
             "server_url": ROBLOX_MCP_URL,
             "health": health,
             "status": status,
