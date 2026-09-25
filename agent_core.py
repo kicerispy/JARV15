@@ -44,6 +44,8 @@ from logger import logger
 import config
 from project_fs import iter_project_files
 from autonomy_memory import get_failure_hints, record_episode
+from local_memory import recall as recall_memory
+from resilience_kernel import tool_health_status
 from answer_composer import compose_task_answer
 from healing_kernel import (
     build_healing_evidence,
@@ -363,6 +365,47 @@ class JarvisAgent:
             task.active_context["learned_hints"] = learned_hints
             task.observations.append(
                 f"Loaded {len(learned_hints)} relevant prior failure lesson(s)."
+            )
+
+        # Load durable local memories relevant to the request without forcing
+        # every task through an LLM. These are hints, not authoritative facts;
+        # the planner still has to validate tool results and live state.
+        if getattr(config, "MEMORY_ENABLED", True):
+            try:
+                memories = recall_memory(
+                    normalized_request,
+                    limit=5,
+                )
+            except Exception as exc:
+                memories = []
+                logger.debug(
+                    f"JARVIS AGENT: local memory lookup skipped: {exc}"
+                )
+
+            if memories:
+                task.active_context["memory_hints"] = memories
+                task.observations.append(
+                    f"Loaded {len(memories)} relevant local memory item(s)."
+                )
+
+        # Surface degraded tool capabilities before planning. The planner can
+        # choose an alternate tool instead of wasting a replan on a repeatedly
+        # failing subsystem.
+        try:
+            tool_health = tool_health_status(limit=5)
+        except Exception:
+            tool_health = {}
+
+        degraded_tools = (
+            tool_health.get("degraded_tools", [])
+            if isinstance(tool_health, dict)
+            else []
+        )
+
+        if degraded_tools:
+            task.active_context["tool_health_hints"] = degraded_tools
+            task.observations.append(
+                f"Loaded health hints for {len(degraded_tools)} degraded tool(s)."
             )
 
         self.state[
