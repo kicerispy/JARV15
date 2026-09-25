@@ -158,3 +158,36 @@ def test_integration_health_answer_includes_not_ready_and_error():
 
     assert "Not ready: God's Eye View." in answer
     assert "Error: Broken Tool." in answer
+
+
+class RobloxMcpLifecycleTask:
+    request = "setup Roblox MCP"
+    planner_result = {
+        "steps": [
+            {"tool": "roblox_mcp_setup", "argument": ""},
+        ]
+    }
+    evidence = [
+        {
+            "tool": "roblox_mcp_setup",
+            "success": True,
+            "verified": True,
+            "data": {
+                "server_url": "http://127.0.0.1:58741",
+                "health": {"status": "ok"},
+                "status": {"plugin_connected": True},
+            },
+        }
+    ]
+
+
+def test_roblox_mcp_setup_answer_reports_plugin_connection():
+    answer = compose_task_answer(
+        "setup Roblox MCP",
+        RobloxMcpLifecycleTask(),
+        active_context={},
+    )
+
+    assert "setup completed" in answer.lower()
+    assert "plugin is connected" in answer.lower()
+    assert "127.0.0.1:58741" in answer
