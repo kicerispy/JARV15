@@ -3667,7 +3667,11 @@ def _run_tool_raw(
 
     elif tool_name == "tool_health":
 
-        return resilience_kernel.tool_health_status()
+        return {
+            "success": True,
+            "verified": True,
+            **resilience_kernel.tool_health_status(),
+        }
 
     elif tool_name == "memory_remember":
 
@@ -4216,7 +4220,11 @@ def run_tool(
     argument = str(argument or "")
 
     resilience = resilience_kernel.get_resilience()
-    gate = resilience.before(tool_name)
+    gate = (
+        {"allowed": True, "tool": tool_name}
+        if tool_name in NON_CIRCUIT_TOOLS
+        else resilience.before(tool_name)
+    )
 
     if not gate.get("allowed", True):
         return ToolResult(
@@ -4270,6 +4278,18 @@ def run_tool(
         }
 
     return normalized
+
+# Self-observability/state tools must remain callable even when a prior
+# invocation opened a tool circuit; otherwise JARVIS can lock itself out of its
+# own diagnostics and memory just when they are needed for recovery.
+NON_CIRCUIT_TOOLS = {
+    "tool_health",
+    "memory_remember",
+    "memory_recall",
+    "memory_forget",
+    "memory_status",
+    "healing_history",
+}
 
 # Backward-compatible dispatcher alias for scripts and integrations that
 # historically called execute_tool(). The canonical API remains run_tool().
