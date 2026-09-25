@@ -37,6 +37,151 @@ DEFAULT_NUM_CTX = 8192
 DEFAULT_LLM_TIMEOUT = 45
 DEFAULT_STEP_TIMEOUT = 60
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(number, maximum))
+
+
+def _resolve_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    """Resolve safe Browser Use settings from the request and environment.
+
+    Conservative settings remain the default. Advanced controls can be enabled
+    globally with JARVIS_BROWSER_ADVANCED=1 or per request with
+    {"advanced": true}.
+    """
+    advanced = _coerce_bool(
+        payload.get("advanced"),
+        _coerce_bool(os.getenv("JARVIS_BROWSER_ADVANCED"), False),
+    )
+
+    return {
+        "advanced": advanced,
+        "use_vision": _coerce_bool(
+            payload.get("use_vision"),
+            _coerce_bool(os.getenv("JARVIS_BROWSER_USE_VISION"), False),
+        ),
+        "use_thinking": _coerce_bool(
+            payload.get("use_thinking"),
+            _coerce_bool(os.getenv("JARVIS_BROWSER_USE_THINKING"), False),
+        ),
+        "use_judge": _coerce_bool(
+            payload.get("use_judge"),
+            _coerce_bool(os.getenv("JARVIS_BROWSER_USE_JUDGE"), False),
+        ),
+        "enable_planning": _coerce_bool(
+            payload.get("enable_planning"),
+            _coerce_bool(
+                os.getenv("JARVIS_BROWSER_ENABLE_PLANNING"),
+                advanced,
+            ),
+        ),
+        "planning_replan_on_stall": _coerce_int(
+            payload.get(
+                "planning_replan_on_stall",
+                os.getenv("JARVIS_BROWSER_PLANNING_REPLAN_ON_STALL", 3),
+            ),
+            3,
+            1,
+            10,
+        ),
+        "planning_exploration_limit": _coerce_int(
+            payload.get(
+                "planning_exploration_limit",
+                os.getenv("JARVIS_BROWSER_PLANNING_EXPLORATION_LIMIT", 5),
+            ),
+            5,
+            1,
+            20,
+        ),
+        "loop_detection_window": _coerce_int(
+            payload.get(
+                "loop_detection_window",
+                os.getenv("JARVIS_BROWSER_LOOP_DETECTION_WINDOW", 20),
+            ),
+            20,
+            5,
+            100,
+        ),
+        "loop_detection_enabled": _coerce_bool(
+            payload.get("loop_detection_enabled"),
+            _coerce_bool(
+                os.getenv("JARVIS_BROWSER_LOOP_DETECTION"),
+                advanced,
+            ),
+        ),
+        "message_compaction": _coerce_bool(
+            payload.get("message_compaction"),
+            _coerce_bool(
+                os.getenv("JARVIS_BROWSER_MESSAGE_COMPACTION"),
+                advanced,
+            ),
+        ),
+        "max_actions_per_step": _coerce_int(
+            payload.get(
+                "max_actions_per_step",
+                os.getenv("JARVIS_BROWSER_MAX_ACTIONS_PER_STEP", 3 if advanced else 1),
+            ),
+            3 if advanced else 1,
+            1,
+            8,
+        ),
+        "max_failures": _coerce_int(
+            payload.get(
+                "max_failures",
+                os.getenv("JARVIS_BROWSER_MAX_FAILURES", 3 if advanced else 2),
+            ),
+            3 if advanced else 2,
+            1,
+            10,
+        ),
+        "max_history_items": _coerce_int(
+            payload.get(
+                "max_history_items",
+                os.getenv("JARVIS_BROWSER_MAX_HISTORY_ITEMS", 20 if advanced else 8),
+            ),
+            20 if advanced else 8,
+            1,
+            100,
+        ),
+        "llm_timeout": _coerce_int(
+            payload.get(
+                "llm_timeout",
+                os.getenv("JARVIS_BROWSER_LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT),
+            ),
+            DEFAULT_LLM_TIMEOUT,
+            15,
+            300,
+        ),
+        "step_timeout": _coerce_int(
+            payload.get(
+                "step_timeout",
+                os.getenv("JARVIS_BROWSER_STEP_TIMEOUT", 90 if advanced else DEFAULT_STEP_TIMEOUT),
+            ),
+            90 if advanced else DEFAULT_STEP_TIMEOUT,
+            15,
+            600,
+        ),
+    }
+
+
 
 def _read_request() -> dict[str, Any]:
     raw = sys.stdin.read().strip()
@@ -228,6 +373,7 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         max_steps = 6
     max_steps = max(1, min(max_steps, 30))
+    settings = _resolve_settings(payload)
 
     profile = BrowserProfile(
         cdp_url=DEFAULT_CDP_URL,
@@ -246,7 +392,7 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
             "num_ctx": int(
                 os.getenv("JARVIS_BROWSER_NUM_CTX", str(DEFAULT_NUM_CTX))
             ),
-            "think": False,
+            "think": settings["use_thinking"],
             "keep_alive": "5m",
         },
     )
@@ -275,17 +421,21 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
             llm=llm,
             browser_session=browser_session,
             directly_open_url=False,
-            use_vision=False,
-            use_thinking=False,
-            use_judge=False,
-            enable_planning=False,
-            max_actions_per_step=1,
-            max_failures=2,
+            use_vision=settings["use_vision"],
+            use_thinking=settings["use_thinking"],
+            use_judge=settings["use_judge"],
+            enable_planning=settings["enable_planning"],
+            planning_replan_on_stall=settings["planning_replan_on_stall"],
+            planning_exploration_limit=settings["planning_exploration_limit"],
+            loop_detection_window=settings["loop_detection_window"],
+            loop_detection_enabled=settings["loop_detection_enabled"],
+            max_actions_per_step=settings["max_actions_per_step"],
+            max_failures=settings["max_failures"],
             final_response_after_failure=False,
-            max_history_items=8,
-            llm_timeout=DEFAULT_LLM_TIMEOUT,
-            step_timeout=DEFAULT_STEP_TIMEOUT,
-            message_compaction=False,
+            max_history_items=settings["max_history_items"],
+            llm_timeout=settings["llm_timeout"],
+            step_timeout=settings["step_timeout"],
+            message_compaction=settings["message_compaction"],
             enable_signal_handler=False,
         )
 
@@ -301,9 +451,12 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             done = True
 
+        agent_success = history.is_successful()
+        verified = bool(done and agent_success is not False)
+
         return {
-            "success": done,
-            "verified": done,
+            "success": verified,
+            "verified": verified,
             "message": (
                 final_text
                 or "Browser agent completed without a final text result."
@@ -312,6 +465,8 @@ async def _run(payload: dict[str, Any]) -> dict[str, Any]:
             "model": DEFAULT_BROWSER_MODEL,
             "cdp_url": DEFAULT_CDP_URL,
             "max_steps": max_steps,
+            "browser_use_settings": settings,
+            "agent_success": agent_success,
         }
     finally:
         try:
