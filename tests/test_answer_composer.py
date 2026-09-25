@@ -191,3 +191,35 @@ def test_roblox_mcp_setup_answer_reports_plugin_connection():
     assert "setup completed" in answer.lower()
     assert "plugin is connected" in answer.lower()
     assert "127.0.0.1:58741" in answer
+
+
+class RobloxMcpCompactStatusTask:
+    request = "check Roblox MCP status"
+    planner_result = {
+        "steps": [
+            {"tool": "roblox_mcp_status", "argument": ""},
+        ]
+    }
+    evidence = [
+        {
+            "tool": "roblox_mcp_status",
+            "success": True,
+            "verified": True,
+            "data": {
+                "server_url": "http://127.0.0.1:58741",
+                "health": {"status": "ok", "pluginConnected": True},
+                "status": {"pluginConnected": True, "mcpServerActive": True},
+            },
+        }
+    ]
+
+
+def test_roblox_mcp_answer_does_not_speak_url():
+    answer = compose_task_answer(
+        "check Roblox MCP status",
+        RobloxMcpCompactStatusTask(),
+        active_context={},
+    )
+
+    assert "plugin is connected" in answer.lower()
+    assert "127.0.0.1:58741" not in answer

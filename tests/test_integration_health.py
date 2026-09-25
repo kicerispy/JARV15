@@ -119,3 +119,41 @@ def test_integration_health_reports_degraded_and_unavailable_counts(monkeypatch)
     assert result["counts"]["DEGRADED"] == 1
     assert result["counts"]["NOT_READY"] == 1
     assert result["counts"]["OFFLINE"] == 1
+
+
+def test_roblox_health_reads_top_level_plugin_state(monkeypatch):
+    import integration_health as health
+    from tool_result import ToolResult
+
+    monkeypatch.setattr(
+        health,
+        "_probe_socket",
+        lambda url: (True, "127.0.0.1:58741 reachable"),
+    )
+    import roblox_mcp
+
+    monkeypatch.setattr(
+        roblox_mcp,
+        "roblox_mcp_status",
+        lambda argument="": ToolResult(
+            success=True,
+            tool="roblox_mcp_status",
+            data={
+                "health": {
+                    "status": "ok",
+                    "pluginConnected": True,
+                    "instanceCount": 1,
+                },
+                "status": {
+                    "pluginConnected": True,
+                    "mcpServerActive": True,
+                    "instanceCount": 1,
+                },
+            },
+        ),
+    )
+
+    result = health._roblox_component()
+
+    assert result["status"] == "READY"
+    assert "plugin is connected" in result["message"]

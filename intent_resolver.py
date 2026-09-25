@@ -280,6 +280,27 @@ def resolve_intent(
     evidence_request = any(text.startswith(prefix) for prefix in evidence_verbs)
     action_request = any(text.startswith(prefix) for prefix in _ACTION_STARTS)
 
+    roblox_mcp_lifecycle_request = (
+        domain == "roblox"
+        and any(
+            phrase in text
+            for phrase in (
+                "roblox mcp status",
+                "roblox mcp health",
+                "check roblox mcp",
+                "check roblox status",
+                "is roblox mcp connected",
+                "is roblox connected",
+                "setup roblox mcp",
+                "set up roblox mcp",
+                "install roblox mcp",
+                "start roblox mcp",
+                "start the roblox mcp",
+                "repair roblox mcp",
+            )
+        )
+    )
+
     # Unreal capability searches are inherently information-bearing: the
     # returned capabilities are the result the user asked to see.
     unreal_search_request = (
@@ -311,27 +332,6 @@ def resolve_intent(
         or report_request
         or unreal_search_request
         or roblox_mcp_lifecycle_request
-    )
-
-    roblox_mcp_lifecycle_request = (
-        domain == "roblox"
-        and any(
-            phrase in text
-            for phrase in (
-                "roblox mcp status",
-                "roblox mcp health",
-                "check roblox mcp",
-                "check roblox status",
-                "is roblox mcp connected",
-                "is roblox connected",
-                "setup roblox mcp",
-                "set up roblox mcp",
-                "install roblox mcp",
-                "start roblox mcp",
-                "start the roblox mcp",
-                "repair roblox mcp",
-            )
-        )
     )
 
     # Common browser actions are not informational by themselves.
