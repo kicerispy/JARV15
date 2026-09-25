@@ -136,6 +136,60 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(by_id["n8n-nodes-base.switch"]["version"], 3.4)
 
 
+    def test_get_node_types_isolates_invalid_node_from_valid_schema(self):
+        calls = []
+
+        def fake_call(tool_name, arguments=None):
+            self.assertEqual(tool_name, "get_node_types")
+            ref = (arguments or {})["nodeIds"][0]
+            calls.append(ref)
+
+            if ref["nodeId"] == "n8n-nodes-base.badNode":
+                return {
+                    "success": False,
+                    "message": "bad discriminator",
+                }
+
+            return {
+                "success": True,
+                "data": {
+                    "definitions": (
+                        "interface GithubTriggerParams { events: string[] }"
+                    )
+                },
+            }
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect._get_node_types(
+                [
+                    {
+                        "nodeId": "n8n-nodes-base.badNode",
+                        "type": "n8n-nodes-base.badNode",
+                    },
+                    {
+                        "nodeId": "n8n-nodes-base.githubTrigger",
+                        "type": "n8n-nodes-base.githubTrigger",
+                        "version": 1,
+                    },
+                ]
+            )
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["definitions"])
+        self.assertEqual(len(calls), 2)
+
+
+    def test_search_queries_expand_explicit_summarization_and_notification_nodes(self):
+        queries = architect._search_queries(
+            "Monitor GitHub issues, summarize bugs, and send me an alert",
+            ["monitoring", "content_generation", "notification"],
+        )
+
+        self.assertIn("OpenAI text generation", queries)
+        self.assertIn("Slack notification", queries)
+        self.assertIn("Email send", queries)
+
+
     def test_get_node_types_forwards_search_discriminators(self):
         captured = {}
 
