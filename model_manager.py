@@ -80,6 +80,7 @@ class ModelManager:
 
     chat_model: str = config.CHAT_MODEL
     planner_model: str = config.PLANNER_MODEL
+    change_planner_model: str = config.CHANGE_PLANNER_MODEL
     coding_model: str = config.CODING_MODEL
     coding_fallback_model: str = config.CODING_FALLBACK_MODEL
 
@@ -206,6 +207,20 @@ class ModelManager:
             options={
                 "temperature": 0,
                 "num_predict": config.PLANNER_NUM_PREDICT,
+            },
+            keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
+            think=False,
+        )
+
+    def change_planner(self, messages: list, *, format: str = "json"):
+        """Generate a fast structured software-change plan with the bounded planner model."""
+        return self.generate(
+            model=self.change_planner_model,
+            messages=messages,
+            format=format,
+            options={
+                "temperature": 0,
+                "num_predict": config.CHANGE_PLANNER_NUM_PREDICT,
             },
             keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
             think=False,
