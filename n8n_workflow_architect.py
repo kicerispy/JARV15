@@ -438,7 +438,7 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         ("nodeTypes", "definitions", "results"),
     )
 
-    if definitions and all(
+    if not definitions or all(
         not item.get("content")
         and not item.get("properties")
         and not item.get("parameters")
@@ -449,11 +449,10 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             result,
             ("definitions", "documentation", "content"),
         )
-        definitions = (
-            _definition_items_from_text(definition_text)
-            if definition_text
-            else []
-        )
+        if definition_text:
+            parsed_definitions = _definition_items_from_text(definition_text)
+            if parsed_definitions:
+                definitions = parsed_definitions
 
     return {
         "success": result.get("success") is True,
