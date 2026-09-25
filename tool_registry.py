@@ -69,6 +69,7 @@ GODS_EYE_TOOLS = frozenset(
 
 SCREEN_MEMORY_TOOLS = frozenset(
     {
+        "screen_memory_setup",
         "screen_memory_status",
         "screen_memory_search",
         "screen_memory_recent",
