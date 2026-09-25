@@ -109,3 +109,28 @@ def test_unreal_mcp_client_uses_native_protocol_version():
     headers = client.headers(session=False, protocol=False)
     assert headers["Content-Type"] == "application/json"
     assert headers["Accept"] == "application/json, text/event-stream"
+
+
+
+
+def test_unreal_mcp_project_path_accepts_uproject_file(monkeypatch, tmp_path):
+    import config
+    import unreal_mcp
+
+    project_dir = tmp_path / "FGH"
+    project_dir.mkdir()
+    project_file = project_dir / "FGH.uproject"
+    project_file.write_text("{}", encoding="utf-8")
+
+    token_path = project_dir / "Saved" / "MCP" / "capability-token"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("test-token", encoding="utf-8")
+
+    monkeypatch.setattr(config, "UNREAL_MCP_PROJECT_PATH", str(project_file))
+    monkeypatch.setattr(config, "UNREAL_MCP_TOKEN", "")
+    monkeypatch.setattr(config, "UNREAL_MCP_TOKEN_FILE", "")
+
+    token, source = unreal_mcp.capability_token()
+
+    assert token == "test-token"
+    assert source == f"file:{token_path.resolve()}"

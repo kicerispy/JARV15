@@ -47,7 +47,17 @@ def _project_path() -> Path | None:
         _cfg("UNREAL_MCP_PROJECT_PATH", os.environ.get("JARVIS_UNREAL_MCP_PROJECT_PATH", ""))
         or ""
     ).strip()
-    return Path(os.path.expandvars(os.path.expanduser(raw))).resolve() if raw else None
+    if not raw:
+        return None
+
+    path = Path(os.path.expandvars(os.path.expanduser(raw))).resolve()
+
+    # Accept either the Unreal project directory or the .uproject file.
+    # The token is always relative to the project directory.
+    if path.is_file() and path.suffix.lower() == ".uproject":
+        return path.parent
+
+    return path
 
 
 def capability_token() -> tuple[str | None, str]:
