@@ -21,9 +21,28 @@ from n8n_workflow_architect import audit_workflow, design_workflow
 DEFAULT_OLLAMA_HOST = os.getenv("JARVIS_OLLAMA_HOST", "http://127.0.0.1:11434")
 DEFAULT_MODEL = os.getenv("JARVIS_N8N_BUILDER_MODEL", os.getenv("JARVIS_CODING_MODEL", "qwen3.5:9b"))
 DEFAULT_TIMEOUT = 180
-MAX_ARCHITECT_CONTEXT = 18000
-MAX_SDK_REFERENCE_CHARS = 22000
-MAX_REPAIR_ATTEMPTS = 2
+MAX_ARCHITECT_CONTEXT = 10000
+MAX_SDK_REFERENCE_CHARS = 12000
+MAX_REPAIR_ATTEMPTS = 1
+
+KNOWN_NODE_TYPES = {
+    "n8n-nodes-base.githubTrigger",
+    "n8n-nodes-base.github",
+    "n8n-nodes-base.manualTrigger",
+    "n8n-nodes-base.scheduleTrigger",
+    "n8n-nodes-base.webhook",
+    "n8n-nodes-base.if",
+    "n8n-nodes-base.switch",
+    "n8n-nodes-base.filter",
+    "n8n-nodes-base.set",
+    "n8n-nodes-base.httpRequest",
+    "n8n-nodes-base.slack",
+    "n8n-nodes-base.emailSend",
+    "@n8n/n8n-nodes-langchain.chainLlm",
+    "@n8n/n8n-nodes-langchain.lmChatOllama",
+    "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+    "@n8n/n8n-nodes-langchain.agent",
+}
 
 AI_SUBNODE_PATTERN = """
 const openAiModel = languageModel({
@@ -118,8 +137,9 @@ def _ollama_json(prompt: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
         "think": False,
         "format": "json",
         "options": {
-            "num_ctx": 32768,
-            "temperature": 0.1,
+            "num_ctx": 16384,
+            "temperature": 0.0,
+            "num_predict": 3000,
         },
     }
     request = Request(
@@ -217,10 +237,7 @@ def _unknown_node_types(
     """Detect quoted n8n node type literals not present in verified schemas."""
     source = str(code or "")
     allowed = {str(item).strip() for item in allowed_node_types if str(item).strip()}
-    allowed.update({
-        "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-        "@n8n/n8n-nodes-langchain.agent",
-    })
+    allowed.update(KNOWN_NODE_TYPES)
 
     found: List[str] = []
     for match in re.finditer(r'\btype\s*:\s*[\'"]([^\'"]+)[\'"]', source):
@@ -290,7 +307,7 @@ def _sdk_shape_errors(
     return errors
 
 def _verified_node_types(design: Dict[str, Any]) -> List[str]:
-    values: List[str] = []
+    values: List[str] = list(KNOWN_NODE_TYPES)
     for item in (
         list(design.get("node_definitions", []))
         + list(design.get("node_candidates", []))
@@ -300,12 +317,6 @@ def _verified_node_types(design: Dict[str, Any]) -> List[str]:
         node_type = str(item.get("nodeId") or item.get("type") or "").strip()
         if node_type:
             values.append(node_type)
-    # These are explicitly documented by the targeted SDK pattern embedded
-    # above; keep them available even when discovery omitted their parent.
-    values.extend([
-        "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-        "@n8n/n8n-nodes-langchain.agent",
-    ])
     return list(dict.fromkeys(values))
 
 
