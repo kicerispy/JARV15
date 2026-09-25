@@ -425,6 +425,40 @@ def route_command(command: str) -> RouteDecision:
     if _looks_multi_step(text):
         return RouteDecision("agent", "explicit multi-step action", 0.98)
 
+    platform_self_service = (
+        "diagnose jarvis",
+        "doctor jarvis",
+        "run a diagnostic on jarvis",
+        "run a full diagnostic",
+        "self diagnostic",
+        "self-diagnose",
+        "self diagnose",
+        "check yourself",
+        "check your health",
+        "run a health check",
+        "self test",
+        "run your tests",
+        "check your tools",
+        "which tools are failing",
+        "what do you remember",
+        "show my memories",
+        "show my memory",
+        "list my memories",
+        "remember that",
+        "remember this",
+        "remember ",
+        "forget that",
+        "forget this",
+        "forget ",
+    )
+
+    if any(text == phrase or text.startswith(phrase) for phrase in platform_self_service):
+        return RouteDecision(
+            "agent",
+            "JARVIS self-service, memory, or diagnostic request",
+            0.99,
+        )
+
     if text in _FAST_EXACT or any(text.startswith(prefix) for prefix in _FAST_PREFIXES):
         return RouteDecision("fast", "deterministic command", 0.99)
 
