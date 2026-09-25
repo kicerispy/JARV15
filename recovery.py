@@ -2,6 +2,9 @@
 JARVIS error recovery and self-correction system.
 """
 
+import json
+import time
+
 from tool_result import ToolResult
 from typing import Any, Dict, Optional
 
@@ -11,6 +14,8 @@ from healing_kernel import (
     build_healing_evidence,
     choose_recovery,
     diagnose_failure,
+    healing_hints,
+    recovery_backoff_seconds,
     record_healing_event,
 )
 
@@ -42,6 +47,13 @@ Tool: {tool_name}
 Argument: {argument}
 Error: {error_message}
 Attempt: {attempt}/{max_attempts}
+
+Prior recovery evidence from this tool:
+{failure_hints}
+
+Use prior evidence to avoid repeating a strategy that already failed. Do not
+blindly copy a previous argument; only return a new argument when it directly
+addresses the current failure.
 
 Return ONLY valid JSON with this format:
 {{
@@ -147,6 +159,7 @@ def retry_with_recovery(
     Execute a tool with error recovery.
     """
     last_error = None
+    last_signature = ""
 
     for attempt in range(
         1,
@@ -161,6 +174,17 @@ def retry_with_recovery(
             if isinstance(result, ToolResult):
 
                 if result.success:
+                    if last_signature:
+                        try:
+                            from healing_playbook import mark_recovered
+                            mark_recovered(
+                                tool_name,
+                                signature=last_signature,
+                            )
+                        except Exception as playbook_exc:
+                            logger.debug(
+                                f"JARVIS HEALING: recovery mark skipped: {playbook_exc}"
+                            )
                     return {
                         "success": True,
                         "result": result,
@@ -178,6 +202,7 @@ def retry_with_recovery(
                     argument=argument,
                     result=result.data,
                 )
+                last_signature = diagnosis.signature
                 decision = choose_recovery(
                     diagnosis,
                     attempt=attempt,
@@ -222,6 +247,17 @@ def retry_with_recovery(
                     result.get("success", True)
                     and result.get("verified", True)
                 ):
+                    if last_signature:
+                        try:
+                            from healing_playbook import mark_recovered
+                            mark_recovered(
+                                tool_name,
+                                signature=last_signature,
+                            )
+                        except Exception as playbook_exc:
+                            logger.debug(
+                                f"JARVIS HEALING: recovery mark skipped: {playbook_exc}"
+                            )
                     return {
                         "success": True,
                         "result": result,
@@ -242,6 +278,7 @@ def retry_with_recovery(
                     argument=argument,
                     result=result,
                 )
+                last_signature = diagnosis.signature
                 decision = choose_recovery(
                     diagnosis,
                     attempt=attempt,
@@ -285,6 +322,7 @@ def retry_with_recovery(
                 last_error,
                 argument=argument,
             )
+            last_signature = diagnosis.signature
             decision = choose_recovery(
                 diagnosis,
                 attempt=attempt,
@@ -321,6 +359,7 @@ def retry_with_recovery(
                 last_error or "",
                 argument=argument,
             )
+            last_signature = diagnosis.signature
             decision = choose_recovery(
                 diagnosis,
                 attempt=attempt,
@@ -329,6 +368,13 @@ def retry_with_recovery(
             )
 
             if decision.action == "retry":
+                delay = recovery_backoff_seconds(attempt)
+                if delay > 0:
+                    logger.info(
+                        "JARVIS HEALING: transient retry backoff "
+                        f"{delay:.3f}s for {diagnosis.category}"
+                    )
+                    time.sleep(delay)
                 logger.info(
                     "JARVIS HEALING: retrying without model intervention: "
                     f"{diagnosis.category}"
