@@ -418,6 +418,22 @@ def run_n8n_workflow(
 
     normalized_class = _normalize(workflow_class)
 
+    # Prefer the native n8n instance-level MCP transport when enabled.
+    # Keep the existing webhook gateway as a stable fallback for installations
+    # that have not enabled MCP yet.
+    try:
+        from config import N8N_MCP_ENABLED
+    except Exception:
+        N8N_MCP_ENABLED = False
+
+    if N8N_MCP_ENABLED:
+        from n8n_mcp import run_workflow_request
+        return run_workflow_request(
+            request=normalized_request,
+            workflow_class=normalized_class,
+            context=context,
+        )
+
     if not N8N_ENABLED:
         return {
             "success": False,
