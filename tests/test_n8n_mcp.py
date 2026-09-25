@@ -261,6 +261,54 @@ class N8nMcpTests(unittest.TestCase):
             )
         )
 
+    def test_workflow_search_queries_strip_action_words_for_matching(self):
+        queries = n8n_mcp._workflow_search_queries(
+            "Run the JARVIS MCP Smoke Test",
+            "testing",
+        )
+        self.assertEqual(
+            queries,
+            [
+                "Run the JARVIS MCP Smoke Test",
+                "JARVIS MCP Smoke Test",
+                "testing",
+            ],
+        )
+
+    def test_select_workflow_falls_back_to_keyword_query(self):
+        responses = [
+            {
+                "success": True,
+                "data": {"data": []},
+            },
+            {
+                "success": True,
+                "data": {
+                    "data": [
+                        {
+                            "id": "smoke-1",
+                            "name": "JARVIS MCP Smoke Test",
+                            "description": "Side-effect-free live MCP integration test",
+                            "availableInMCP": True,
+                            "updatedAt": "2026-09-25T11:52:49Z",
+                        }
+                    ]
+                },
+            },
+        ]
+
+        def fake_call_tool(name, arguments=None):
+            return responses.pop(0)
+
+        with patch.object(n8n_mcp, "call_tool", side_effect=fake_call_tool):
+            workflow = n8n_mcp._select_workflow(
+                "Run the JARVIS MCP Smoke Test",
+                "testing",
+            )
+
+        self.assertIsNotNone(workflow)
+        self.assertEqual(workflow["id"], "smoke-1")
+
     def test_run_workflow_request_selects_mcp_workflow_and_polls(self):
         tool_calls = [
             {
