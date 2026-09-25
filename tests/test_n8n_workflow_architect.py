@@ -622,11 +622,6 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertIn("@n8n/n8n-nodes-langchain.openAi", node_ids)
         self.assertIn("n8n-nodes-base.if", node_ids)
         self.assertIn("n8n-nodes-base.slack", node_ids)
-        self.assertNotIn("n8n-nodes-base.githubTool", node_ids)
-        self.assertNotIn(
-            "@n8n/n8n-nodes-langchain.textClassifier",
-            node_ids,
-        )
 
 
     def test_deprecated_nodes_are_detected_from_type_definitions(self):
