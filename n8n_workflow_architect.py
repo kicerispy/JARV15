@@ -98,6 +98,14 @@ _FALLBACK_NODE_CANDIDATES = {
             "description": "Send an email notification.",
         },
     ],
+    "alert_output": [
+        {
+            "nodeId": "n8n-nodes-base.set",
+            "type": "n8n-nodes-base.set",
+            "name": "Edit Fields",
+            "description": "Build a structured alert payload without external side effects.",
+        },
+    ],
 }
 
 
