@@ -1560,7 +1560,18 @@ def build_anipy_plan(user_request):
         phrase in text
         for phrase in ("anime", "anipy", "anilist", "myanimelist")
     )
-    if not anime_domain:
+
+    # Natural anime requests often omit the word "anime". Episode-specific
+    # watch/download/stream requests are sufficiently specific to enter the
+    # Anipy parser without hijacking unrelated generic browser/file tasks.
+    episode_action = bool(
+        re.search(
+            r"\b(?:watch|play|stream|download|save|list|show|get|find|resolve)\b.*\bepisodes?\b",
+            original,
+            re.IGNORECASE,
+        )
+    )
+    if not anime_domain and not episode_action:
         return None
 
     language_match = re.search(r"\b(sub|dub)\b", text, re.IGNORECASE)
