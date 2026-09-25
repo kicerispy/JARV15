@@ -4069,6 +4069,7 @@ class JarvisAgent:
             ),
             "error": task.error,
             "replans": task.replan_count,
+            "change_recovery_attempts": task.change_recovery_attempts,
             "observations": list(
                 task.observations
             ),
