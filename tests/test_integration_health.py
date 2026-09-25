@@ -44,7 +44,7 @@ def test_completion_tool_families_are_registered():
 
 
 def test_integration_health_local_sweep_has_structured_components():
-    result = integration_health('{"include_optional": false}')
+    result = integration_health('{"include_optional": false, "probe": false}')
     assert result["success"] is True
     assert result["verified"] is True
     assert result["tool"] == "integration_health"
