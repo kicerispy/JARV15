@@ -472,6 +472,38 @@ def _discover_nodes(
     return ranked[:MAX_NODE_CANDIDATES], queries
 
 
+def _deprecated_node_ids(
+    definition_text: str,
+    candidates: Sequence[Dict[str, Any]],
+) -> List[str]:
+    text = str(definition_text or "")
+    deprecated: List[str] = []
+
+    for item in candidates:
+        node_id = str(
+            item.get("nodeId")
+            or item.get("id")
+            or item.get("type")
+            or ""
+        ).strip()
+        if not node_id:
+            continue
+
+        escaped = re.escape(node_id)
+        matches = list(re.finditer(
+            rf"type\s*:\s*['\"]{escaped}['\"]",
+            text,
+            re.IGNORECASE,
+        ))
+        for match in matches:
+            window = text[max(0, match.start() - 1400):match.end() + 200]
+            if "@deprecated" in window.lower():
+                deprecated.append(node_id)
+                break
+
+    return _unique_strings(deprecated)
+
+
 def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     refs: List[Dict[str, Any]] = []
 
@@ -526,6 +558,13 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
     invalid_node_ids = _unique_strings(invalid_node_ids)
     schema_errors = _unique_strings(schema_errors)
+    deprecated_node_ids = _deprecated_node_ids(
+        definition_text,
+        [
+            item for item in candidates
+            if isinstance(item, dict)
+        ],
+    )
 
     return {
         "success": result.get("success") is True,
@@ -534,6 +573,7 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "definition_text": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
         "schema_errors": schema_errors,
         "invalid_node_ids": invalid_node_ids,
+        "deprecated_node_ids": deprecated_node_ids,
     }
 
 
@@ -642,7 +682,7 @@ def _required_capabilities(request: str) -> List[Tuple[str, Tuple[str, ...]]]:
                 "language",
                 "textgenerator",
                 "text generator",
-                "basiclmn",
+                "basicllm",
                 "basic llm",
             ),
         ))
@@ -752,11 +792,11 @@ def _quality_gate(
 
     if schema_errors:
         checks.append({
-            "id": "schema_errors",
-            "status": "blocked",
+            "id": "schema_safety",
+            "status": "filtered",
             "message": (
-                "n8n rejected one or more discovered node configurations; "
-                "invalid candidates were removed before build."
+                "n8n rejected some discovered node configurations; "
+                "those nodes were filtered before the architecture was evaluated."
             ),
         })
 
@@ -806,9 +846,12 @@ def design_workflow(
         techniques,
     )
 
-    invalid_node_ids = {
+    rejected_node_ids = {
         str(item).strip()
-        for item in node_types.get("invalid_node_ids", [])
+        for item in (
+            list(node_types.get("invalid_node_ids", []))
+            + list(node_types.get("deprecated_node_ids", []))
+        )
         if str(item).strip()
     }
     candidates = [
@@ -818,8 +861,13 @@ def design_workflow(
             or item.get("id")
             or item.get("type")
             or ""
-        ) not in invalid_node_ids
+        ) not in rejected_node_ids
     ]
+
+    if rejected_node_ids:
+        filtered_types = _get_node_types(candidates)
+        if filtered_types.get("success") is True:
+            node_types = filtered_types
 
     definitions = node_types.get("definitions", [])
     quality = _quality_gate(
