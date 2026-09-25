@@ -414,7 +414,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
             raise AssertionError(name)
 
         with patch.object(builder, "design_workflow", return_value=design), \
-             patch.object(builder, "_ollama_json", return_value={"name": "x", "code": "code"}), \
+             patch.object(builder, "_ollama_json", return_value={"name": "x", "code": self.VALID_CODE}), \
              patch.object(builder, "call_tool", side_effect=fake_call), \
              patch.object(
                  builder,
@@ -462,7 +462,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
             raise AssertionError(name)
 
         with patch.object(builder, "design_workflow", return_value=design), \
-             patch.object(builder, "_ollama_json", return_value={"name": "x", "code": "code"}), \
+             patch.object(builder, "_ollama_json", return_value={"name": "x", "code": self.VALID_CODE}), \
              patch.object(builder, "call_tool", side_effect=fake_call), \
              patch.object(
                  builder,
