@@ -128,6 +128,10 @@ class AgentTask:
 
     replan_count: int = 0
 
+    # Failed post-edit validation can trigger a checkpoint restore + focused
+    # repair loop. Keep that loop bounded independently of generic replans.
+    change_recovery_attempts: int = 0
+
     max_replans: int = 2
 
     current_step: int = -1
@@ -854,6 +858,45 @@ class JarvisAgent:
                 return evidence
 
         return None
+
+    @staticmethod
+    def _latest_failed_execution_evidence(
+        task: AgentTask,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest failed tool evidence entry."""
+        for evidence in reversed(task.evidence):
+            if not isinstance(evidence, dict):
+                continue
+            if evidence.get("success"):
+                continue
+            tool = str(evidence.get("tool", "") or "").strip()
+            if tool:
+                return evidence
+        return None
+
+    @staticmethod
+    def _has_verified_git_diff_check(task: AgentTask) -> bool:
+        """Return True once deterministic git diff validation has passed."""
+        for evidence in reversed(task.evidence):
+            if not isinstance(evidence, dict):
+                continue
+            if (
+                str(evidence.get("tool", "") or "").strip() != "code_test"
+                or not evidence.get("success")
+                or not evidence.get("verified")
+            ):
+                continue
+
+            data = evidence.get("data")
+            if isinstance(data, dict):
+                if str(data.get("mode", "") or "").strip().lower() == "git_diff_check":
+                    return True
+
+            detail = str(evidence.get("detail", "") or "").lower()
+            if "git diff whitespace validation passed" in detail:
+                return True
+
+        return False
 
     @staticmethod
     def _requested_file_exists(requested_target: Optional[str]) -> bool:
@@ -1884,6 +1927,32 @@ class JarvisAgent:
 
         return "\n".join(lines)
 
+
+    def _build_change_repair_request_after_failure(
+        self,
+        task: AgentTask,
+    ) -> str:
+        """Build a focused corrective handoff after failed change validation."""
+        return "\n".join([
+            "The requested software change was attempted and validation failed.",
+            "The project was restored to the pre-change checkpoint.",
+            "Use the verified source and failure evidence below to correct the implementation.",
+            "",
+            f"Original request: {task.request}",
+            "",
+            self._build_evidence_packet(task, max_chars=12000),
+            "",
+            "CHANGE RECOVERY RULES:",
+            "1. Treat the failed test or edit error as authoritative evidence.",
+            "2. Make the smallest safe correction that satisfies the original request.",
+            "3. Create code_checkpoint before the corrective mutation.",
+            "4. Use edit_file/write_file only after inspecting the verified source.",
+            "5. Run the focused code_test that validates the original request.",
+            "6. Do not repeat the failed edit blindly.",
+            "7. Return executable JSON only.",
+            "",
+            "Return ONLY JSON.",
+        ])
 
     def _build_change_request_after_source(
         self,
