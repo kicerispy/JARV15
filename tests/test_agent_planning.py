@@ -2092,12 +2092,18 @@ def test_explicit_change_target_moves_from_source_read_to_focused_implementation
 
     assert completed.status == "completed"
     assert len(planner.calls) == 1
-    assert len(executor.calls) == 2
+    assert len(executor.calls) == 3
     assert executor.calls[0]["steps"][0]["tool"] == "read_file"
     assert [step["tool"] for step in executor.calls[1]["steps"]] == [
         "code_checkpoint",
         "edit_file",
         "code_test",
+    ]
+    assert executor.calls[2]["steps"] == [
+        {
+            "tool": "code_test",
+            "argument": '{"mode": "git_diff_check"}',
+        }
     ]
     assert any(
         "[JARVIS_INTERNAL_PHASE:CHANGE]" in call
