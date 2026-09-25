@@ -251,8 +251,7 @@ def _extract_node_versions(code: str) -> Dict[str, List[str]]:
     source = str(code or "")
     versions: Dict[str, List[str]] = {}
     pattern = re.compile(
-        r"type\s*:\s*['"]([^'"]+)['"].{0,700}?"
-        r"(?:version|typeVersion)\s*:\s*([0-9]+(?:\.[0-9]+)*)",
+        r"""type\s*:\s*['"]([^'"]+)['"].{0,700}?(?:version|typeVersion)\s*:\s*([0-9]+(?:\.[0-9]+)*)""",
         re.DOTALL,
     )
     for match in pattern.finditer(source):
