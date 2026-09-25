@@ -1618,6 +1618,108 @@ def build_context_and_skill_plan(user_request):
     return None
 
 
+
+def build_integration_health_plan(user_request):
+    """Build deterministic read-only health/status routes for JARVIS itself."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact = {
+        "integration status",
+        "integration health",
+        "check integrations",
+        "check all integrations",
+        "check tool status",
+        "check tool health",
+        "check all tools",
+        "check all my tools",
+        "what tools are working",
+        "what tools are working right now",
+        "which tools are working",
+        "which tools are available",
+        "jarvis tool health",
+        "jarvis integration health",
+    }
+    if text in exact or (
+        ("tools" in text or "integrations" in text)
+        and any(token in text for token in ("working", "available", "health", "status"))
+        and any(token in text for token in ("what", "which", "check", "show"))
+    ):
+        return {"steps": [{"tool": "integration_health", "argument": ""}]}
+
+    return None
+
+
+def build_gods_eye_plan(user_request):
+    """Build deterministic routes for Bilawal Sidhu's God's Eye View."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if "gods eye" not in text and "god's eye" not in text:
+        return None
+
+    if any(token in text for token in ("status", "health", "running", "online", "connected")):
+        return {"steps": [{"tool": "gods_eye_status", "argument": ""}]}
+
+    if any(token in text for token in ("set up", "setup", "install", "prepare", "update")):
+        return {"steps": [{"tool": "gods_eye_setup", "argument": ""}]}
+
+    if "start" in text or "launch" in text or "run" in text:
+        return {"steps": [{"tool": "gods_eye_start", "argument": ""}]}
+
+    if "stop" in text or "close" in text:
+        return {"steps": [{"tool": "gods_eye_stop", "argument": ""}]}
+
+    if any(token in text for token in ("open", "show", "view", "display")) and not any(
+        token in text for token in ("aircraft", "planes", "vessels", "ships", "satellites", "launches", "cameras", "radio", "transit")
+    ):
+        return {"steps": [{"tool": "gods_eye_open", "argument": ""}]}
+
+    data_routes = (
+        (("aircraft", "planes", "contacts"), "gods_eye_contacts"),
+        (("vessels", "ships", "boats"), "gods_eye_vessels"),
+        (("satellites",), "gods_eye_satellites"),
+        (("launches", "rocket launches"), "gods_eye_launches"),
+        (("cameras", "cctv"), "gods_eye_cameras"),
+        (("radio",), "gods_eye_radio"),
+        (("transit", "traffic"), "gods_eye_transit"),
+    )
+    for needles, tool in data_routes:
+        if any(needle in text for needle in needles):
+            return {"steps": [{"tool": tool, "argument": ""}]}
+
+    return {"steps": [{"tool": "gods_eye_status", "argument": ""}]}
+
+
+def build_screen_memory_plan(user_request):
+    """Build deterministic routes for optional Screenpipe screen memory."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if "screen memory" not in text and "screenpipe" not in text:
+        return None
+
+    if any(token in text for token in ("status", "health", "running", "online")):
+        return {"steps": [{"tool": "screen_memory_status", "argument": ""}]}
+
+    if any(token in text for token in ("recent", "what was on my screen", "what was i looking at", "what did i have open")):
+        return {"steps": [{"tool": "screen_memory_recent", "argument": ""}]}
+
+    match = re.search(
+        r"(?:search|find|look for)\s+(?:screen memory|screenpipe)\s+(?:for|about)?\s*(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match and match.group(1).strip():
+        return {
+            "steps": [{
+                "tool": "screen_memory_search",
+                "argument": json.dumps({"query": match.group(1).strip()}),
+            }]
+        }
+
+    return {"steps": [{"tool": "screen_memory_status", "argument": ""}]}
+
 def build_unreal_mcp_plan(user_request):
     """Build deterministic routes for the upstream Unreal_mcp gateway."""
     original = str(user_request or "").strip()
@@ -1956,6 +2058,25 @@ def deterministic_route(user_request, active_context=None):
         print("JARVIS: Software/gameplay follow-up detected.")
         return None
 
+
+    # ==================================================
+    # JARVIS / INTEGRATION HEALTH + OPTIONAL OBSERVABILITY
+    # ==================================================
+
+    health_plan = build_integration_health_plan(user_request)
+    if health_plan:
+        print("JARVIS: Integration health route selected.")
+        return health_plan
+
+    gods_eye_plan = build_gods_eye_plan(user_request)
+    if gods_eye_plan:
+        print("JARVIS: God's Eye View route selected.")
+        return gods_eye_plan
+
+    screen_memory_plan = build_screen_memory_plan(user_request)
+    if screen_memory_plan:
+        print("JARVIS: Screen memory route selected.")
+        return screen_memory_plan
 
     # ==================================================
     # MEMORY / AGENT SKILLS

@@ -43,6 +43,37 @@ UNREAL_MCP_TOOLS = frozenset(
     }
 )
 
+GODS_EYE_TOOLS = frozenset(
+    {
+        "gods_eye_status",
+        "gods_eye_setup",
+        "gods_eye_start",
+        "gods_eye_open",
+        "gods_eye_stop",
+        "gods_eye_contacts",
+        "gods_eye_vessels",
+        "gods_eye_satellites",
+        "gods_eye_launches",
+        "gods_eye_cameras",
+        "gods_eye_radio",
+        "gods_eye_transit",
+    }
+)
+
+SCREEN_MEMORY_TOOLS = frozenset(
+    {
+        "screen_memory_status",
+        "screen_memory_search",
+        "screen_memory_recent",
+    }
+)
+
+SYSTEM_HEALTH_TOOLS = frozenset(
+    {
+        "integration_health",
+    }
+)
+
 CONTEXT_MEMORY_TOOLS = frozenset(
     {
         "context_backend_status",
@@ -105,6 +136,7 @@ BROWSER_TOOLS = frozenset(
 JSON_ARGUMENT_TOOLS = frozenset(
     {
         "n8n_run_workflow",
+        "integration_health",
         "browser_click_result",
         "browser_click_first_result",
         "browser_find_element",
@@ -156,5 +188,8 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in UNREAL_MCP_TOOLS
         and str(name) not in CONTEXT_MEMORY_TOOLS
         and str(name) not in AGENT_SKILL_TOOLS
+        and str(name) not in GODS_EYE_TOOLS
+        and str(name) not in SCREEN_MEMORY_TOOLS
+        and str(name) not in SYSTEM_HEALTH_TOOLS
         and not is_roblox_tool_name(name)
     )

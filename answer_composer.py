@@ -445,6 +445,52 @@ def _roblox_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     # should still be compact enough for natural TTS.
     return "\n".join(lines)[:650]
 
+def _integration_health_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
+    """Summarize the unified JARVIS tool/integration health sweep."""
+    for item in reversed(evidence):
+        if str(item.get("tool", "") or "").strip() != "integration_health":
+            continue
+
+        data = _decode_json_text(item.get("data"))
+        if not isinstance(data, dict):
+            continue
+
+        components = data.get("components")
+        if not isinstance(components, list):
+            return str(data.get("message") or "").strip()
+
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            groups.setdefault(str(component.get("status") or "UNKNOWN"), []).append(component)
+
+        def names_for(status: str, limit: int = 8) -> str:
+            names = [
+                str(component.get("name"))
+                for component in groups.get(status, [])
+                if component.get("name")
+            ]
+            return ", ".join(names[:limit])
+
+        lines = [str(data.get("message") or "").strip()]
+        for status, label in (
+            ("READY", "Ready"),
+            ("RUNNING", "Running"),
+            ("DEGRADED", "Degraded"),
+            ("OFFLINE", "Offline"),
+            ("DISABLED", "Disabled"),
+            ("NOT_CONFIGURED", "Not configured"),
+            ("NOT_INSTALLED", "Not installed"),
+        ):
+            names = names_for(status)
+            if names:
+                lines.append(f"{label}: {names}.")
+
+        return "\n".join(line for line in lines if line)[:1400]
+
+    return "I completed the JARVIS integration health check, but there was not enough structured evidence to summarize it."
+
 def _browser_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     """Summarize structured browser search evidence without reading raw metadata."""
     search_records: List[Dict[str, Any]] = []
@@ -943,6 +989,9 @@ def compose_task_answer(
 
     if intent.get("domain") == "browser":
         return _browser_answer(task, evidence)
+
+    if "integration_health" in executed_tools:
+        return _integration_health_answer(task, evidence)
 
     if any(
         str(item.get("tool", "") or "").strip()
