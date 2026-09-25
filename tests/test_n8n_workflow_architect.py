@@ -220,12 +220,20 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
                 ]
             )
 
-        self.assertTrue(result["definitions"])
-        self.assertNotEqual(
-            result["definitions"][0]["content"].strip(),
-            "n8n-nodes-base.github n8n-nodes-base.webhook",
+        self.assertFalse(result["definitions"])
+
+
+    def test_schema_markers_are_required_for_string_definitions(self):
+        self.assertTrue(
+            architect._looks_like_node_schema(
+                "interface GithubParameters { resource: string; operation: string }"
+            )
         )
-        self.assertIn("n8n-nodes-base.github", result["definitions"][0]["content"])
+        self.assertFalse(
+            architect._looks_like_node_schema(
+                "n8n-nodes-base.github n8n-nodes-base.webhook"
+            )
+        )
 
 
     def test_best_practices_prefers_documentation_field(self):
