@@ -39,12 +39,11 @@ def trace_db_path() -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    global _SCHEMA_READY
     _TRACE_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(_TRACE_DB), timeout=5.0)
     connection.row_factory = sqlite3.Row
     connection.executescript(
-            """
+        """
             CREATE TABLE IF NOT EXISTS traces (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id TEXT NOT NULL,
@@ -66,9 +65,9 @@ def _connect() -> sqlite3.Connection:
 
             CREATE INDEX IF NOT EXISTS idx_traces_status
                 ON traces(status);
-            """
-        )
-        connection.commit()
+        """
+    )
+    connection.commit()
     return connection
 
 
