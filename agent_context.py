@@ -108,7 +108,14 @@ def _backend_order() -> List[str]:
     requested = str(CONTEXT_MEMORY_BACKEND or "auto").strip().lower()
     if requested in {"openviking", "agentmemory", "local"}:
         return [requested]
-    return ["openviking", "agentmemory", "local"]
+    try:
+        selected = str(backend_status(timeout=0.6).get("selected_backend") or "")
+    except Exception:
+        selected = ""
+    ordered = ["openviking", "agentmemory", "local"]
+    if selected in ordered:
+        return [selected] + [item for item in ordered if item != selected]
+    return ordered
 
 
 def _local_memory():
@@ -118,7 +125,7 @@ def _local_memory():
     return memory
 
 
-def backend_status(timeout: float = 1.2, force: bool = False) -> Dict[str, Any]:
+def backend_status(timeout: float = 0.6, force: bool = False) -> Dict[str, Any]:
     """Return reachability for all configured context backends."""
     global _STATUS_CACHE, _STATUS_CACHE_AT
 
