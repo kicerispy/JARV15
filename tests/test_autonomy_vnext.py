@@ -204,3 +204,11 @@ def test_public_dispatcher_exposes_regression_status():
     )
     assert result.success is True
     assert "tool_regressions" in result.data
+
+
+def test_strategy_status_reports_persistent_learning_state():
+    result = tools.execute_tool("autonomy_status")
+    assert result.success is True
+    assert result.data["enabled"] is True
+    assert result.data["trace"]["enabled"] is True
+    assert result.data["strategy"]["enabled"] is True
