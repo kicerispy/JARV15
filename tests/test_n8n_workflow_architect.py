@@ -619,7 +619,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             ["monitoring", "content_generation", "notification"],
         )
         gate = architect._quality_gate(
-            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            "Monitor GitHub issues, summarize bugs, and send me a Slack alert.",
             requirements,
             candidates,
             [
@@ -964,7 +964,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
 
     def test_discover_nodes_falls_back_when_search_nodes_is_unavailable(self):
-        request = "Build a workflow that monitors GitHub issues, summarizes bugs, and sends me an alert"
+        request = "Build a workflow that monitors GitHub issues, summarizes bugs, and sends me a Slack alert"
         calls = []
 
         def fake_call(tool_name, arguments=None):
