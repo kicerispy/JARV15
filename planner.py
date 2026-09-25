@@ -3321,59 +3321,67 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         logger.error(f"Planner LLM call failed: {e}")
 
         if focused_implementation_phase:
-            if is_change_phase:
-                fallback_model = MODEL_MANAGER.coding_model
-                logger.warning(
-                    "JARVIS DEBUG: change planner failed; "
-                    f"falling back to coding model {fallback_model}"
-                )
-                fallback_response = MODEL_MANAGER.coding(
-                    messages,
-                    format="json",
-                    options={
-                        "temperature": 0,
-                        "num_predict": 512,
-                        "num_ctx": config.CODING_NUM_CTX,
-                    },
-                    model=fallback_model,
-                )
-            else:
-                fallback_model = MODEL_MANAGER.coding_fallback_model
-                if not fallback_model or fallback_model == planner_model:
-                    return {"goal": "", "steps": []}
-                logger.warning(
-                    "JARVIS DEBUG: primary coding planner failed; "
-                    f"falling back to {fallback_model}"
-                )
-                fallback_response = MODEL_MANAGER.coding(
-                    messages,
-                    format="json",
-                    options={
-                        "temperature": 0,
-                        "num_predict": 240,
-                        "num_ctx": config.CODING_NUM_CTX,
-                    },
-                    model=fallback_model,
-                )
-                    fallback_content = (
-                        fallback_response
-                        .get("message", {})
-                        .get("content", "")
+            try:
+                if is_change_phase:
+                    fallback_model = MODEL_MANAGER.coding_model
+                    logger.warning(
+                        "JARVIS DEBUG: change planner failed; "
+                        f"falling back to coding model {fallback_model}"
                     )
-                    fallback_data = extract_json(fallback_content)
+                    fallback_response = MODEL_MANAGER.coding(
+                        messages,
+                        format="json",
+                        options={
+                            "temperature": 0,
+                            "num_predict": 512,
+                            "num_ctx": config.CODING_NUM_CTX,
+                        },
+                        model=fallback_model,
+                    )
+                else:
+                    fallback_model = MODEL_MANAGER.coding_fallback_model
 
-                    if fallback_data:
-                        validated_fallback = validate_plan(fallback_data)
-                        if validated_fallback.get("steps"):
-                            logger.info(
-                                "JARVIS DEBUG: coding fallback planner "
-                                "recovered a valid plan."
-                            )
-                            return validated_fallback
-                except Exception as fallback_exc:
-                    logger.error(
-                        f"Coding fallback planner failed: {fallback_exc}"
+                    if (
+                        not fallback_model
+                        or fallback_model == planner_model
+                    ):
+                        return {"goal": "", "steps": []}
+
+                    logger.warning(
+                        "JARVIS DEBUG: primary coding planner failed; "
+                        f"falling back to {fallback_model}"
                     )
+                    fallback_response = MODEL_MANAGER.coding(
+                        messages,
+                        format="json",
+                        options={
+                            "temperature": 0,
+                            "num_predict": 240,
+                            "num_ctx": config.CODING_NUM_CTX,
+                        },
+                        model=fallback_model,
+                    )
+
+                fallback_content = (
+                    fallback_response
+                    .get("message", {})
+                    .get("content", "")
+                )
+                fallback_data = extract_json(fallback_content)
+
+                if fallback_data:
+                    validated_fallback = validate_plan(fallback_data)
+                    if validated_fallback.get("steps"):
+                        logger.info(
+                            "JARVIS DEBUG: focused coding fallback planner "
+                            "recovered a valid plan."
+                        )
+                        return validated_fallback
+
+            except Exception as fallback_exc:
+                logger.error(
+                    f"Coding fallback planner failed: {fallback_exc}"
+                )
 
         return {"goal": "", "steps": []}
 
@@ -3411,6 +3419,43 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                     "JARVIS planner: recovered with deterministic Roblox fallback."
                 )
                 return validated_fallback
+
+        if is_change_phase:
+            fallback_model = MODEL_MANAGER.coding_model
+            logger.warning(
+                "JARVIS DEBUG: change planner returned invalid output; "
+                f"falling back to {fallback_model}"
+            )
+            try:
+                fallback_response = MODEL_MANAGER.coding(
+                    messages,
+                    format="json",
+                    options={
+                        "temperature": 0,
+                        "num_predict": 512,
+                        "num_ctx": config.CODING_NUM_CTX,
+                    },
+                    model=fallback_model,
+                )
+                fallback_content = (
+                    fallback_response
+                    .get("message", {})
+                    .get("content", "")
+                )
+                fallback_data = extract_json(fallback_content)
+
+                if fallback_data:
+                    validated_fallback = validate_plan(fallback_data)
+                    if validated_fallback.get("steps"):
+                        logger.info(
+                            "JARVIS DEBUG: change coding fallback planner "
+                            "returned a valid plan."
+                        )
+                        return validated_fallback
+            except Exception as fallback_exc:
+                logger.error(
+                    f"Change fallback planner failed: {fallback_exc}"
+                )
 
         if is_repair_phase:
             fallback_model = MODEL_MANAGER.coding_fallback_model
