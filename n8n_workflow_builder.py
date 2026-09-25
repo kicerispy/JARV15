@@ -509,6 +509,15 @@ def _schema_repair_instructions(validation_blockers: List[str]) -> List[str]:
             "do not leave channelId undefined."
         )
 
+    if "fromemail" in text or "toemail" in text:
+        instructions.append(
+            "The generated email node is missing required sender/recipient fields. "
+            "Do not invent email addresses. When the request did not explicitly "
+            "specify email delivery, replace the email node with a final "
+            "n8n-nodes-base.set alert payload. When email delivery is explicit, "
+            "use the required configured addresses from the request/context."
+        )
+
     if "invalid_input_index" in text or "invalid_output_index" in text:
         instructions.append(
             "Use ordinary main-output to main-input wiring only. .to(target) must "
