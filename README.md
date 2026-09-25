@@ -12,6 +12,7 @@ JARVIS is a local-first personal AI assistant for Windows. It combines voice int
 - **Automation:** optional n8n delegation
 - **Coding/self-repair:** checkpoint → inspect → focused plan → edit → test → verification → bounded recovery
 - **Self-healing/runtime resilience:** persistent tool-health telemetry, bounded circuit breakers, sanitized failure signatures, structured model-role fallbacks, and a persistent failure playbook that reuses prior recovery evidence
+- **Learned autonomy:** bounded SQLite task traces, repeated-plan memory, conservative learned-strategy reuse, plan scoring, regression detection, temporary strategy quarantine, and automatic execution-trace verification
 - **Local memory:** bounded semantic/preferences/procedure/lesson memory plus episodic failure lessons, with a SQLite FTS5 shadow index for faster deterministic recall
 - **JARVIS Doctor:** read-only runtime/model/tool/Git diagnostics with optional compile and pytest probes
 - **QoL diagnostics:** deterministic quick-check, resource/process/project/service diagnostics that avoid an LLM round-trip
@@ -99,6 +100,11 @@ The resilience and memory layer stores local runtime state under `.jarvis_autono
 - `JARVIS_SELF_HEALING_FAILURE_MEMORY_ENABLED`
 - `JARVIS_SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS`
 - `JARVIS_SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS`
+- `JARVIS_AUTONOMY_LEARNED_STRATEGY_ENABLED`
+- `JARVIS_AUTONOMY_AUTO_VERIFICATION_ENABLED`
+- `JARVIS_AUTONOMY_STRATEGY_QUARANTINE_SECONDS`
+- `JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESSES`
+- `JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESS_RATE`
 
 Examples include:
 
@@ -127,6 +133,7 @@ JARVIS also exposes deterministic self-service tools:
 - `ollama_models` for local model inventory
 - `memory_remember`, `memory_recall`, and `memory_forget` for explicit local memory control
 - `healing_hints` and `healing_history` for inspecting what has failed and what recovery patterns JARVIS has learned
+- `autonomy_status`, `strategy_history`, and `regression_status` for inspecting learned execution strategies, trace health, and detected regressions
 - `jarvis_quickcheck`, `resource_status`, `process_snapshot`, `project_snapshot`, and `service_status` for fast deterministic diagnostics
 
 Run the public CI-focused set:
