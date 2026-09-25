@@ -196,24 +196,64 @@ def _search(
     if not query.strip():
         raise ValueError("Anime search query is required.")
 
-    matches: list[tuple[Any, Any]] = []
-    errors: list[str] = []
-
-    for provider in _provider_instances(
+    primary_providers = _provider_instances(
         mode=mode,
         provider_name=provider_name,
         all_providers=all_providers,
-    ):
+    )
+    matches: list[tuple[Any, Any]] = []
+    errors: list[str] = []
+    attempted_names: set[str] = set()
+
+    def search_provider(provider: Any) -> None:
+        name = str(getattr(provider, "NAME", provider) or "").strip()
+        if name and name in attempted_names:
+            return
+        if name:
+            attempted_names.add(name)
+
         try:
             results = provider.get_search(query)
         except Exception as exc:
-            errors.append(f"{provider.NAME}: {exc}")
-            continue
+            errors.append(f"{name or 'provider'}: {exc}")
+            return
 
         for result in results:
             matches.append((provider, result))
 
-    if not matches and errors:
+    for provider in primary_providers:
+        search_provider(provider)
+        if matches:
+            return matches
+
+    # Preserve explicit provider/all-provider semantics. The fallback is only
+    # for JARVIS's default configured-provider route when the configured
+    # provider is unavailable or returns no results.
+    if provider_name is None and not all_providers:
+        try:
+            from anipy_api.provider import list_providers
+
+            from anipy_cli.config import Config
+
+            overrides = Config().provider_urls
+        except Exception:
+            overrides = {}
+
+        for provider_cls in list_providers():
+            name = str(getattr(provider_cls, "NAME", "") or "").strip()
+            if name and name in attempted_names:
+                continue
+            try:
+                provider = provider_cls(overrides.get(name))
+            except Exception as exc:
+                errors.append(f"{name or 'provider'} initialization: {exc}")
+                continue
+
+            search_provider(provider)
+            if matches:
+                return matches
+
+    if errors:
         raise RuntimeError(
             "No anime results were returned. Provider errors: "
             + "; ".join(errors)
