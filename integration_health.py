@@ -25,6 +25,7 @@ from tool_registry import (
     CONTEXT_MEMORY_TOOLS,
     GODS_EYE_TOOLS,
     N8N_TOOLS,
+    ROBLOX_MCP_TOOLS,
     SCREEN_MEMORY_TOOLS,
     SYSTEM_HEALTH_TOOLS,
     UNREAL_MCP_TOOLS,
@@ -127,6 +128,7 @@ def _registry_counts() -> Dict[str, int]:
         "gods_eye": len(GODS_EYE_TOOLS),
         "screen_memory": len(SCREEN_MEMORY_TOOLS),
         "n8n": len(N8N_TOOLS),
+        "roblox_mcp": len(ROBLOX_MCP_TOOLS),
         "health": len(SYSTEM_HEALTH_TOOLS),
     }
 
@@ -455,7 +457,12 @@ def _static_components() -> list[Dict[str, Any]]:
         _component("External Memory", "READY", "JARVIS context-memory integration is installed.", tool_count=len(CONTEXT_MEMORY_TOOLS)),
         _component("Agent Skills", "READY" if _module_available("skill_catalog") else "NOT_INSTALLED", "Agent Skills catalog is installed." if _module_available("skill_catalog") else "Agent Skills catalog is unavailable.", tool_count=len(AGENT_SKILL_TOOLS)),
         _component("Unreal MCP", "READY" if getattr(config, "UNREAL_MCP_URL", "") else "NOT_CONFIGURED", "Unreal MCP endpoint is configured." if getattr(config, "UNREAL_MCP_URL", "") else "Unreal MCP endpoint is not configured.", tool_count=len(UNREAL_MCP_TOOLS)),
-        _component("Roblox MCP", "READY" if getattr(config, "ROBLOX_MCP_URL", "") else "NOT_CONFIGURED", "Roblox MCP endpoint is configured." if getattr(config, "ROBLOX_MCP_URL", "") else "Roblox MCP endpoint is not configured."),
+        _component(
+            "Roblox MCP",
+            "READY" if getattr(config, "ROBLOX_MCP_URL", "") else "NOT_CONFIGURED",
+            "Roblox MCP endpoint is configured." if getattr(config, "ROBLOX_MCP_URL", "") else "Roblox MCP endpoint is not configured.",
+            tool_count=len(ROBLOX_MCP_TOOLS),
+        ),
         _component("n8n", "READY" if getattr(config, "N8N_ENABLED", False) else "DISABLED", "n8n delegation is configured." if getattr(config, "N8N_ENABLED", False) else "n8n delegation is disabled."),
     ]
 
