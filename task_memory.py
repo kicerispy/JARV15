@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -53,6 +54,33 @@ def record_task(
         items = _load()
         items.append(entry)
         _save(items)
+
+        # Mirror durable task outcomes into the richer external context
+        # backend without delaying the user-facing task completion path.
+        if os.environ.get("JARVIS_EXTERNAL_TASK_MEMORY", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            summary = (
+                f"JARVIS task outcome: request={entry['request']}; "
+                f"goal={entry['goal']}; status={entry['status']}; "
+                f"result={entry['result']}; error={entry['error']}"
+            )
+
+            def _mirror() -> None:
+                try:
+                    from agent_context import remember
+                    remember(
+                        summary,
+                        concepts=["jarvis-task", entry["status"] or "unknown"],
+                        memory_type="workflow" if entry["status"] == "completed" else "bug",
+                    )
+                except Exception:
+                    pass
+
+            threading.Thread(
+                target=_mirror,
+                name="jarvis-external-task-memory",
+                daemon=True,
+            ).start()
+
         return True
     except OSError:
         return False
