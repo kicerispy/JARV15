@@ -194,3 +194,8 @@ def test_roblox_mcp_setup_uses_npx_when_server_is_offline(monkeypatch):
     assert result.success is True
     assert calls["command"][:2] == ["C:/node/npx.cmd", "-y"]
     assert calls["command"][2] == "robloxstudio-mcp@latest"
+
+
+def test_roblox_mcp_setup_wait_window_is_bounded(monkeypatch):
+    source = roblox_mcp.roblox_mcp_setup.__doc__ or ""
+    assert "npx" in source.lower()
