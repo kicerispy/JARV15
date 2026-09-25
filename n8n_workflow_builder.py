@@ -659,7 +659,10 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
 
         allowed_node_types = [
             str(item.get("nodeId") or item.get("type") or "").strip()
-            for item in design.get("node_definitions", [])
+            for item in (
+                list(design.get("node_definitions", []))
+                + list(design.get("node_candidates", []))
+            )
             if isinstance(item, dict)
         ]
         validation = _validate_code(
