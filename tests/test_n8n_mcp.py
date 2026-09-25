@@ -359,7 +359,7 @@ class N8nMcpTests(unittest.TestCase):
             },
         )
 
-    def test_run_workflow_request_refuses_unpublished_non_manual_workflow(self):
+    def test_run_workflow_request_executes_unpublished_webhook_in_manual_mode(self):
         calls = [
             {
                 "success": True,
@@ -393,16 +393,66 @@ class N8nMcpTests(unittest.TestCase):
                     }
                 },
             },
+            {
+                "success": True,
+                "data": {
+                    "executionId": "9100",
+                    "status": "started",
+                },
+            },
+            {
+                "success": True,
+                "data": {
+                    "execution": {
+                        "id": "9100",
+                        "workflowId": "7",
+                        "status": "success",
+                    },
+                    "data": {
+                        "result": "ok",
+                    },
+                },
+            },
         ]
 
-        with patch.object(n8n_mcp, "call_tool", side_effect=lambda *args, **kwargs: calls.pop(0)):
+        calls_seen = []
+
+        def fake_call_tool(name, arguments=None):
+            calls_seen.append((name, arguments))
+            return calls.pop(0)
+
+        with patch.object(n8n_mcp, "call_tool", side_effect=fake_call_tool),              patch.object(n8n_mcp.time, "sleep"):
             result = n8n_mcp.run_workflow_request(
                 "Email me the report",
                 "integration",
+                {"recipient": "test@example.com"},
             )
 
-        self.assertFalse(result["success"])
-        self.assertIn("publish", result["message"].lower())
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["execution_id"], "9100")
+
+        execute_calls = [
+            arguments
+            for name, arguments in calls_seen
+            if name == "execute_workflow"
+        ]
+        self.assertEqual(len(execute_calls), 1)
+        self.assertEqual(execute_calls[0]["executionMode"], "manual")
+        self.assertEqual(execute_calls[0]["triggerNodeName"], "Webhook")
+        self.assertEqual(
+            execute_calls[0]["inputs"],
+            {
+                "webhookData": {
+                    "method": "POST",
+                    "body": {
+                        "recipient": "test@example.com",
+                        "workflow_class": "integration",
+                        "request": "Email me the report",
+                    },
+                }
+            },
+        )
 
 
 if __name__ == "__main__":
