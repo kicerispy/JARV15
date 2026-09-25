@@ -3776,6 +3776,48 @@ def _run_tool_raw(
 
         return local_memory.memory_status()
 
+    elif tool_name in {"autonomy_status", "strategy_history", "regression_status"}:
+        from strategy_selector import (
+            autonomy_status,
+            regression_status,
+            strategy_history,
+        )
+
+        raw = str(argument or "").strip()
+        if tool_name == "autonomy_status":
+            return {
+                "success": True,
+                "verified": True,
+                **autonomy_status(),
+            }
+
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+                else:
+                    payload = {"request": raw}
+            except (json.JSONDecodeError, TypeError):
+                payload = {"request": raw}
+
+        request = str(payload.get("request", "") or "")
+        limit = int(payload.get("limit", 10) or 10)
+
+        if tool_name == "strategy_history":
+            return {
+                "success": True,
+                "verified": True,
+                "strategies": strategy_history(request, limit=limit),
+            }
+
+        return {
+            "success": True,
+            "verified": True,
+            **regression_status(request),
+        }
+
     elif tool_name == "healing_hints":
 
         raw = str(argument or "").strip()
@@ -4210,6 +4252,9 @@ NON_CIRCUIT_TOOLS = {
     "memory_forget",
     "memory_status",
     "healing_history",
+    "autonomy_status",
+    "strategy_history",
+    "regression_status",
 }
 
 def run_tool(
