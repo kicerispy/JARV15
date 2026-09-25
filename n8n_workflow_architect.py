@@ -13,8 +13,8 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
-MAX_TECHNIQUES = 2
-MAX_QUERIES = 6
+MAX_TECHNIQUES = 3
+MAX_QUERIES = 10
 MAX_NODE_CANDIDATES = 8
 MAX_DISCOVERED_NODE_CANDIDATES = 32
 MAX_NODE_TYPE_REQUESTS = 8
@@ -41,7 +41,17 @@ _TECHNIQUE_KEYWORDS: Sequence[Tuple[str, Sequence[str]]] = (
     ("data_analysis", ("analyze data", "analysis", "analytics", "report")),
     ("data_transformation", ("transform", "normalize", "map fields", "convert data")),
     ("data_persistence", ("database", "store", "save", "persist", "insert", "update record")),
-    ("notification", ("notify", "notification", "email", "send a message", "slack", "discord")),
+    ("notification", (
+        "notify",
+        "notification",
+        "alert",
+        "alert me",
+        "send me an alert",
+        "email",
+        "send a message",
+        "slack",
+        "discord",
+    )),
     ("knowledge_base", ("knowledge base", "rag", "vector", "knowledge")),
     ("human_in_the_loop", ("approval", "approve", "human review", "human in the loop")),
     ("web_app", ("web app", "webhook", "api endpoint", "http endpoint")),
@@ -105,6 +115,7 @@ def _keyword_terms(request: str) -> List[str]:
 
 
 def _search_queries(request: str, techniques: Sequence[str]) -> List[str]:
+    text = _clean_text(request).lower()
     terms = _keyword_terms(request)
     queries = [_clean_text(request)]
 
@@ -113,14 +124,35 @@ def _search_queries(request: str, techniques: Sequence[str]) -> List[str]:
 
     queries.append("trigger")
 
+    if "github" in text and "issue" in text:
+        queries.extend([
+            "GitHub issues",
+            "GitHub issue trigger",
+            "GitHub issue",
+        ])
+
+    if any(marker in text for marker in ("alert", "notify", "notification", "message me")):
+        queries.extend([
+            "notification",
+            "email slack discord",
+        ])
+
+    if any(marker in text for marker in ("summarize", "summary", "summarizes", "generate", "write")):
+        queries.extend([
+            "text generation",
+            "AI text generation",
+        ])
+
+    if any(marker in text for marker in ("bug", "condition", "when", "if")):
+        queries.append("conditional filter")
+
     for technique in techniques:
         queries.append(technique.replace("_", " "))
 
-    expanded = list(queries)
     for term in terms[:4]:
-        expanded.append(term)
+        queries.append(term)
 
-    return _unique_strings(expanded)[:MAX_QUERIES]
+    return _unique_strings(queries)[:MAX_QUERIES]
 
 
 def _result_data(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -375,7 +407,6 @@ def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, str]:
             str(item.get("name") or ""),
             str(item.get("nodeId") or ""),
             str(item.get("type") or ""),
-            str(item.get("_search_text") or ""),
         ]
     ).lower()
 
@@ -468,26 +499,41 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         ("nodeTypes", "definitions", "results"),
     )
 
-    if not definitions or all(
-        not item.get("content")
-        and not item.get("properties")
-        and not item.get("parameters")
-        and not item.get("inputs")
-        for item in definitions
-    ):
-        definition_text = _result_text(
-            result,
-            ("definitions", "documentation", "content"),
+    definition_text = _result_text(
+        result,
+        ("definitions", "documentation", "content"),
+    )
+
+    if not definitions and definition_text:
+        parsed_definitions = _definition_items_from_text(definition_text)
+        if parsed_definitions:
+            definitions = parsed_definitions
+
+    schema_errors: List[str] = []
+    invalid_node_ids: List[str] = []
+    if definition_text:
+        error_pattern = re.compile(
+            r"Error:\s*Node ['\"]([^'\"]+)['\"] (?P<message>[^\n]+)",
+            re.IGNORECASE,
         )
-        if definition_text:
-            parsed_definitions = _definition_items_from_text(definition_text)
-            if parsed_definitions:
-                definitions = parsed_definitions
+        for match in error_pattern.finditer(definition_text):
+            node_id = _clean_text(match.group(1))
+            message = _clean_text(match.group("message"))
+            if node_id:
+                invalid_node_ids.append(node_id)
+            if message:
+                schema_errors.append(f"{node_id}: {message}")
+
+    invalid_node_ids = _unique_strings(invalid_node_ids)
+    schema_errors = _unique_strings(schema_errors)
 
     return {
         "success": result.get("success") is True,
         "message": result.get("message", ""),
         "definitions": definitions,
+        "definition_text": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
+        "schema_errors": schema_errors,
+        "invalid_node_ids": invalid_node_ids,
     }
 
 
@@ -581,6 +627,7 @@ def _quality_gate(
     requirements: Dict[str, Any],
     candidates: Sequence[Dict[str, Any]],
     definitions: Sequence[Dict[str, Any]],
+    schema_errors: Sequence[str] = (),
 ) -> Dict[str, Any]:
     has_trigger_candidate = any(
         _is_start_trigger_type(item.get("type"))
@@ -631,16 +678,27 @@ def _quality_gate(
         },
     ]
 
+    if schema_errors:
+        checks.append({
+            "id": "schema_errors",
+            "status": "blocked",
+            "message": (
+                "n8n rejected one or more discovered node configurations; "
+                "invalid candidates were removed before build."
+            ),
+        })
+
     missing = [
         check["id"]
         for check in checks
-        if check["status"] == "missing"
+        if check["status"] in {"missing", "blocked"}
     ]
 
     return {
         "ready_to_build": not missing and bool(definitions),
         "checks": checks,
         "missing": missing,
+        "schema_errors": list(schema_errors),
         "note": (
             "This pass is read-only. Build/update/test/publish must use the "
             "existing n8n MCP mutation tools after the architecture is accepted."
@@ -676,12 +734,28 @@ def design_workflow(
         techniques,
     )
 
+    invalid_node_ids = {
+        str(item).strip()
+        for item in node_types.get("invalid_node_ids", [])
+        if str(item).strip()
+    }
+    candidates = [
+        item for item in candidates
+        if str(
+            item.get("nodeId")
+            or item.get("id")
+            or item.get("type")
+            or ""
+        ) not in invalid_node_ids
+    ]
+
     definitions = node_types.get("definitions", [])
     quality = _quality_gate(
         request_text,
         requirements,
         candidates,
         definitions,
+        node_types.get("schema_errors", []),
     )
 
     return {
