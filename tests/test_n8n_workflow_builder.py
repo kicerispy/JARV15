@@ -5,6 +5,42 @@ import n8n_workflow_builder as builder
 
 
 class N8nWorkflowBuilderTests(unittest.TestCase):
+    def test_sdk_shape_guard_rejects_common_model_failures(self):
+        bad_codes = [
+            "export default createWorkflow('Name', []);",
+            "import { workflow } from '@n8n/workflow-sdk'; export default workflow('Name');",
+            "import { workflow } from '@n8n/workflow-sdk'; export type Foo = typeof default_;",
+        ]
+
+        for code in bad_codes:
+            self.assertTrue(builder._sdk_shape_errors(code), code)
+
+        good = (
+            "import { workflow } from '@n8n/workflow-sdk';\n"
+            "export default workflow('stable-id', 'Workflow Name');"
+        )
+        self.assertEqual(builder._sdk_shape_errors(good), [])
+
+    def test_sdk_reference_loader_requires_live_reference(self):
+        with patch.object(
+            builder,
+            "call_tool",
+            return_value={
+                "success": True,
+                "verified": True,
+                "data": {"reference": "workflow('id', 'name')"},
+            },
+        ) as call_tool:
+            result = builder._get_workflow_sdk_reference()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertIn("workflow('id', 'name')", result["reference"])
+        call_tool.assert_called_once_with(
+            "get_workflow_sdk_reference",
+            {"section": "all"},
+        )
+
     def _design(self):
         return {
             "success": True,
@@ -80,6 +116,24 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         design = self._design()
 
         def fake_call(name, args=None):
+        if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "data": {"reference": "SDK: workflow('id', 'name'); node({config: {parameters: {}}});"},
+                }
+        if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "data": {"reference": "SDK: workflow('id', 'name'); node({config: {parameters: {}}});"},
+                }
+        if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "data": {"reference": "SDK: workflow('id', 'name'); node({config: {parameters: {}}});"},
+                }
             if name == "validate_workflow":
                 return {"success": True, "verified": True, "data": {"valid": True}}
             if name == "create_workflow_from_code":
