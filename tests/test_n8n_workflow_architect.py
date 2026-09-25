@@ -707,7 +707,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             ["monitoring", "content_generation", "notification"],
         )
         gate = architect._quality_gate(
-            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            "Monitor GitHub issues, summarize bugs, and send me a Slack alert.",
             requirements,
             candidates,
             [
