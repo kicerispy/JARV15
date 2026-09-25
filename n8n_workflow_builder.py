@@ -210,7 +210,31 @@ def _undefined_subnode_identifiers(code: str) -> List[str]:
             undefined.append(identifier)
     return list(dict.fromkeys(undefined))
 
-def _sdk_shape_errors(code: str) -> List[str]:
+def _unknown_node_types(
+    code: str,
+    allowed_node_types: List[str],
+) -> List[str]:
+    """Detect quoted n8n node type literals not present in verified schemas."""
+    source = str(code or "")
+    allowed = {str(item).strip() for item in allowed_node_types if str(item).strip()}
+    allowed.update({
+        "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "@n8n/n8n-nodes-langchain.agent",
+    })
+
+    found: List[str] = []
+    for match in re.finditer(r"\btype\s*:\s*['"]([^'"]+)['"]", source):
+        node_type = match.group(1).strip()
+        if node_type.startswith(("n8n-nodes-base.", "@n8n/")) and node_type not in allowed:
+            found.append(node_type)
+    return list(dict.fromkeys(found))
+
+
+def _sdk_shape_errors(
+    code: str,
+    *,
+    allowed_node_types: Optional[List[str]] = None,
+) -> List[str]:
     """Reject common model-generated SDK shapes before spending an MCP call."""
     errors: List[str] = []
     source = str(code or "")
@@ -234,6 +258,15 @@ def _sdk_shape_errors(code: str) -> List[str]:
 
     if "@n8n/workflow-sdk" not in source:
         errors.append("Import the Workflow SDK from @n8n/workflow-sdk.")
+
+    unknown_node_types = _unknown_node_types(source, allowed_node_types or [])
+    if unknown_node_types:
+        errors.append(
+            "These node types are not present in the verified live n8n schemas: "
+            + ", ".join(unknown_node_types)
+            + ". Do not invent node types. Replace each with a verified node "
+            + "type from the supplied architecture/schema reference."
+        )
 
     undefined_subnodes = _undefined_subnode_identifiers(source)
     if undefined_subnodes:
@@ -288,6 +321,7 @@ Rules:
 - Do not emit export type, export interface, typeof default_, or other type-only exports.
 - Do not leave branch wiring as standalone statements after export default.
 - Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
+- Never invent semantic node types such as @n8n/n8n-nodes-langchain.summarize. For summarization, use a verified LLM/AI node or another verified processing node from the supplied schemas.
 - Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
 - For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
 - Include a real trigger and connect every required stage.
@@ -344,8 +378,15 @@ def _validation_blockers(validation: Dict[str, Any]) -> List[str]:
     return blockers
 
 
-def _validate_code(code: str) -> Dict[str, Any]:
-    shape_errors = _sdk_shape_errors(code)
+def _validate_code(
+    code: str,
+    *,
+    allowed_node_types: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    shape_errors = _sdk_shape_errors(
+        code,
+        allowed_node_types=allowed_node_types,
+    )
     if shape_errors:
         return {
             "success": False,
@@ -616,7 +657,15 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
                 stage="compile",
             )
 
-        validation = _validate_code(code)
+        allowed_node_types = [
+            str(item.get("nodeId") or item.get("type") or "").strip()
+            for item in design.get("node_definitions", [])
+            if isinstance(item, dict)
+        ]
+        validation = _validate_code(
+            code,
+            allowed_node_types=allowed_node_types,
+        )
         attempts.append({
             "attempt": attempt + 1,
             "validation": validation,
