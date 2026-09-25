@@ -140,3 +140,100 @@ def verify_postcondition(
         "reason": "Verified evidence is available for an answer.",
         "evidence_count": len(evidence),
     }
+
+
+def verify_execution_trace(
+    task: Any,
+) -> Dict[str, Any]:
+    """Verify that an executor produced a coherent, non-failing trace."""
+    try:
+        from tool_executor import get_last_execution_trace
+
+        trace = get_last_execution_trace() or []
+    except Exception as exc:
+        return {
+            "ready": True,
+            "verified": False,
+            "trace_available": False,
+            "reason": f"Execution trace unavailable; preserving legacy executor behavior: {exc}",
+            "failed_steps": [],
+            "verified_steps": 0,
+            "total_steps": 0,
+        }
+
+    if not trace:
+        return {
+            "ready": True,
+            "verified": False,
+            "trace_available": False,
+            "reason": "No structured trace was produced by the executor.",
+            "failed_steps": [],
+            "verified_steps": 0,
+            "total_steps": 0,
+        }
+
+    failed_steps = []
+    verified_steps = 0
+    successful_steps = 0
+
+    for entry in trace:
+        if not isinstance(entry, dict):
+            continue
+
+        if entry.get("success") is False or str(
+            entry.get("status", "") or ""
+        ).lower() in {"failed", "error"}:
+            failed_steps.append(
+                {
+                    "tool": str(entry.get("tool", "") or ""),
+                    "message": str(
+                        entry.get("message")
+                        or entry.get("error")
+                        or ""
+                    )[:500],
+                }
+            )
+            continue
+
+        if entry.get("success") is True:
+            successful_steps += 1
+            if entry.get("verified") or str(
+                entry.get("status", "") or ""
+            ).lower() in {"completed", "success", "done"}:
+                verified_steps += 1
+
+    if failed_steps:
+        return {
+            "ready": False,
+            "verified": False,
+            "trace_available": True,
+            "reason": "Execution trace contains failed steps.",
+            "failed_steps": failed_steps[:8],
+            "verified_steps": verified_steps,
+            "total_steps": len(trace),
+        }
+
+    if successful_steps <= 0:
+        return {
+            "ready": False,
+            "verified": False,
+            "trace_available": True,
+            "reason": "Execution completed without a successful step.",
+            "failed_steps": [],
+            "verified_steps": 0,
+            "total_steps": len(trace),
+        }
+
+    return {
+        "ready": verified_steps > 0,
+        "verified": verified_steps > 0,
+        "trace_available": True,
+        "reason": (
+            "At least one successful step has verified completion evidence."
+            if verified_steps
+            else "Successful steps were recorded without explicit verification."
+        ),
+        "failed_steps": [],
+        "verified_steps": verified_steps,
+        "total_steps": len(trace),
+    }
