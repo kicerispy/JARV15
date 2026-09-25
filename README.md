@@ -108,12 +108,7 @@ python -m pytest -q
 Run the public CI-focused set:
 
 ```powershell
-python -m pytest \
-  tests/test_agent_planning.py \
-  tests/test_planner_model_manager.py \
-  tests/test_browser_agent.py \
-  tests/test_task_controller.py \
-  tests/test_autonomy_kernel_v2.py -q
+python -m pytest tests/test_agent_planning.py tests/test_planner_model_manager.py tests/test_browser_agent.py tests/test_task_controller.py tests/test_autonomy_kernel_v2.py -q
 ```
 
 GitHub Actions runs compile checks, focused regressions, and the full pytest suite on pushes and pull requests.
