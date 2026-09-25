@@ -1564,7 +1564,7 @@ def build_anipy_plan(user_request):
         return None
 
     language_match = re.search(r"\b(sub|dub)\b", text, re.IGNORECASE)
-    default_language = language_match.group(1).lower() if language_match else "sub"
+    default_language = language_match.group(1).lower() if language_match else None
 
     patterns = (
         r"^(?:search|find|look up)\s+(?:for\s+)?(?:the\s+)?anime\s+(.+)$",
@@ -1579,7 +1579,7 @@ def build_anipy_plan(user_request):
                 return {
                     "steps": [{
                         "tool": "anipy_search",
-                        "argument": json.dumps({"query": query, "language": default_language}),
+                        "argument": json.dumps({"query": query, **({"language": default_language} if default_language else {})}),
                     }]
                 }
 
@@ -1605,7 +1605,7 @@ def build_anipy_plan(user_request):
         return {
             "steps": [{
                 "tool": "anipy_episodes",
-                "argument": json.dumps({"query": query, "language": default_language}),
+                "argument": json.dumps({"query": query, **({"language": default_language} if default_language else {})}),
             }]
         }
 
@@ -1624,7 +1624,7 @@ def build_anipy_plan(user_request):
                 "argument": json.dumps({
                     "query": match.group(1).strip(),
                     "episode": episode,
-                    "language": (match.group(3) or default_language).lower(),
+                    **({"language": (match.group(3) or default_language).lower()} if (match.group(3) or default_language) else {}),
                 }),
             }]
         }
@@ -1647,7 +1647,7 @@ def build_anipy_plan(user_request):
                 "argument": json.dumps({
                     "query": match.group(1).strip(),
                     "episodes": episode_value,
-                    "language": (match.group(3) or default_language).lower(),
+                    **({"language": (match.group(3) or default_language).lower()} if (match.group(3) or default_language) else {}),
                 }),
             }]
         }
@@ -1669,11 +1669,14 @@ def build_anipy_plan(user_request):
     )
     if match:
         episode_range = re.sub(r"\s+", "", match.group(2))
-        lang = (match.group(3) or default_language).lower()
+        lang = (match.group(3) or default_language)
         query = match.group(1).strip()
-        args = ["-s", f"{query}:{episode_range}:{lang}"]
+        search_arg = f"{query}:{episode_range}"
+        if lang:
+            search_arg += f":{lang.lower()}"
+        args = ["-s", search_arg]
         if "-" in episode_range:
-            args = ["-B", "-s", f"{query}:{episode_range}:{lang}"]
+            args = ["-B", "-s", search_arg]
         return {"steps": [{"tool": "anipy_cli", "argument": json.dumps({"args": args})}]}
 
     match = re.match(
