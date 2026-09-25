@@ -1134,6 +1134,106 @@ def _capability_is_schema_backed(
     return False
 
 
+
+def _capability_schema_retry(
+    request: str,
+    capability: str,
+    candidates: Sequence[Dict[str, Any]],
+    definitions: Sequence[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    """Retry schema retrieval for one required capability."""
+    updated_definitions = list(definitions)
+    updated_candidates = list(candidates)
+    failures: List[str] = []
+    known_definition_ids = _definition_node_ids(updated_definitions)
+
+    retry_candidates = [
+        item for item in updated_candidates
+        if _capability_matches_node(capability, item)
+    ]
+
+    for query in _capability_search_queries(request, capability):
+        if len(retry_candidates) >= MAX_NODE_TYPE_REQUESTS:
+            break
+
+        result = _call(
+            "search_nodes",
+            {
+                "queries": [query],
+                "usage": "workflow",
+            },
+        )
+        if result.get("success") is not True:
+            failures.append(
+                f"{capability}/{query}: "
+                f"{result.get('message') or 'search_nodes failed'}"
+            )
+            continue
+
+        discovered = _result_list(
+            result,
+            ("nodes", "results", "items"),
+        )
+        for item in discovered:
+            if not _capability_matches_node(capability, item):
+                continue
+
+            item_id = _node_identity(item)
+            if not item_id:
+                continue
+
+            if not any(
+                _node_identity(existing) == item_id
+                for existing in retry_candidates
+            ):
+                retry_candidates.append(item)
+
+    for candidate in retry_candidates[:MAX_NODE_TYPE_REQUESTS]:
+        ref = _node_identity(candidate)
+        if not ref:
+            continue
+
+        node_id = str(ref["nodeId"]).lower()
+        if node_id in known_definition_ids:
+            continue
+
+        result = _call(
+            "get_node_types",
+            {"nodeIds": [ref]},
+        )
+
+        if result.get("success") is not True:
+            failures.append(
+                f"{capability}/{node_id}: "
+                f"{result.get('message') or 'get_node_types failed'}"
+            )
+            continue
+
+        if not _schema_result_is_valid(result):
+            failures.append(
+                f"{capability}/{node_id}: "
+                "get_node_types returned no usable schema"
+            )
+            continue
+
+        retry_types = _get_node_types([candidate])
+        if retry_types.get("definitions"):
+            updated_definitions.extend(retry_types["definitions"])
+            known_definition_ids = _definition_node_ids(updated_definitions)
+            break
+
+        failures.extend(
+            str(message)
+            for message in retry_types.get("schema_failures", [])
+        )
+
+    return (
+        updated_definitions,
+        retry_candidates,
+        _unique_strings(failures),
+    )
+
+
 def _quality_gate(
     request: str,
     requirements: Dict[str, Any],
@@ -1368,6 +1468,29 @@ def design_workflow(
             node_types = filtered_types
 
     definitions = node_types.get("definitions", [])
+    capability_schema_failures = list(node_types.get("schema_failures", []))
+
+    for capability, _markers in _required_capabilities(request_text):
+        if _capability_is_schema_backed(
+            capability,
+            candidates,
+            _definition_node_ids(definitions),
+        ):
+            continue
+
+        definitions, retry_candidates, failures = _capability_schema_retry(
+            request_text,
+            capability,
+            candidates,
+            definitions,
+        )
+        candidates = _augment_nodes_from_guidance(
+            request_text,
+            list(candidates) + retry_candidates,
+            guidance,
+        )
+        capability_schema_failures.extend(failures)
+
     quality = _quality_gate(
         request_text,
         requirements,
@@ -1407,6 +1530,7 @@ def design_workflow(
             for item in candidates
         ],
         "node_definitions": definitions,
+        "schema_failures": _unique_strings(capability_schema_failures),
         "quality_gate": quality,
         "message": (
             "n8n workflow architecture discovered from live node schemas and guidance."
