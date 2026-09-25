@@ -5,3 +5,11 @@ faster-whisper>=1.1.0,<2
 silero-vad>=6.2.2,<7
 pywebrtc-audio>=0.2.0,<0.3
 mcp==2.2.0
+ollama>=0.5.0
+playwright>=1.49.0
+psutil>=6.0.0
+certifi>=2024.0.0
+pyautogui>=0.9.54
+numpy>=1.26.0
+PyYAML>=6.0
+sounddevice>=0.5.0
