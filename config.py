@@ -534,6 +534,36 @@ SELF_HEALING_MAX_ATTEMPTS = int(
     )
 )
 
+TOOL_RESILIENCE_ENABLED = os.environ.get(
+    "JARVIS_TOOL_RESILIENCE_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+TOOL_CIRCUIT_BREAKER_ENABLED = os.environ.get(
+    "JARVIS_TOOL_CIRCUIT_BREAKER_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+TOOL_CIRCUIT_FAILURE_THRESHOLD = int(
+    os.environ.get(
+        "JARVIS_TOOL_CIRCUIT_FAILURE_THRESHOLD",
+        "4",
+    )
+)
+
+TOOL_CIRCUIT_COOLDOWN_SECONDS = float(
+    os.environ.get(
+        "JARVIS_TOOL_CIRCUIT_COOLDOWN_SECONDS",
+        "20",
+    )
+)
+
+MEMORY_ENABLED = os.environ.get(
+    "JARVIS_MEMORY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+
 # ============================================================
 # DEBUG
 # ============================================================
