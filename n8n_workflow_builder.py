@@ -25,6 +25,14 @@ MAX_ARCHITECT_CONTEXT = 10000
 MAX_SDK_REFERENCE_CHARS = 12000
 MAX_REPAIR_ATTEMPTS = 2
 
+# Findings that indicate an automation is not ready for explicit activation.
+# Medium findings remain informative for test-only builds, but become blockers
+# when the user explicitly asks JARVIS to publish a workflow.
+ACTIVATION_BLOCKING_FINDINGS = frozenset({
+    "missing_error_strategy",
+    "http_resilience_review",
+})
+
 KNOWN_NODE_TYPES = {
     "n8n-nodes-base.githubTrigger",
     "n8n-nodes-base.github",
@@ -1045,6 +1053,26 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     audit_ready = bool(
         audit_result.get("quality_gate", {}).get("ready_to_publish")
     )
+
+    if activate_requested and audit_ready:
+        findings = audit_result.get("findings", [])
+        if isinstance(findings, list):
+            activation_blockers = [
+                finding
+                for finding in findings
+                if isinstance(finding, dict)
+                and str(finding.get("id") or "").strip()
+                in ACTIVATION_BLOCKING_FINDINGS
+            ]
+            if activation_blockers:
+                audit_ready = False
+                audit_result = dict(audit_result)
+                audit_result["activation_blockers"] = activation_blockers
+                quality_gate = dict(audit_result.get("quality_gate") or {})
+                quality_gate["ready_to_publish"] = False
+                quality_gate["activation_ready"] = False
+                audit_result["quality_gate"] = quality_gate
+
     test_ready = (
         not test_requested
         or bool(test_result and test_result.get("success"))
@@ -1063,8 +1091,8 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     if activate_requested:
         if not audit_ready:
             return _failed(
-                "Activation blocked because the workflow audit has open "
-                "high-severity findings.",
+                "Activation blocked because the workflow audit has "
+                "activation-blocking reliability findings.",
                 stage="activate_gate",
                 workflow_id=workflow_id,
                 test=test_result,
