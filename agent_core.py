@@ -975,8 +975,8 @@ class JarvisAgent:
         # with a differently formatted physical filename found on disk.
         direct_match = re.search(
             rf"\b(?:diagnose\s+and\s+repair|repair|fix)\s+"
-            rf"(?:(?:(?:the|a|an)\s+)?(?:intentional\s+)?"
-            rf"(?:bug|issue|problem)\s+in\s+)?"
+            rf"(?:(?:the|a|an)\s+)?"
+            rf"(?:(?:intentional\s+)?(?:bug|issue|problem)\s+in\s+)?"
             rf"(.+?\.{extension_pattern})",
             normalized_text,
             flags=re.IGNORECASE,
@@ -3343,6 +3343,10 @@ class JarvisAgent:
                     is_software_change_request(task.request)
                     and not is_software_repair_request(task.request)
                     and not self._plan_has_mutation(task.planner_result)
+                    and not self._has_verified_evidence(
+                        task,
+                        {"edit_file", "write_file", "delete_file"},
+                    )
                 ):
                     has_source_read = self._has_verified_evidence(
                         task,
