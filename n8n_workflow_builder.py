@@ -423,6 +423,8 @@ Rules:
 - Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
 - Keep the graph minimal and deterministic.
 - Preserve the requested notification, condition, summarization, and source behavior.
+- If VERIFIED ARCHITECTURE required_capabilities contains "alert_output", the request did not specify a delivery destination. NEVER use emailSend, slack, Discord, Telegram, or another external notification node in that case. End with n8n-nodes-base.set containing a structured alert payload so the workflow remains valid and testable without invented addresses, channels, or credentials.
+- Use a real external notification node only when the request explicitly names a delivery channel and supplies or references its required destination/configuration.
 - Use n8n expressions for values flowing between nodes.
 - When repairing invalid code, rewrite the whole code into the documented SDK pattern instead of making a local textual patch.
 - Return executable SDK source only, not TypeScript declarations and not raw workflow JSON.
