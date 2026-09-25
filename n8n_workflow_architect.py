@@ -1529,11 +1529,12 @@ def design_workflow(
 
     context = dict(context or {})
     techniques = _infer_techniques(request_text)
+    fast_mode = bool(context.get("fast"))
     candidates, queries = _discover_nodes(
         request_text,
         techniques,
     )
-    guidance = _best_practice_guidance(techniques)
+    guidance = [] if fast_mode else _best_practice_guidance(techniques)
     candidates = _augment_nodes_from_guidance(
         request_text,
         candidates,
@@ -1549,7 +1550,7 @@ def design_workflow(
             continue
         guidance_queries.extend(_capability_search_queries(request_text, capability)[:4])
 
-    if guidance_queries:
+    if guidance_queries and not fast_mode:
         discovered, _guidance_result = _search_nodes_batch(guidance_queries)
         if discovered:
             candidates = _augment_nodes_from_guidance(
