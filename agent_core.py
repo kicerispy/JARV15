@@ -44,6 +44,12 @@ from logger import logger
 from project_fs import iter_project_files
 from autonomy_memory import get_failure_hints, record_episode
 from answer_composer import compose_task_answer
+from healing_kernel import (
+    build_healing_evidence,
+    choose_recovery,
+    diagnose_failure,
+    record_healing_event,
+)
 from postcondition_verifier import verify_postcondition
 from planner import (
     assess_plan,
@@ -2322,6 +2328,41 @@ class JarvisAgent:
 
             # Build structured evidence for the next planner phase.
             data = self._extract_tool_data(raw_result)
+
+            # Record a task-level healing diagnosis for failed steps. Tool-level
+            # file recovery may already have journaled the same failure; the
+            # source field lets the local replay log distinguish both layers.
+            if success is False:
+                diagnosis = diagnose_failure(
+                    tool,
+                    message,
+                    argument=argument,
+                    result=data,
+                )
+                decision = choose_recovery(
+                    diagnosis,
+                    attempt=attempt,
+                    max_attempts=max(
+                        1,
+                        int(getattr(task, "max_replans", 0) or 0) + 1,
+                    ),
+                    model_available=True,
+                )
+                record_healing_event(
+                    {
+                        **build_healing_evidence(
+                            tool,
+                            argument,
+                            message,
+                            diagnosis,
+                            attempt=attempt,
+                            result=data,
+                        ),
+                        "source": "agent_core",
+                        "action": decision.action,
+                        "decision_reason": decision.reason,
+                    }
+                )
 
             evidence = {
                 "attempt": attempt,
