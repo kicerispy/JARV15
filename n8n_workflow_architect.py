@@ -21,6 +21,11 @@ MAX_BEST_PRACTICE_CHARS = 12000
 MAX_DESCRIPTION_CHARS = 3000
 
 
+_NODE_ID_RE = re.compile(
+    r"(?:@n8n/n8n-nodes-[A-Za-z0-9_-]+|n8n-nodes-[A-Za-z0-9_-]+)\\.[A-Za-z0-9_.-]+"
+)
+
+
 _TECHNIQUE_KEYWORDS: Sequence[Tuple[str, Sequence[str]]] = (
     ("scheduling", ("schedule", "scheduled", "every day", "every hour", "cron", "recurring")),
     ("chatbot", ("chatbot", "chat bot", "chat assistant", "conversational")),
@@ -119,31 +124,112 @@ def _search_queries(request: str, techniques: Sequence[str]) -> List[str]:
 
 def _result_data(result: Dict[str, Any]) -> Dict[str, Any]:
     data = result.get("data")
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+
+    for envelope_key in ("data", "result", "output"):
+        nested = data.get(envelope_key)
+        if isinstance(nested, dict):
+            data = nested
+
+    return data
+
+
+def _parse_json_text(value: str) -> Any:
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    candidates = [text]
+    if text.startswith(chr(96) * 3) and text.endswith(chr(96) * 3):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            candidates.append("\n".join(lines[1:-1]).strip())
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+
+    return None
+
+
+def _node_items_from_text(value: str) -> List[Dict[str, Any]]:
+    parsed = _parse_json_text(value)
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    if isinstance(parsed, dict):
+        for key in ("nodes", "results", "items"):
+            nested = parsed.get(key)
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+
+    ids = _unique_strings(_NODE_ID_RE.findall(str(value or "")))
+    return [
+        {
+            "nodeId": node_id,
+            "type": node_id,
+            "name": node_id.rsplit(".", 1)[-1],
+        }
+        for node_id in ids
+    ]
 
 
 def _result_list(result: Dict[str, Any], keys: Sequence[str]) -> List[Dict[str, Any]]:
     data = _result_data(result)
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
 
     containers: List[Dict[str, Any]] = [data]
-    nested = data.get("data") if isinstance(data, dict) else None
-    if isinstance(nested, dict):
-        containers.append(nested)
-
-    for container in containers:
+    while containers:
+        container = containers.pop(0)
         for key in keys:
             value = container.get(key)
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, dict)]
+            if isinstance(value, str):
+                items = _node_items_from_text(value)
+                if items:
+                    return items
+            if isinstance(value, dict):
+                containers.append(value)
 
-        value = container.get("data")
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-
-    if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
+        for key in ("data", "result", "output", "content"):
+            nested = container.get(key)
+            if isinstance(nested, dict):
+                containers.append(nested)
+            elif isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+            elif isinstance(nested, str):
+                items = _node_items_from_text(nested)
+                if items:
+                    return items
 
     return []
+
+
+def _result_text(result: Dict[str, Any], keys: Sequence[str]) -> str:
+    data = _result_data(result)
+
+    def walk(value: Any) -> str:
+        if isinstance(value, dict):
+            for key in keys:
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            for key in ("data", "result", "output", "content"):
+                text = walk(value.get(key))
+                if text:
+                    return text
+        elif isinstance(value, list):
+            for item in value:
+                text = walk(item)
+                if text:
+                    return text
+        return ""
+
+    return walk(data)
 
 
 def _call(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -178,6 +264,7 @@ def _is_start_trigger_type(node_type: Any) -> bool:
 def _node_identity(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     node_id = (
         item.get("nodeId")
+        or item.get("nodeType")
         or item.get("id")
         or item.get("type")
         or item.get("name")
@@ -259,10 +346,27 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         {"nodeIds": refs},
     )
 
+    definitions = _result_list(
+        result,
+        ("nodeTypes", "nodes", "definitions", "results"),
+    )
+    definition_text = _result_text(
+        result,
+        ("definitions", "documentation", "content"),
+    )
+
+    if not definitions and definition_text:
+        definitions = [
+            {
+                "nodeIds": refs,
+                "content": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
+            }
+        ]
+
     return {
         "success": result.get("success") is True,
         "message": result.get("message", ""),
-        "definitions": _result_list(result, ("nodeTypes", "nodes", "definitions", "results")),
+        "definitions": definitions,
     }
 
 
@@ -279,7 +383,8 @@ def _best_practice_guidance(techniques: Sequence[str]) -> List[Dict[str, Any]]:
 
         data = _result_data(result)
         reference = (
-            data.get("guidance")
+            data.get("documentation")
+            or data.get("guidance")
             or data.get("reference")
             or data.get("content")
             or data
