@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "purpose": "bounded autonomous coding contract benchmark",
+  "cases": [
+    {
+      "id": "readonly_python",
+      "request": "Inspect main.py and explain how the task controller works.",
+      "kind": "read_only",
+      "superpowers": false
+    },
+    {
+      "id": "readonly_project_lookup",
+      "request": "Find browser_controller.py in my project.",
+      "kind": "read_only",
+      "superpowers": false
+    },
+    {
+      "id": "bounded_regression_change",
+      "request": "Add a regression test to tests/test_superpowers_engine.py and run the relevant tests afterward.",
+      "kind": "change",
+      "target": "tests/test_superpowers_engine.py",
+      "first_phase": "read_file",
+      "requires_mutation": true,
+      "requires_validation": true
+    },
+    {
+      "id": "bounded_source_change",
+      "request": "Add a regression test to tests/test_superpowers_engine.py ensuring read-only inspection stays out of Superpowers.",
+      "kind": "change",
+      "target": "tests/test_superpowers_engine.py",
+      "first_phase": "read_file",
+      "requires_mutation": true,
+      "requires_validation": true
+    },
+    {
+      "id": "named_repair",
+      "request": "Fix the browser_controller.py bug and add a regression test.",
+      "kind": "repair",
+      "target": "browser_controller.py",
+      "first_phase": "find_file",
+      "requires_mutation": true,
+      "requires_validation": true
+    },
+    {
+      "id": "diagnostic_only",
+      "request": "Diagnose planner.py and report the problem without changing it.",
+      "kind": "diagnostic",
+      "target": "planner.py",
+      "requires_mutation": false,
+      "requires_validation": true
+    },
+    {
+      "id": "architectural",
+      "request": "Integrate a new autonomous coding subsystem with planning, testing, code review, and branch management.",
+      "kind": "architectural",
+      "requires_design": true
+    },
+    {
+      "id": "browser_change",
+      "request": "Change browser_controller.py so a successful click reports the destination URL.",
+      "kind": "change",
+      "target": "browser_controller.py",
+      "first_phase": "read_file",
+      "requires_mutation": true,
+      "requires_validation": true
+    },
+    {
+      "id": "roblox_change",
+      "request": "Add a Roblox gameplay regression test and verify the behavior in Studio.",
+      "kind": "change",
+      "requires_mutation": true,
+      "requires_validation": true
+    },
+    {
+      "id": "self_repair",
+      "request": "Diagnose yourself and repair your own code if a real defect is found.",
+      "kind": "repair",
+      "requires_mutation": "conditional"
+    }
+  ]
+}
