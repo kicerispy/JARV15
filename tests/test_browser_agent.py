@@ -45,6 +45,7 @@ class BrowserAgentTests(unittest.TestCase):
         settings = module._resolve_settings({"advanced": True})
 
         self.assertTrue(settings["advanced"])
+        self.assertTrue(settings["enable_jarvis_tools"])
         self.assertTrue(settings["enable_planning"])
         self.assertTrue(settings["loop_detection_enabled"])
         self.assertTrue(settings["message_compaction"])
@@ -52,6 +53,17 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertEqual(settings["max_failures"], 3)
         self.assertEqual(settings["max_history_items"], 20)
         self.assertEqual(settings["step_timeout"], 90)
+
+    def test_worker_jarvis_bridge_is_backed_by_existing_controller(self):
+        source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
+
+        self.assertIn("def _build_jarvis_tools()", source)
+        self.assertIn("browser_controller.browser_page_info", source)
+        self.assertIn("browser_controller.browser_page_snapshot", source)
+        self.assertIn("browser_controller.browser_find_text", source)
+        self.assertIn("browser_controller.browser_find_element", source)
+        self.assertIn("browser_controller.browser_click_element", source)
+        self.assertIn('settings["enable_jarvis_tools"]', source)
 
     def test_worker_request_options_override_advanced_defaults(self):
         module = importlib.import_module("browser_agent_worker")
