@@ -109,22 +109,15 @@ class N8nMcpTests(unittest.TestCase):
 
         with patch.object(
             n8n_mcp,
+            "is_known_tool",
+            return_value=True,
+        ), patch.object(
+            n8n_mcp,
             "_rpc",
-            side_effect=[
-                {
-                    "tools": [
-                        {
-                            "name": "search_workflows",
-                            "description": "Search workflows",
-                            "inputSchema": {},
-                        }
-                    ]
-                },
-                {
-                    "content": tool_response["result"]["content"],
-                    "isError": False,
-                },
-            ],
+            return_value={
+                "content": tool_response["result"]["content"],
+                "isError": False,
+            },
         ):
             result = n8n_mcp.call_tool(
                 "search_workflows",
