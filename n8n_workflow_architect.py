@@ -1500,45 +1500,23 @@ def design_workflow(
         guidance,
     )
 
-    # Re-run targeted searches after guidance is available. Best-practice
-    # documentation often names the exact provider/node that should satisfy a
-    # capability even when search_nodes did not return it for the original query.
+    # Best-practice guidance can reveal exact provider nodes. Batch all
+    # remaining capability searches into one MCP request instead of looping over
+    # every capability/query pair.
+    guidance_queries: List[str] = []
     for capability, _markers in _required_capabilities(request_text):
-        if any(
-            _capability_matches_node(capability, item)
-            for item in candidates
-        ):
+        if any(_capability_matches_node(capability, item) for item in candidates):
             continue
+        guidance_queries.extend(_capability_search_queries(request_text, capability)[:4])
 
-        for query in _capability_search_queries(request_text, capability):
-            result = _call(
-                "search_nodes",
-                {
-                    "queries": [query],
-                    "usage": "workflow",
-                },
-            )
-            if result.get("success") is not True:
-                continue
-
-            discovered = _result_list(
-                result,
-                ("nodes", "results", "items"),
-            )
-            if not discovered:
-                continue
-
+    if guidance_queries:
+        discovered, _guidance_result = _search_nodes_batch(guidance_queries)
+        if discovered:
             candidates = _augment_nodes_from_guidance(
                 request_text,
                 list(candidates) + discovered,
                 guidance,
             )
-
-            if any(
-                _capability_matches_node(capability, item)
-                for item in candidates
-            ):
-                break
 
     node_types = _get_node_types(candidates)
     requirements = _requirements(
