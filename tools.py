@@ -2825,6 +2825,20 @@ def normalize_tool_result(tool_name: str, result: Any) -> ToolResult:
                 retryable=bool(result.get("retryable", False)),
                 observation=result,
             )
+        # Some legacy tools omit ``success`` and expose only verification or an error field. Explicit negative evidence must enter recovery.
+        if result.get("verified") is False or result.get("error"):
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                data=result,
+                error=str(
+                    result.get("error")
+                    or result.get("message")
+                    or f"{tool_name} returned an unverified result"
+                ),
+                retryable=bool(result.get("retryable", False)),
+                observation=result,
+            )
 
     if isinstance(result, str):
         stripped = result.strip()
