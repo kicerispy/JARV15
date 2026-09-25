@@ -143,7 +143,7 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
     def test_defined_ai_subnode_reference_passes_shape_guard(self):
         code = (
             "import { workflow, node, trigger, languageModel } from '@n8n/workflow-sdk';\n"
-            "const openAiModel = languageModel({type: '@n8n/n8n-nodes-langchain.lmChatOpenAi', version: 1.3, config: {name: 'OpenAI Model', parameters: {}}});\n"
+            "const openAiModel = languageModel({type: '@n8n/n8n-nodes-langchain.lmChatOpenAi', config: {name: 'OpenAI Model', parameters: {}}});\n"
             "const startTrigger = trigger({});\n"
             "const aiAgent = node({config: {subnodes: {model: openAiModel}}});\n"
             "export default workflow('id', 'name').add(startTrigger).to(aiAgent);"
