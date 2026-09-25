@@ -588,7 +588,7 @@ def roblox_mcp_setup(argument: str = "") -> ToolResult:
                     **kwargs,
                 )
 
-        deadline = time.monotonic() + 12.0
+        deadline = time.monotonic() + max(30.0, min(_REQUEST_TIMEOUT, 60.0))
         last_error = ""
         while time.monotonic() < deadline:
             checked = roblox_mcp_status('{"timeout":1.5}')
