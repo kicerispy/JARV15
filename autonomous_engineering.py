@@ -28,39 +28,17 @@ def _normalized(text: str) -> str:
 
 
 def requires_regression_test(request: str) -> bool:
-    """Return True when a change request explicitly or strongly implies regression coverage."""
+    """Return True when the request explicitly asks for regression coverage.
+
+    Ordinary repair/debug requests still require inspection, checkpointing, and
+    validation, but they do not force a test-file mutation unless the user
+    explicitly requests regression coverage. This keeps repair handoffs
+    compatible with bounded source-fix workflows.
+    """
     text = _normalized(request)
-
-    if any(phrase in text for phrase in _REGRESSION_PHRASES):
-        return True
-
-    repair_signals = (
-        "fix ",
-        "fix the ",
-        "repair ",
-        "debug ",
-        "broken",
-        "failing",
-        "not working",
-        "bug",
-        "exception",
-        "crash",
-    )
-    software_signals = (
-        ".py",
-        "python",
-        "code",
-        "repository",
-        "project",
-        "browser",
-        "jarvis",
-        "module",
-        "script",
-    )
-
-    return (
-        any(signal in text for signal in repair_signals)
-        and any(signal in text for signal in software_signals)
+    return any(
+        phrase in text
+        for phrase in _REGRESSION_PHRASES
     )
 
 
