@@ -1526,6 +1526,113 @@ def build_browser_qol_plan(user_request):
 
 
 
+def build_unreal_mcp_plan(user_request):
+    """Build deterministic routes for the upstream Unreal_mcp gateway."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    if re.search(
+        r"^(?:check|show|report|what(?:'s| is))?(?:\s+the)?\s*"
+        r"(?:unreal|unreal engine|ue5|ue)\s+(?:mcp\s+)?"
+        r"(?:status|connection|connected|online|health)$",
+        original,
+        re.IGNORECASE,
+    ) or text in {
+        "check unreal mcp",
+        "check unreal mcp status",
+        "is unreal mcp connected",
+        "is unreal connected",
+    }:
+        return {"steps": [{"tool": "unreal_mcp_status", "argument": ""}]}
+
+    if re.search(
+        r"^(?:set up|setup|install|prepare|clone|update)\s+(?:the\s+)?"
+        r"(?:unreal|unreal engine|unreal mcp|unreal_mcp)(?:\s+mcp)?$",
+        original,
+        re.IGNORECASE,
+    ):
+        return {"steps": [{"tool": "unreal_mcp_setup", "argument": ""}]}
+
+    explicit = re.match(
+        r"^(?:run|use|call)\s+(?:the\s+)?unreal\s+mcp\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if explicit:
+        argument = explicit.group(1).strip()
+        if argument.startswith("{"):
+            try:
+                json.loads(argument)
+            except json.JSONDecodeError:
+                return None
+            return {"steps": [{"tool": "unreal_mcp", "argument": argument}]}
+
+    raw = re.match(
+        r"^(?:unreal\s+mcp|unreal_mcp)\s+(\{.*\})$",
+        original,
+        re.IGNORECASE,
+    )
+    if raw:
+        try:
+            json.loads(raw.group(1))
+        except json.JSONDecodeError:
+            return None
+        return {"steps": [{"tool": "unreal_mcp", "argument": raw.group(1)}]}
+
+    match = re.match(
+        r"^(?:search|find)\s+(?:in|for)\s+unreal(?:\s+mcp)?\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        return {
+            "steps": [{
+                "tool": "unreal_mcp",
+                "argument": json.dumps({
+                    "operation": "search",
+                    "query": match.group(1).strip(),
+                }),
+            }]
+        }
+
+    match = re.match(
+        r"^search\s+unreal(?:\s+mcp)?\s+for\s+(.+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match:
+        return {
+            "steps": [{
+                "tool": "unreal_mcp",
+                "argument": json.dumps({
+                    "operation": "search",
+                    "query": match.group(1).strip(),
+                }),
+            }]
+        }
+
+    match = re.match(
+        r"^(?:describe|inspect)\s+(?:unreal\s+)?(?:mcp\s+)?"
+        r"(?:capability\s+)?([A-Za-z0-9_.:-]+)$",
+        original,
+        re.IGNORECASE,
+    )
+    if match and any(token in text for token in ("unreal", "mcp", "capability")):
+        return {
+            "steps": [{
+                "tool": "unreal_mcp",
+                "argument": json.dumps({
+                    "operation": "describe",
+                    "capability": match.group(1),
+                }),
+            }]
+        }
+
+    return None
+
+
 def build_anipy_plan(user_request):
     """Build deterministic first-class routes for the upstream anipy-cli integration."""
     original = str(user_request or "").strip()
@@ -1757,6 +1864,15 @@ def deterministic_route(user_request, active_context=None):
         print("JARVIS: Software/gameplay follow-up detected.")
         return None
 
+
+    # ==================================================
+    # UNREAL ENGINE MCP
+    # ==================================================
+
+    unreal_plan = build_unreal_mcp_plan(user_request)
+    if unreal_plan:
+        print("JARVIS: Unreal MCP route selected.")
+        return unreal_plan
 
     # ==================================================
     # ANIPY-CLI / ANIME
