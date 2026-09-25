@@ -37,6 +37,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "process_snapshot": "Report the busiest local processes by CPU and memory. Argument is an optional result count.",
     "project_snapshot": "Report the current JARVIS Git branch, worktree cleanliness, source/test counts, Python version, and platform.",
     "service_status": "Probe local dependencies such as Ollama and n8n. Argument is ollama, n8n, or all.",
+    "dependency_status": "Check declared Python requirements against the active environment without invoking the LLM.",
     "healing_hints": "Inspect learned recovery patterns from prior failures. Argument is JSON with optional tool, category, error, and limit.",
     "tool_health": "Show bounded tool reliability, failure categories, latency, and circuit-breaker state.",
     "memory_remember": "Store a local JARVIS memory item. Argument is JSON with text, kind, and optional tags.",
@@ -4261,6 +4262,17 @@ def _qol_plan(command):
         return {
             "goal": "inspect project status",
             "steps": [{"tool": "project_snapshot", "argument": ""}],
+        }
+
+    if (
+        "check dependencies" in lowered
+        or "dependency status" in lowered
+        or "are my python packages installed" in lowered
+        or "are my dependencies installed" in lowered
+    ):
+        return {
+            "goal": "check Python dependencies",
+            "steps": [{"tool": "dependency_status", "argument": ""}],
         }
 
     if (
