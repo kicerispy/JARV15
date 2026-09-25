@@ -33,6 +33,31 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertIn("subnodes: { model: openAiModel }", prompt)
         self.assertIn("const openAiModel = languageModel({", prompt)
 
+    def test_unknown_node_type_is_rejected_against_verified_schemas(self):
+        code = (
+            "import { workflow } from '@n8n/workflow-sdk';\n"
+            "const summarize = node({type: '@n8n/n8n-nodes-langchain.summarize'});\n"
+            "export default workflow('id', 'Workflow').add(summarize);"
+        )
+        errors = builder._sdk_shape_errors(
+            code,
+            allowed_node_types=["n8n-nodes-base.code"],
+        )
+        self.assertTrue(any("not present in the verified live n8n schemas" in error for error in errors))
+        self.assertTrue(any("summarize" in error for error in errors))
+
+    def test_verified_node_type_passes_node_type_guard(self):
+        code = (
+            "import { workflow } from '@n8n/workflow-sdk';\n"
+            "const codeNode = node({type: 'n8n-nodes-base.code'});\n"
+            "export default workflow('id', 'Workflow').add(codeNode);"
+        )
+        errors = builder._sdk_shape_errors(
+            code,
+            allowed_node_types=["n8n-nodes-base.code"],
+        )
+        self.assertFalse(any("not present in the verified live n8n schemas" in error for error in errors))
+
     def test_undefined_ai_subnode_reference_is_rejected(self):
         code = (
             "import { workflow, node } from '@n8n/workflow-sdk';\n"
