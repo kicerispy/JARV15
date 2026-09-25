@@ -450,12 +450,6 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     folder_id = _clean(arguments.get("folder_id")) or None
     timeout = int(arguments.get("test_timeout", 300) or 300)
 
-    _progress("sdk-reference: loading live n8n Workflow SDK contract")
-    sdk_result = _get_workflow_sdk_reference()
-    if sdk_result.get("success") is not True:
-        return sdk_result
-    sdk_reference = str(sdk_result["reference"])
-
     _progress("architecture: discovering n8n capabilities")
     design = design_workflow(request, arguments.get("context"))
     if (
@@ -467,6 +461,12 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
             stage="architecture",
             architecture=design,
         )
+
+    _progress("sdk-reference: loading live n8n Workflow SDK contract")
+    sdk_result = _get_workflow_sdk_reference()
+    if sdk_result.get("success") is not True:
+        return sdk_result
+    sdk_reference = str(sdk_result["reference"])
 
     code = str(arguments.get("workflow_code") or "").strip()
     name = _clean(arguments.get("name"))
