@@ -2722,6 +2722,11 @@ PRODUCT_RESEARCH_TOOLS = {
 }
 
 
+ANIME_STREAMING_TOOLS = {
+    "anime_streaming_links",
+}
+
+
 N8N_TOOLS = {
     "n8n_status",
     "n8n_run_workflow",
@@ -3451,6 +3456,11 @@ def _run_tool_raw(
             tool_name,
             argument,
         )
+
+    if tool_name in ANIME_STREAMING_TOOLS:
+        from anime_streaming import anime_streaming_links
+
+        return anime_streaming_links(argument)
 
     if tool_name in EXTENDED_API_TOOLS:
         from extended_api_tools import run_extended_api_tool
