@@ -294,6 +294,15 @@ def jarvis_quickcheck() -> dict[str, Any]:
     tools = tool_health_status(limit=8)
     resources = resource_status()
 
+    try:
+        from strategy_selector import autonomy_status
+        learned_autonomy = autonomy_status()
+    except Exception as exc:
+        learned_autonomy = {
+            "enabled": False,
+            "error": str(exc)[:300],
+        }
+
     degraded = [
         item
         for item in tools.get("degraded_tools", [])
@@ -319,6 +328,7 @@ def jarvis_quickcheck() -> dict[str, Any]:
         },
         "memory_records": memory.get("records", 0),
         "healing_events": healing.get("events", 0),
+        "learned_autonomy": learned_autonomy,
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
     }
 
