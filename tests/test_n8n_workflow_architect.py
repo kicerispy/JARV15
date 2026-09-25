@@ -935,7 +935,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         node_ids = {item["nodeId"] for item in nodes}
         self.assertIn("n8n-nodes-base.githubTrigger", node_ids)
-        self.assertIn("@n8n/n8n-nodes-langchain.openAi", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.chainLlm", node_ids)
         self.assertIn("n8n-nodes-base.if", node_ids)
         self.assertIn("n8n-nodes-base.slack", node_ids)
 
