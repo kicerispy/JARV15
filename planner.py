@@ -95,6 +95,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "anime_episodes": "Find an anime and return its episodes using AniAPI, Kitsu, and Jikan fallbacks. Argument = anime title or JSON with anime/title and optional page.",
     "anime_streaming_links": "Find official anime watch pages by combining AniList streaming metadata with web discovery. Returns watch-page URLs only; does not resolve direct media manifests. Argument = anime title, optional episode, or JSON.",
     "anime_availability": "Find anime streaming availability/watch pages using AniList, JustWatch discovery, and known official streaming services. Does not extract direct media manifests. Argument = anime title, optional episode, or JSON.",
+    "anime_free_watch": "Find currently discoverable free/ad-supported official anime watch pages on providers such as Tubi, Pluto TV, RetroCrush, and the Crunchyroll Channel. Returns watch pages only, not direct media URLs.",
     "anime_provider_catalog": "List streaming providers that JARVIS can use for official anime watch-page discovery. Argument = optional provider/domain filter.",
     "ghibli_search": "Search Studio Ghibli films. Argument = title, director, or empty.",
     "openalex_search": "Search scholarly works using OpenAlex. Argument = research topic.",
