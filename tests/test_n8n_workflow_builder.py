@@ -21,6 +21,14 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         )
         self.assertEqual(builder._sdk_shape_errors(good), [])
 
+    def test_compiler_prompt_renders_ai_reference_without_python_formatting_error(self):
+        prompt = builder._compiler_prompt(
+            self._design(),
+            sdk_reference="workflow('id', 'name')",
+        )
+        self.assertIn("subnodes: { model: openAiModel }", prompt)
+        self.assertIn("const openAiModel = languageModel({", prompt)
+
     def test_undefined_ai_subnode_reference_is_rejected(self):
         code = (
             "import { workflow, node } from '@n8n/workflow-sdk';\n"
