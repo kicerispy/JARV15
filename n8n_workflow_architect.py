@@ -20,6 +20,7 @@ MAX_DISCOVERED_NODE_CANDIDATES = 32
 MAX_NODE_TYPE_REQUESTS = 8
 MAX_BEST_PRACTICE_CHARS = 12000
 MAX_DESCRIPTION_CHARS = 3000
+MAX_ARCHITECT_SECONDS = 90
 
 
 # Fallback node catalog used when an n8n instance exposes workflow-management
@@ -507,6 +508,25 @@ def _call(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[st
     }
 
 
+def _search_nodes_batch(queries: Sequence[str]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    bounded = _unique_strings(queries)[:MAX_QUERIES]
+    if not bounded:
+        return [], {
+            "success": False,
+            "message": "No n8n node search queries were provided.",
+        }
+
+    result = _call(
+        "search_nodes",
+        {
+            "queries": bounded,
+            "usage": "workflow",
+        },
+    )
+    values = _result_list(result, ("nodes", "results", "items")) if result.get("success") is True else []
+    return values, result
+
+
 def _is_start_trigger_type(node_type: Any) -> bool:
     value = str(node_type or "").lower()
     return any(
@@ -617,57 +637,37 @@ def _discover_nodes(
     request: str,
     techniques: Sequence[str],
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    candidates: List[Dict[str, Any]] = []
     queries = _search_queries(request, techniques)
-
-    for query in queries:
-        result = _call(
-            "search_nodes",
-            {
-                "queries": [query],
-                "usage": "workflow",
-            },
-        )
-        if result.get("success") is not True:
-            continue
-
-        values = _result_list(result, ("nodes", "results", "items"))
-        candidates.extend(values)
+    candidates, first_result = _search_nodes_batch(queries)
 
     required_capabilities = [
         capability
         for capability, _markers in _required_capabilities(request)
     ]
 
-    # The normal search/ranking pass can legitimately fill all eight slots with
-    # triggers or lookalike nodes. Backfill any required capability that is still
-    # absent with a targeted live n8n search before ranking the final set.
+    # Search once for all capability gaps instead of making one MCP round-trip
+    # per keyword. n8n's search_nodes API is explicitly batch-oriented.
+    missing_queries: List[str] = []
     for capability in required_capabilities:
-        if any(
-            _capability_matches_node(capability, item)
-            for item in candidates
-        ):
+        if any(_capability_matches_node(capability, item) for item in candidates):
             continue
+        missing_queries.extend(
+            _capability_search_queries(request, capability)[:4]
+        )
 
-        for query in _capability_search_queries(request, capability):
-            result = _call(
-                "search_nodes",
-                {
-                    "queries": [query],
-                    "usage": "workflow",
-                },
+    if missing_queries:
+        extra, _extra_result = _search_nodes_batch(missing_queries)
+        candidates.extend(extra)
+
+    # If search_nodes is unavailable or returns no usable entries, the fallback
+    # catalog supplies only request-relevant known node IDs; schemas remain the
+    # authority in _get_node_types / _quality_gate.
+    if not candidates:
+        for capability in required_capabilities:
+            candidates.extend(
+                dict(item, _source="fallback_catalog")
+                for item in _FALLBACK_NODE_CANDIDATES.get(capability, ())
             )
-            if result.get("success") is not True:
-                continue
-
-            values = _result_list(result, ("nodes", "results", "items"))
-            candidates.extend(values)
-
-            if any(
-                _capability_matches_node(capability, item)
-                for item in values
-            ):
-                break
 
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in candidates:
@@ -683,9 +683,6 @@ def _discover_nodes(
         ):
             deduped[key] = item
 
-        if len(deduped) >= MAX_DISCOVERED_NODE_CANDIDATES:
-            continue
-
     ranked = sorted(
         deduped.values(),
         key=lambda item: _node_relevance(request, item),
@@ -695,18 +692,13 @@ def _discover_nodes(
     selected: List[Dict[str, Any]] = []
     selected_keys = set()
 
-    # Reserve capacity for the best live node satisfying each explicitly
-    # requested capability. This prevents a generic trigger or classifier from
-    # crowding out the actual LLM/condition/notification node we need.
     for capability in required_capabilities:
         matches = [
-            item
-            for item in ranked
+            item for item in ranked
             if _capability_matches_node(capability, item)
         ]
         if not matches:
             continue
-
         best = matches[0]
         ref = _node_identity(best)
         key = json.dumps(ref, sort_keys=True, default=str) if ref else ""
@@ -724,18 +716,10 @@ def _discover_nodes(
         if len(selected) >= MAX_NODE_CANDIDATES:
             break
 
-    # If the live MCP endpoint does not expose search_nodes, seed only the
-    # capabilities implied by the request. The exact schema lookup below is
-    # still authoritative and the quality gate remains schema-backed.
-    required_capabilities = [
-        capability
-        for capability, _markers in _required_capabilities(request)
-    ]
+    # Ensure every explicitly required capability has a known fallback candidate
+    # even when search returned only generic matches.
     for capability in required_capabilities:
-        if any(
-            _capability_matches_node(capability, item)
-            for item in selected
-        ):
+        if any(_capability_matches_node(capability, item) for item in selected):
             continue
         for fallback in _FALLBACK_NODE_CANDIDATES.get(capability, ()):
             ref = _node_identity(fallback)
@@ -743,6 +727,8 @@ def _discover_nodes(
             if key and key not in selected_keys:
                 selected.append(dict(fallback, _source="fallback_catalog"))
                 selected_keys.add(key)
+                if len(selected) >= MAX_NODE_CANDIDATES:
+                    break
 
     return selected[:MAX_NODE_CANDIDATES], queries
 
@@ -811,132 +797,85 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     if not refs:
         return {
             "success": False,
-            "message": "No node definitions were returned by search_nodes.",
+            "message": "No node definitions were returned by discovery.",
             "definitions": [],
             "schema_errors": [],
             "invalid_node_ids": [],
             "deprecated_node_ids": [],
+            "schema_failures": [],
         }
 
-    definitions: List[Dict[str, Any]] = []
-    definition_texts: List[str] = []
+    # n8n's get_node_types API accepts multiple nodeIds in one call. Use that
+    # contract so an architecture never performs one network call per node.
+    result = _call(
+        "get_node_types",
+        {"nodeIds": refs},
+    )
+
+    if result.get("success") is not True:
+        return {
+            "success": False,
+            "message": str(result.get("message") or "get_node_types failed"),
+            "definitions": [],
+            "schema_errors": [],
+            "invalid_node_ids": [],
+            "deprecated_node_ids": [],
+            "schema_failures": [str(result.get("message") or "get_node_types failed")],
+        }
+
+    if not _schema_result_is_valid(result):
+        return {
+            "success": False,
+            "message": str(result.get("message") or "get_node_types returned no usable schema"),
+            "definitions": [],
+            "schema_errors": [],
+            "invalid_node_ids": [],
+            "deprecated_node_ids": [],
+            "schema_failures": [str(result.get("message") or "get_node_types returned no usable schema")],
+        }
+
+    definitions = _structured_result_list(
+        result,
+        ("nodeTypes", "definitions", "results"),
+    )
+    definition_text = _result_text(
+        result,
+        ("definitions", "documentation", "content"),
+    )
+    if definition_text and not definitions:
+        parsed = _definition_items_from_text(definition_text)
+        if parsed:
+            definitions.extend(parsed)
+
     schema_errors: List[str] = []
     invalid_node_ids: List[str] = []
     deprecated_node_ids: List[str] = []
-    successes = 0
-    messages: List[str] = []
+    error_pattern = re.compile(
+        r"Error:\\s*Node ['\"]([^'\"]+)['\"] (?P<message>[^\\n]+)",
+        re.IGNORECASE,
+    )
+    for match in error_pattern.finditer(definition_text):
+        node_id = _clean_text(match.group(1))
+        message = _clean_text(match.group("message"))
+        if node_id:
+            invalid_node_ids.append(node_id)
+        if message:
+            schema_errors.append(f"{node_id}: {message}")
 
     for ref in refs:
-        attempts = [ref]
-        fallback_ref = {"nodeId": ref["nodeId"]}
-        if fallback_ref != ref:
-            attempts.append(fallback_ref)
-
-        resolved = False
-        last_message = ""
-
-        for attempt_index, attempt_ref in enumerate(attempts):
-            result = _call(
-                "get_node_types",
-                {"nodeIds": [attempt_ref]},
-            )
-
-            if result.get("success") is not True:
-                last_message = str(
-                    result.get("message")
-                    or "get_node_types failed"
-                )
-                if attempt_index + 1 < len(attempts):
-                    continue
-                messages.append(
-                    f"{ref.get('nodeId')}: {last_message}"
-                )
-                break
-
-            if not _schema_result_is_valid(result):
-                last_message = str(
-                    result.get("message")
-                    or "get_node_types returned no schema"
-                )
-                if attempt_index + 1 < len(attempts):
-                    continue
-                messages.append(
-                    f"{ref.get('nodeId')}: {last_message}"
-                )
-                break
-
-            successes += 1
-            structured = _structured_result_list(
-                result,
-                ("nodeTypes", "definitions", "results"),
-            )
-            definition_text = _result_text(
-                result,
-                ("definitions", "documentation", "content"),
-            )
-
-            if structured:
-                definitions.extend(structured)
-
-            if definition_text:
-                definition_texts.append(definition_text)
-                if not structured:
-                    parsed_definitions = _definition_items_from_text(
-                        definition_text
-                    )
-                    if parsed_definitions:
-                        definitions.extend(parsed_definitions)
-
-                error_pattern = re.compile(
-                    r"Error:\s*Node ['\"]([^'\"]+)['\"] "
-                    r"(?P<message>[^\n]+)",
-                    re.IGNORECASE,
-                )
-                for match in error_pattern.finditer(definition_text):
-                    node_id = _clean_text(match.group(1))
-                    message = _clean_text(match.group("message"))
-                    if node_id:
-                        invalid_node_ids.append(node_id)
-                    if message:
-                        schema_errors.append(
-                            f"{node_id}: {message}"
-                        )
-
-                deprecated_node_ids.extend(
-                    _deprecated_node_ids(
-                        definition_text,
-                        [ref],
-                    )
-                )
-
-            resolved = bool(structured or definition_text)
-            if resolved:
-                break
-
-        if not resolved and last_message:
-            messages.append(
-                f"{ref.get('nodeId')}: {last_message}"
-            )
-
-    invalid_node_ids = _unique_strings(invalid_node_ids)
-    schema_errors = _unique_strings(schema_errors)
-    deprecated_node_ids = _unique_strings(deprecated_node_ids)
+        deprecated_node_ids.extend(
+            _deprecated_node_ids(definition_text, [ref])
+        )
 
     return {
-        "success": successes > 0,
-        "message": (
-            f"Retrieved schemas for {successes}/{len(refs)} requested nodes."
-            + (f" Failures: {' | '.join(messages[:3])}" if messages else "")
-        ),
+        "success": bool(definitions or _looks_like_node_schema(definition_text)),
+        "message": f"Retrieved schemas for {len(refs)} requested nodes in one MCP call.",
         "definitions": definitions,
-        "definition_text": _clip(
-            "\n\n".join(definition_texts),
-            MAX_BEST_PRACTICE_CHARS,
-        ),
-        "schema_errors": schema_errors,
-        "invalid_node_ids": invalid_node_ids,
-        "deprecated_node_ids": deprecated_node_ids,
-        "schema_failures": messages[:MAX_NODE_TYPE_REQUESTS],
+        "definition_text": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
+        "schema_errors": _unique_strings(schema_errors),
+        "invalid_node_ids": _unique_strings(invalid_node_ids),
+        "deprecated_node_ids": _unique_strings(deprecated_node_ids),
+        "schema_failures": [],
     }
 
 
@@ -1341,95 +1280,57 @@ def _capability_schema_retry(
     candidates: Sequence[Dict[str, Any]],
     definitions: Sequence[Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
-    """Retry schema retrieval for one required capability."""
     updated_definitions = list(definitions)
     updated_candidates = list(candidates)
     failures: List[str] = []
     known_definition_ids = _definition_node_ids(updated_definitions)
 
-    retry_candidates = [
-        item for item in updated_candidates
-        if _capability_matches_node(capability, item)
-    ]
-
-    for query in _capability_search_queries(request, capability):
-        if len(retry_candidates) >= MAX_NODE_TYPE_REQUESTS:
-            break
-
-        result = _call(
-            "search_nodes",
-            {
-                "queries": [query],
-                "usage": "workflow",
-            },
+    # One bounded search pass for this capability.
+    search_queries = _capability_search_queries(request, capability)[:6]
+    retry_candidates, search_result = _search_nodes_batch(search_queries)
+    if search_result.get("success") is not True and not retry_candidates:
+        failures.append(
+            f"{capability}: {search_result.get('message') or 'search_nodes failed'}"
         )
-        if result.get("success") is not True:
-            failures.append(
-                f"{capability}/{query}: "
-                f"{result.get('message') or 'search_nodes failed'}"
-            )
+
+    merged = list(updated_candidates) + list(retry_candidates)
+    matching: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for item in merged:
+        if not _capability_matches_node(capability, item):
             continue
+        ref = _node_identity(item)
+        if not ref:
+            continue
+        key = json.dumps(ref, sort_keys=True, default=str)
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
+        matching.append(item)
 
-        discovered = _result_list(
-            result,
-            ("nodes", "results", "items"),
-        )
-        for item in discovered:
-            if not _capability_matches_node(capability, item):
-                continue
-
-            item_id = _node_identity(item)
-            if not item_id:
-                continue
-
-            if not any(
-                _node_identity(existing) == item_id
-                for existing in retry_candidates
-            ):
-                retry_candidates.append(item)
-
-    for candidate in retry_candidates[:MAX_NODE_TYPE_REQUESTS]:
+    # Use one batch schema request for all candidates not already covered.
+    schema_candidates: List[Dict[str, Any]] = []
+    for candidate in matching[:MAX_NODE_TYPE_REQUESTS]:
         ref = _node_identity(candidate)
         if not ref:
             continue
+        node_id = str(ref.get("nodeId") or "").lower()
+        if node_id and node_id not in known_definition_ids:
+            schema_candidates.append(candidate)
 
-        node_id = str(ref["nodeId"]).lower()
-        if node_id in known_definition_ids:
-            continue
-
-        result = _call(
-            "get_node_types",
-            {"nodeIds": [ref]},
-        )
-
-        if result.get("success") is not True:
-            failures.append(
-                f"{capability}/{node_id}: "
-                f"{result.get('message') or 'get_node_types failed'}"
+    if schema_candidates:
+        retry_types = _get_node_types(schema_candidates)
+        if retry_types.get("success") is True:
+            updated_definitions.extend(retry_types.get("definitions", []))
+        else:
+            failures.extend(
+                str(message)
+                for message in retry_types.get("schema_failures", [])
             )
-            continue
-
-        if not _schema_result_is_valid(result):
-            failures.append(
-                f"{capability}/{node_id}: "
-                "get_node_types returned no usable schema"
-            )
-            continue
-
-        retry_types = _get_node_types([candidate])
-        if retry_types.get("definitions"):
-            updated_definitions.extend(retry_types["definitions"])
-            known_definition_ids = _definition_node_ids(updated_definitions)
-            break
-
-        failures.extend(
-            str(message)
-            for message in retry_types.get("schema_failures", [])
-        )
 
     return (
         updated_definitions,
-        retry_candidates,
+        matching,
         _unique_strings(failures),
     )
 
