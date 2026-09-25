@@ -181,6 +181,25 @@ def _node_items_from_text(value: str) -> List[Dict[str, Any]]:
     return items
 
 
+def _looks_like_node_schema(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+
+    markers = (
+        "interface ",
+        "type ",
+        "export interface",
+        "export type",
+        "parameters:",
+        "properties:",
+        "credentials:",
+        "displayname:",
+        "description:",
+    )
+    return any(marker in normalized for marker in markers)
+
+
 def _definition_items_from_text(value: str) -> List[Dict[str, Any]]:
     parsed = _parse_json_text(value)
     if isinstance(parsed, list):
@@ -195,7 +214,7 @@ def _definition_items_from_text(value: str) -> List[Dict[str, Any]]:
             return [parsed]
 
     text = str(value or "").strip()
-    if not text:
+    if not text or not _looks_like_node_schema(text):
         return []
 
     node_ids = _unique_strings(_NODE_ID_RE.findall(text))
