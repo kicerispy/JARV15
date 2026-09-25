@@ -32,13 +32,41 @@ OFFICIAL_STREAMING_DOMAINS = {
     "tubitv.com": "Tubi",
     "pluto.tv": "Pluto TV",
     "aniplus-asia.com": "Ani-One / ANIPLUS",
+    "retrocrush.tv": "RetroCrush",
+}
+
+# Providers that currently document a free/ad-supported offering. A title is
+# only reported as free when search evidence also indicates the specific title
+# or watch page is free; the catalog itself is not treated as proof.
+FREE_STREAMING_DOMAINS = {
+    "tubitv.com": {
+        "provider": "Tubi",
+        "access": "free_with_ads",
+        "region_note": "availability varies by title and region",
+    },
+    "pluto.tv": {
+        "provider": "Pluto TV",
+        "access": "free_with_ads",
+        "region_note": "availability varies by title and region",
+    },
+    "retrocrush.tv": {
+        "provider": "RetroCrush",
+        "access": "free_with_ads",
+        "region_note": "US/Canada availability; catalog varies",
+    },
+    "crunchyroll.com": {
+        "provider": "Crunchyroll Channel",
+        "access": "free_linear_channel",
+        "region_note": "select platforms; curated lineup, not full Crunchyroll library",
+    },
 }
 
 
-def _error(message: str, *, retryable: bool = True) -> dict:
+
+def _error(message: str, *, retryable: bool = True, tool: str = "anime_streaming_links") -> dict:
     return {
         "success": False,
-        "tool": "anime_streaming_links",
+        "tool": tool,
         "error": str(message),
         "retryable": retryable,
     }
@@ -411,4 +439,143 @@ def anime_provider_catalog(argument: str = "") -> dict:
             "count": len(providers),
         },
         "message": f"JARVIS knows {len(providers)} official anime-capable streaming provider domain(s).",
+    }
+
+
+def _free_provider_for_url(url: str) -> dict | None:
+    try:
+        host = urlparse(url).netloc
+    except ValueError:
+        return None
+
+    for domain, info in FREE_STREAMING_DOMAINS.items():
+        if _domain_match(host, domain):
+            return {
+                "domain": domain,
+                **info,
+            }
+    return None
+
+
+def _free_evidence(item: dict) -> bool:
+    text = " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "snippet", "url")
+    ).lower()
+
+    return any(
+        marker in text
+        for marker in (
+            "watch free",
+            "free to watch",
+            "free streaming",
+            "stream free",
+            "free anime",
+            "no subscription",
+            "without subscription",
+            "free with ads",
+        )
+    )
+
+
+def _free_search(anime: str, episode: int | None, limit: int) -> list[dict]:
+    episode_text = f" episode {episode}" if episode is not None else ""
+    combined: list[dict] = []
+
+    queries = (
+        f'site:tubitv.com "{anime}"{episode_text} watch free',
+        f'site:pluto.tv "{anime}"{episode_text} watch free',
+        f'site:retrocrush.tv "{anime}"{episode_text} free',
+        f'site:crunchyroll.com "{anime}" Crunchyroll Channel free',
+    )
+
+    for query in queries:
+        try:
+            results = web_search(query, max_results=8)
+        except Exception:
+            continue
+
+        for result in results:
+            url = str(result.get("url") or "").strip()
+            provider = _free_provider_for_url(url)
+            if not provider:
+                continue
+
+            item = {
+                "anime": anime,
+                "episode": episode,
+                "title": str(result.get("title") or "").strip(),
+                "provider": provider["provider"],
+                "access": provider["access"],
+                "region_note": provider["region_note"],
+                "url": url,
+                "snippet": str(result.get("snippet") or "").strip()[:500],
+                "source": "web_search",
+                "free_evidence": _free_evidence(result),
+            }
+
+            # Never label a result "free" merely because it belongs to a
+            # provider with some free catalog. Require result-level evidence.
+            if item["free_evidence"]:
+                combined.append(item)
+
+            if len(combined) >= limit:
+                return combined
+
+    return combined
+
+
+def anime_free_watch(argument: str = "") -> dict:
+    """Find currently discoverable free/ad-supported official anime watch pages.
+
+    Inspired by anipy-cli's provider-selection model, but intentionally limited
+    to watch/availability pages rather than direct media manifests.
+    """
+    try:
+        anime, episode, limit = _parse_argument(argument)
+    except (TypeError, ValueError) as exc:
+        return _error(str(exc), retryable=False, tool="anime_free_watch")
+
+    candidates = _free_search(anime, episode, limit)
+
+    # Deduplicate while preserving provider diversity and result order.
+    results: list[dict] = []
+    seen: set[str] = set()
+    for item in candidates:
+        url = str(item.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        results.append(item)
+        if len(results) >= limit:
+            break
+
+    providers: list[str] = []
+    seen_providers: set[str] = set()
+    for item in results:
+        provider = item.get("provider")
+        if provider and provider not in seen_providers:
+            seen_providers.add(provider)
+            providers.append(provider)
+
+    if not results:
+        return _error(
+            f"No currently discoverable free/ad-supported official watch page was found for '{anime}'.",
+            retryable=False,
+            tool="anime_free_watch",
+        )
+
+    return {
+        "success": True,
+        "tool": "anime_free_watch",
+        "data": {
+            "anime": anime,
+            "episode": episode,
+            "providers": providers,
+            "results": results,
+            "count": len(results),
+            "free_only": True,
+            "direct_media_extraction": False,
+        },
+        "message": f"Found {len(results)} free/ad-supported official watch option(s) for {anime}.",
     }
