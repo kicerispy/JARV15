@@ -20,8 +20,8 @@ from n8n_workflow_architect import audit_workflow, design_workflow
 DEFAULT_OLLAMA_HOST = os.getenv("JARVIS_OLLAMA_HOST", "http://127.0.0.1:11434")
 DEFAULT_MODEL = os.getenv("JARVIS_N8N_BUILDER_MODEL", os.getenv("JARVIS_CODING_MODEL", "qwen3.5:9b"))
 DEFAULT_TIMEOUT = 180
-MAX_ARCHITECT_CONTEXT = 24000
-MAX_SDK_REFERENCE_CHARS = 28000
+MAX_ARCHITECT_CONTEXT = 18000
+MAX_SDK_REFERENCE_CHARS = 22000
 MAX_REPAIR_ATTEMPTS = 2
 PROGRESS_ENABLED = os.getenv("JARVIS_N8N_BUILDER_PROGRESS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
@@ -89,8 +89,12 @@ def _ollama_json(prompt: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
             {"role": "user", "content": prompt},
         ],
         "stream": False,
+        "think": False,
         "format": "json",
-        "options": {"num_ctx": 16384},
+        "options": {
+            "num_ctx": 32768,
+            "temperature": 0.1,
+        },
     }
     request = Request(
         DEFAULT_OLLAMA_HOST.rstrip("/") + "/api/chat",
@@ -102,8 +106,23 @@ def _ollama_json(prompt: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
         parsed = json.loads(response.read().decode("utf-8", errors="replace"))
     message = parsed.get("message") if isinstance(parsed, dict) else {}
     content = message.get("content") if isinstance(message, dict) else None
+
+    # Ollama's chat API normally returns the assistant answer in
+    # message.content. Keep a compatibility fallback for wrappers that
+    # return content at the top level, while preserving a useful diagnostic
+    # when the model actually returned only thinking/metadata.
     if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Ollama returned no builder content.")
+        top_level_content = parsed.get("content") if isinstance(parsed, dict) else None
+        if isinstance(top_level_content, str) and top_level_content.strip():
+            content = top_level_content
+
+    if not isinstance(content, str) or not content.strip():
+        thinking = message.get("thinking") if isinstance(message, dict) else None
+        done_reason = parsed.get("done_reason") if isinstance(parsed, dict) else None
+        raise RuntimeError(
+            "Ollama returned no builder content "
+            f"(done_reason={done_reason!r}, thinking_present={bool(thinking)})."
+        )
     return _parse_json_object(content)
 
 
