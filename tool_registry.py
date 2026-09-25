@@ -27,6 +27,17 @@ N8N_TOOLS = frozenset(
 )
 
 N8N_MCP_PREFIX = "n8n_mcp__"
+\nJARVIS_PLATFORM_TOOLS = frozenset(
+    {
+        "jarvis_doctor",
+        "tool_health",
+        "memory_remember",
+        "memory_recall",
+        "memory_forget",
+        "ollama_models",
+    }
+)
+
 
 
 def is_n8n_mcp_tool_name(name) -> bool:
@@ -89,6 +100,10 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "browser_open_link",
         "browser_scroll",
         "product_research",
+        "jarvis_doctor",
+        "memory_remember",
+        "memory_recall",
+        "memory_forget",
         "code_diagnose",
         "dev_command",
     }
@@ -105,6 +120,7 @@ def validate_known_tools(tool_names) -> list[str]:
         if str(name) not in BROWSER_TOOLS
         and str(name) not in JSON_ARGUMENT_TOOLS
         and str(name) not in N8N_TOOLS
+        and str(name) not in JARVIS_PLATFORM_TOOLS
         and not is_roblox_tool_name(name)
         and not is_n8n_mcp_tool_name(name)
     )
