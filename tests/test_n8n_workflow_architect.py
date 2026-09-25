@@ -157,5 +157,54 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         audited.assert_called_once_with("abc")
 
 
+    def test_registry_and_planner_expose_architect(self):
+        from tool_registry import JSON_ARGUMENT_TOOLS, N8N_TOOLS
+
+        self.assertIn("n8n_workflow_architect", N8N_TOOLS)
+        self.assertIn("n8n_workflow_architect", JSON_ARGUMENT_TOOLS)
+
+        import config
+        import planner
+
+        with patch.object(config, "N8N_MCP_ENABLED", True),              patch.object(
+                 planner,
+                 "config",
+                 config,
+             ),              patch.object(
+                 planner,
+                 "classify_n8n_request",
+                 return_value="orchestration",
+                 create=True,
+             ):
+            scope = planner._planner_tool_scope(
+                "Create an n8n workflow that monitors GitHub issues",
+                {},
+            )
+
+        self.assertIn("n8n_workflow_architect", scope)
+
+    def test_tool_dispatch_sends_json_to_architect(self):
+        import tools
+
+        with patch(
+            "n8n_workflow_architect.run_architect",
+            return_value={
+                "success": True,
+                "verified": True,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "mode": "design",
+            },
+        ) as architect_run:
+            raw = tools._run_tool_raw(
+                "n8n_workflow_architect",
+                '{"request":"Design a webhook workflow"}',
+            )
+
+        self.assertTrue(raw["success"])
+        architect_run.assert_called_once_with(
+            {"request": "Design a webhook workflow"}
+        )
+
 if __name__ == "__main__":
     unittest.main()
