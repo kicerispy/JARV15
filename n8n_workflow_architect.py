@@ -397,7 +397,7 @@ def _node_identity(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return ref
 
 
-def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, str]:
+def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, int, str]:
     request_terms = {
         token.lower()
         for token in _keyword_terms(request)
@@ -416,13 +416,56 @@ def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, str]:
         if term and term in haystack
     )
 
+    capability_hits = 0
+    for _, markers in _required_capabilities(request):
+        if any(marker in haystack for marker in markers):
+            capability_hits += 1
+
     trigger_bonus = 1 if _is_start_trigger_type(item.get("type")) else 0
 
     return (
+        capability_hits,
         exact_hits,
         trigger_bonus,
         str(item.get("name") or "").lower(),
     )
+
+
+def _augment_nodes_from_guidance(
+    request: str,
+    candidates: Sequence[Dict[str, Any]],
+    guidance: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+
+    for item in candidates:
+        ref = _node_identity(item)
+        if ref:
+            key = str(ref.get("nodeId"))
+            merged[key] = dict(item)
+
+    guidance_text = "\n".join(
+        str(item.get("guidance") or "")
+        for item in guidance
+        if isinstance(item, dict)
+    )
+    for node_id in _unique_strings(_NODE_ID_RE.findall(guidance_text)):
+        merged.setdefault(
+            node_id,
+            {
+                "nodeId": node_id,
+                "type": node_id,
+                "name": node_id.rsplit(".", 1)[-1],
+                "_source": "best_practice_guidance",
+            },
+        )
+
+    ranked = sorted(
+        merged.values(),
+        key=lambda item: _node_relevance(request, item),
+        reverse=True,
+    )
+    return ranked[:MAX_NODE_CANDIDATES]
 
 
 def _discover_nodes(
@@ -839,8 +882,13 @@ def design_workflow(
         request_text,
         techniques,
     )
-    node_types = _get_node_types(candidates)
     guidance = _best_practice_guidance(techniques)
+    candidates = _augment_nodes_from_guidance(
+        request_text,
+        candidates,
+        guidance,
+    )
+    node_types = _get_node_types(candidates)
     requirements = _requirements(
         request_text,
         techniques,
