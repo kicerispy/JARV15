@@ -116,23 +116,16 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         design = self._design()
 
         def fake_call(name, args=None):
-        if name == "get_workflow_sdk_reference":
+            if name == "get_workflow_sdk_reference":
                 return {
                     "success": True,
                     "verified": True,
-                    "data": {"reference": "SDK: workflow('id', 'name'); node({config: {parameters: {}}});"},
-                }
-        if name == "get_workflow_sdk_reference":
-                return {
-                    "success": True,
-                    "verified": True,
-                    "data": {"reference": "SDK: workflow('id', 'name'); node({config: {parameters: {}}});"},
-                }
-        if name == "get_workflow_sdk_reference":
-                return {
-                    "success": True,
-                    "verified": True,
-                    "data": {"reference": "SDK: workflow('id', 'name'); node({config: {parameters: {}}});"},
+                    "data": {
+                        "reference": (
+                            "SDK: workflow('id', 'name'); "
+                            "node({config: {parameters: {}}});"
+                        )
+                    },
                 }
             if name == "validate_workflow":
                 return {"success": True, "verified": True, "data": {"valid": True}}
@@ -203,6 +196,12 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
 
         def fake_call(name, args=None):
             calls.append(name)
+            if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "data": {"reference": "SDK: workflow('id', 'name')"},
+                }
             if name == "validate_workflow":
                 return {"success": True, "verified": True, "data": {"valid": True}}
             if name == "create_workflow_from_code":
@@ -251,6 +250,12 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         design = self._design()
 
         def fake_call(name, args=None):
+            if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "verified": True,
+                    "data": {"reference": "SDK: workflow('id', 'name')"},
+                }
             if name == "validate_workflow":
                 return {"success": True, "data": {"valid": True}}
             if name == "create_workflow_from_code":
