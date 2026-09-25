@@ -89,6 +89,34 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             any(name == "get_node_types" for name, _ in calls)
         )
 
+    def test_result_list_accepts_nested_data_payloads(self):
+        result = {
+            "success": True,
+            "data": {
+                "data": {
+                    "nodes": [
+                        {"name": "Webhook", "type": "n8n-nodes-base.webhook"}
+                    ]
+                }
+            },
+        }
+
+        values = architect._result_list(
+            result,
+            ("nodes", "results", "items"),
+        )
+
+        self.assertEqual(values[0]["name"], "Webhook")
+
+    def test_external_alerts_are_treated_as_side_effects(self):
+        requirements = architect._requirements(
+            "Monitor GitHub issues and send me an alert when a bug appears.",
+            ["monitoring"],
+        )
+
+        self.assertTrue(requirements["side_effect_review"]["required"])
+        self.assertTrue(requirements["error_handling"]["required"])
+
     def test_design_workflow_fails_cleanly_for_empty_request(self):
         result = architect.design_workflow("")
 
