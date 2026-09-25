@@ -172,6 +172,33 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(calls[1], {"nodeId": "n8n-nodes-base.githubTrigger"})
 
 
+    def test_get_node_types_batches_requested_nodes_into_one_mcp_call(self):
+        captured = {}
+
+        def fake_call(tool_name, arguments=None):
+            captured["tool"] = tool_name
+            captured["arguments"] = arguments
+            return {
+                "success": True,
+                "data": {
+                    "definitions": (
+                        "type A = { type: 'n8n-nodes-base.if' }; "
+                        "type B = { type: 'n8n-nodes-base.slack' };"
+                    )
+                },
+            }
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect._get_node_types([
+                {"nodeId": "n8n-nodes-base.if", "type": "n8n-nodes-base.if"},
+                {"nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
+            ])
+
+        self.assertTrue(result["success"])
+        self.assertEqual(captured["tool"], "get_node_types")
+        self.assertEqual(len(captured["arguments"]["nodeIds"]), 2)
+
+
     def test_schema_result_validator_rejects_success_without_schema(self):
         self.assertFalse(
             architect._schema_result_is_valid({
@@ -233,7 +260,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertTrue(result["definitions"])
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
 
 
     def test_search_queries_expand_explicit_summarization_and_notification_nodes(self):
@@ -398,9 +425,16 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         def fake_call(tool_name, arguments=None):
             self.assertEqual(tool_name, "search_nodes")
-            query = arguments["queries"][0]
-            payload = fake_results.get(query, {"nodes": []})
-            return {"success": True, "data": payload}
+            requested = arguments["queries"]
+            nodes = []
+            for query in requested:
+                payload = fake_results.get(query, {})
+                nodes.extend(payload.get("nodes", []))
+                if isinstance(payload.get("results"), str):
+                    nodes.extend(
+                        architect._node_items_from_text(payload["results"])
+                    )
+            return {"success": True, "data": {"nodes": nodes}}
 
         with patch.object(architect, "_call", side_effect=fake_call):
             nodes, _ = architect._discover_nodes(
@@ -847,53 +881,50 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         def fake_call(tool_name, arguments=None):
             self.assertEqual(tool_name, "search_nodes")
-            query = arguments["queries"][0]
-
-            if query == "GitHub issue trigger":
-                nodes = [{
+            requested = set(arguments["queries"])
+            nodes = [
+                {
+                    "nodeId": "n8n-nodes-base.manualTrigger",
+                    "name": "Manual Trigger",
+                    "type": "n8n-nodes-base.manualTrigger",
+                },
+                {
+                    "nodeId": "n8n-nodes-base.githubTool",
+                    "name": "GitHub",
+                    "type": "n8n-nodes-base.githubTool",
+                    "resource": "file",
+                    "operation": "create",
+                },
+                {
+                    "nodeId": "@n8n/n8n-nodes-langchain.textClassifier",
+                    "name": "Text Classifier",
+                    "type": "@n8n/n8n-nodes-langchain.textClassifier",
+                },
+            ]
+            if "GitHub issue trigger" in requested:
+                nodes.append({
                     "nodeId": "n8n-nodes-base.githubTrigger",
                     "name": "GitHub Trigger",
                     "type": "n8n-nodes-base.githubTrigger",
-                }]
-            elif query == "OpenAI text generation":
-                nodes = [{
-                    "nodeId": "@n8n/n8n-nodes-langchain.openAi",
-                    "name": "OpenAI",
-                    "type": "@n8n/n8n-nodes-langchain.openAi",
-                }]
-            elif query == "IF node":
-                nodes = [{
+                })
+            if "OpenAI text generation" in requested:
+                nodes.append({
+                    "nodeId": "@n8n/n8n-nodes-langchain.chainLlm",
+                    "name": "Basic LLM Chain",
+                    "type": "@n8n/n8n-nodes-langchain.chainLlm",
+                })
+            if "IF node" in requested:
+                nodes.append({
                     "nodeId": "n8n-nodes-base.if",
                     "name": "If",
                     "type": "n8n-nodes-base.if",
-                }]
-            elif query == "Slack send":
-                nodes = [{
+                })
+            if "Slack send" in requested:
+                nodes.append({
                     "nodeId": "n8n-nodes-base.slack",
                     "name": "Slack",
                     "type": "n8n-nodes-base.slack",
-                }]
-            else:
-                nodes = [
-                    {
-                        "nodeId": "n8n-nodes-base.manualTrigger",
-                        "name": "Manual Trigger",
-                        "type": "n8n-nodes-base.manualTrigger",
-                    },
-                    {
-                        "nodeId": "n8n-nodes-base.githubTool",
-                        "name": "GitHub",
-                        "type": "n8n-nodes-base.githubTool",
-                        "resource": "file",
-                        "operation": "create",
-                    },
-                    {
-                        "nodeId": "@n8n/n8n-nodes-langchain.textClassifier",
-                        "name": "Text Classifier",
-                        "type": "@n8n/n8n-nodes-langchain.textClassifier",
-                    },
-                ]
-
+                })
             return {"success": True, "data": {"nodes": nodes}}
 
         with patch.object(architect, "_call", side_effect=fake_call):
@@ -921,17 +952,18 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
                     "message": "Unknown n8n MCP tool: search_nodes",
                 }
             if tool_name == "get_node_types":
-                node_id = arguments["nodeIds"][0]["nodeId"]
+                definitions = []
+                for item in arguments["nodeIds"]:
+                    node_id = item["nodeId"]
+                    definitions.append({
+                        "nodeId": node_id,
+                        "type": node_id,
+                        "content": f"interface {node_id.replace('.', '_').replace('@', '_')} {{}}",
+                    })
                 return {
                     "success": True,
                     "data": {
-                        "definitions": [
-                            {
-                                "nodeId": node_id,
-                                "type": node_id,
-                                "content": f"interface {node_id.replace('.', '_').replace('@', '_')} {{}}",
-                            }
-                        ]
+                        "definitions": definitions,
                     },
                 }
             if tool_name == "get_workflow_best_practices":
