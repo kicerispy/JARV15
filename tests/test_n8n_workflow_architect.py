@@ -130,6 +130,37 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertIn("n8n-nodes-base.github", node_ids)
 
 
+    def test_get_node_types_does_not_treat_string_definitions_as_search_nodes(self):
+        with patch.object(
+            architect,
+            "_call",
+            return_value={
+                "success": True,
+                "data": {
+                    "definitions": "interface GithubParameters { resource: string; operation: string }"
+                },
+            },
+        ):
+            result = architect._get_node_types(
+                [
+                    {
+                        "nodeId": "n8n-nodes-base.github",
+                        "type": "n8n-nodes-base.github",
+                    }
+                ]
+            )
+
+        self.assertEqual(len(result["definitions"]), 1)
+        self.assertIn(
+            "GithubParameters",
+            result["definitions"][0]["content"],
+        )
+        self.assertNotIn(
+            "_search_text",
+            result["definitions"][0],
+        )
+
+
     def test_get_node_types_accepts_documented_string_definitions(self):
         with patch.object(
             architect,
