@@ -556,6 +556,9 @@ def _unreal_result_payload(data: Any) -> Dict[str, Any]:
 
     result = _decode_json_text(decoded.get("result", decoded))
 
+    if isinstance(result, dict) and isinstance(result.get("structuredContent"), dict):
+        result = result["structuredContent"]
+
     if isinstance(result, dict) and isinstance(result.get("content"), list):
         nested = _mapping_payload(result)
         if nested:
