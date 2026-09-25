@@ -4204,6 +4204,18 @@ def _run_tool_raw(
         )
 
 
+# Self-observability/state tools must remain callable even when a prior
+# invocation opened a tool circuit; otherwise JARVIS can lock itself out of its
+# own diagnostics and memory just when they are needed for recovery.
+NON_CIRCUIT_TOOLS = {
+    "tool_health",
+    "memory_remember",
+    "memory_recall",
+    "memory_forget",
+    "memory_status",
+    "healing_history",
+}
+
 def run_tool(
     tool_name: str,
     argument: str = "",
@@ -4279,22 +4291,15 @@ def run_tool(
 
     return normalized
 
-# Self-observability/state tools must remain callable even when a prior
-# invocation opened a tool circuit; otherwise JARVIS can lock itself out of its
-# own diagnostics and memory just when they are needed for recovery.
-NON_CIRCUIT_TOOLS = {
-    "tool_health",
-    "memory_remember",
-    "memory_recall",
-    "memory_forget",
-    "memory_status",
-    "healing_history",
-}
-
 # Backward-compatible dispatcher alias for scripts and integrations that
 # historically called execute_tool(). The canonical API remains run_tool().
 def execute_tool(
     tool_name: str,
     argument: str = "",
 ) -> ToolResult:
+    """Backward-compatible dispatcher alias.
+
+    Keep legacy self-observability callers on the same resilient execution
+    path while guaranteeing those tools remain callable during recovery.
+    """
     return run_tool(tool_name, argument)
