@@ -23,6 +23,7 @@ from tool_registry import (
     ANIPY_TOOLS,
     BROWSER_TOOLS,
     CONTEXT_MEMORY_TOOLS,
+    SYSTEM_HEALTH_TOOLS,
     UNREAL_MCP_TOOLS,
 )
 from project_fs import iter_project_files
@@ -3291,6 +3292,11 @@ def _run_tool_raw(
             workflow_class=str(payload.get("workflow_class") or "").strip(),
             context=payload.get("context") if isinstance(payload.get("context"), dict) else {},
         )
+
+    if tool_name in SYSTEM_HEALTH_TOOLS:
+        from integration_health import run_integration_health
+
+        return run_integration_health(argument)
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
