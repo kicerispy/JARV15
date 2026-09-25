@@ -3064,8 +3064,8 @@ Last tool: {active_context.get('last_tool', 'none')}
     # --------------------------------------------------------
     # Agent Core prefixes internal phase markers so intermediate
     # investigation/test planning cannot accidentally enter repair mode.
-    # The final repair/change phases use the coding model; discovery remains
-    # model-free or planner-model driven as appropriate.
+    # Repair uses the coding model; bounded CHANGE planning uses the faster
+    # dedicated change-planner model. Discovery remains model-free where possible.
     # --------------------------------------------------------
     is_repair_phase = "[JARVIS_INTERNAL_PHASE:REPAIR]" in user_command
     is_change_phase = "[JARVIS_INTERNAL_PHASE:CHANGE]" in user_command
@@ -3126,54 +3126,26 @@ Required shape:
 The final step must validate the changed target. Return ONLY JSON.
 """
     elif is_change_phase:
-        change_tools = {
-            name: AVAILABLE_TOOLS[name]
-            for name in (
-                "code_checkpoint",
-                "edit_file",
-                "write_file",
-                "delete_file",
-                "code_test",
-                "read_file",
-            )
-        }
+        system_content = f"""You are JARVIS's bounded software-change planner.
 
-        change_tool_list = "\n".join(
-            f"{name}: {desc}"
-            for name, desc in change_tools.items()
-        )
-
-        system_content = f"""You are JARVIS's focused software change planner.
-
-The deterministic source-inspection phase has completed successfully. The user
-message contains verified source evidence from the real project.
-
-Available tools:
-{change_tool_list}
-
-CHANGE IMPLEMENTATION MODE — HIGH PRIORITY:
+Verified source evidence is already supplied. Implement the original request
+with the smallest safe edit. Do not rediscover files.
 
 Rules:
-- Implement the original requested change using the verified source evidence.
-- Do not rediscover the project or replace the evidence with guesses.
-- Make the smallest safe change that satisfies the request.
-- For an existing file, prefer edit_file:
-  filename|||old_text|||new_text
-- Copy old_text exactly from the verified source evidence.
+- Existing files: use edit_file as filename|||exact_old_text|||exact_new_text.
 - Create code_checkpoint before any mutation.
-- For a regression-test request, modify the named test file and run the relevant
-  focused tests afterward.
-- Run code_test after the final mutation.
+- Run code_test after the mutation.
+- For regression-test requests, edit the named test file and run its focused tests.
 - Do not return a read-only plan for an explicit change request.
-- Do not invent filenames, code, errors, or behavior.
-- Return executable JSON only. Never return prose or an empty plan.
+- Do not invent paths or source not present in the evidence.
+- Return executable JSON only.
 
-Required shape:
+Required JSON:
 {{
-  "goal": "brief implementation goal",
+  "goal": "brief goal",
   "steps": [
     {{"tool": "code_checkpoint", "argument": ""}},
-    {{"tool": "edit_file", "argument": "existing_file.py|||exact old source|||exact new source"}},
+    {{"tool": "edit_file", "argument": "file.py|||exact old source|||exact new source"}},
     {{"tool": "code_test", "argument": "{{\"mode\":\"pytest\",\"path\":\"tests/test_target.py\"}}"}}
   ]
 }}
@@ -3250,48 +3222,43 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 
         planner_model = (
             MODEL_MANAGER.coding_model
-            if focused_implementation_phase
-            else PLANNER_MODEL
+            if is_repair_phase
+            else (
+                MODEL_MANAGER.change_planner_model
+                if is_change_phase
+                else PLANNER_MODEL
+            )
         )
 
         if focused_implementation_phase:
             phase_label = (
-                "repair"
-                if is_repair_phase
-                else "change"
+                "repair" if is_repair_phase else "change"
             )
-            print(
-                f"JARVIS DEBUG: {phase_label} planner -> using {planner_model}",
-                flush=True,
+            logger.info(
+                f"JARVIS DEBUG: {phase_label} planner -> using {planner_model}"
             )
 
-        focused_num_predict = (
-            240
-            if is_repair_phase
-            else 512
-            if is_change_phase
-            else None
-        )
-
-        repair_options = (
-            {
-                "temperature": 0,
-                "num_predict": focused_num_predict,
-                "num_ctx": config.CODING_NUM_CTX,
-            }
-            if focused_implementation_phase
-            else None
-        )
-
-        if focused_implementation_phase:
+        if is_repair_phase:
             response = MODEL_MANAGER.coding(
                 messages,
                 format="json",
-                options=repair_options,
+                options={
+                    "temperature": 0,
+                    "num_predict": 240,
+                    "num_ctx": config.CODING_NUM_CTX,
+                },
                 model=planner_model,
             )
+        elif is_change_phase:
+            response = MODEL_MANAGER.change_planner(
+                messages,
+                format="json",
+            )
         else:
-            response = MODEL_MANAGER.planner(messages, format="json")
+            response = MODEL_MANAGER.planner(
+                messages,
+                format="json",
+            )
 
         elapsed = time.perf_counter() - planner_start
 
@@ -3354,27 +3321,40 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
         logger.error(f"Planner LLM call failed: {e}")
 
         if focused_implementation_phase:
-            fallback_model = MODEL_MANAGER.coding_fallback_model
-            if fallback_model and fallback_model != planner_model:
+            if is_change_phase:
+                fallback_model = MODEL_MANAGER.coding_model
+                logger.warning(
+                    "JARVIS DEBUG: change planner failed; "
+                    f"falling back to coding model {fallback_model}"
+                )
+                fallback_response = MODEL_MANAGER.coding(
+                    messages,
+                    format="json",
+                    options={
+                        "temperature": 0,
+                        "num_predict": 512,
+                        "num_ctx": config.CODING_NUM_CTX,
+                    },
+                    model=fallback_model,
+                )
+            else:
+                fallback_model = MODEL_MANAGER.coding_fallback_model
+                if not fallback_model or fallback_model == planner_model:
+                    return {"goal": "", "steps": []}
                 logger.warning(
                     "JARVIS DEBUG: primary coding planner failed; "
                     f"falling back to {fallback_model}"
                 )
-                try:
-                    fallback_response = MODEL_MANAGER.coding(
-                        messages,
-                        format="json",
-                        options={
-                            "temperature": 0,
-                            "num_predict": (
-                                240
-                                if is_repair_phase
-                                else 512
-                            ),
-                            "num_ctx": config.CODING_NUM_CTX,
-                        },
-                        model=fallback_model,
-                    )
+                fallback_response = MODEL_MANAGER.coding(
+                    messages,
+                    format="json",
+                    options={
+                        "temperature": 0,
+                        "num_predict": 240,
+                        "num_ctx": config.CODING_NUM_CTX,
+                    },
+                    model=fallback_model,
+                )
                     fallback_content = (
                         fallback_response
                         .get("message", {})
