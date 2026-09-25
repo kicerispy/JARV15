@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 MAX_TECHNIQUES = 2
 MAX_QUERIES = 6
 MAX_NODE_CANDIDATES = 8
+MAX_DISCOVERED_NODE_CANDIDATES = 32
 MAX_NODE_TYPE_REQUESTS = 8
 MAX_BEST_PRACTICE_CHARS = 12000
 MAX_DESCRIPTION_CHARS = 3000
@@ -165,14 +166,50 @@ def _node_items_from_text(value: str) -> List[Dict[str, Any]]:
             if isinstance(nested, list):
                 return [item for item in nested if isinstance(item, dict)]
 
-    ids = _unique_strings(_NODE_ID_RE.findall(str(value or "")))
+    text = str(value or "")
+    ids = _unique_strings(_NODE_ID_RE.findall(text))
+    items: List[Dict[str, Any]] = []
+    for node_id in ids:
+        items.append(
+            {
+                "nodeId": node_id,
+                "type": node_id,
+                "name": node_id.rsplit(".", 1)[-1],
+                "_search_text": text,
+            }
+        )
+    return items
+
+
+def _definition_items_from_text(value: str) -> List[Dict[str, Any]]:
+    parsed = _parse_json_text(value)
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    if isinstance(parsed, dict):
+        for key in ("nodeTypes", "definitions", "results", "items"):
+            nested = parsed.get(key)
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+
+        if parsed:
+            return [parsed]
+
+    text = str(value or "").strip()
+    if not text:
+        return []
+
+    node_ids = _unique_strings(_NODE_ID_RE.findall(text))
     return [
         {
-            "nodeId": node_id,
-            "type": node_id,
-            "name": node_id.rsplit(".", 1)[-1],
+            "nodeId": node_ids[0] if node_ids else None,
+            "type": node_ids[0] if node_ids else None,
+            "name": (
+                node_ids[0].rsplit(".", 1)[-1]
+                if node_ids
+                else "n8n node definition"
+            ),
+            "content": _clip(text, MAX_BEST_PRACTICE_CHARS),
         }
-        for node_id in ids
     ]
 
 
@@ -279,6 +316,35 @@ def _node_identity(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return ref
 
 
+def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, str]:
+    request_terms = {
+        token.lower()
+        for token in _keyword_terms(request)
+    }
+    haystack = " ".join(
+        [
+            str(item.get("name") or ""),
+            str(item.get("nodeId") or ""),
+            str(item.get("type") or ""),
+            str(item.get("_search_text") or ""),
+        ]
+    ).lower()
+
+    exact_hits = sum(
+        1
+        for term in request_terms
+        if term and term in haystack
+    )
+
+    trigger_bonus = 1 if _is_start_trigger_type(item.get("type")) else 0
+
+    return (
+        exact_hits,
+        trigger_bonus,
+        str(item.get("name") or "").lower(),
+    )
+
+
 def _discover_nodes(
     request: str,
     techniques: Sequence[str],
@@ -300,24 +366,26 @@ def _discover_nodes(
         values = _result_list(result, ("nodes", "results", "items"))
         candidates.extend(values)
 
-        if len(candidates) >= MAX_NODE_CANDIDATES:
-            continue
-
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in candidates:
         ref = _node_identity(item)
         if not ref:
             continue
         key = json.dumps(ref, sort_keys=True, default=str)
-        if key not in deduped:
+        existing = deduped.get(key)
+        if existing is None:
             deduped[key] = item
+        elif len(str(item.get("_search_text") or "")) > len(
+            str(existing.get("_search_text") or "")
+        ):
+            deduped[key] = item
+
+        if len(deduped) >= MAX_DISCOVERED_NODE_CANDIDATES:
+            continue
 
     ranked = sorted(
         deduped.values(),
-        key=lambda item: (
-            1 if _is_start_trigger_type(item.get("type")) else 0,
-            str(item.get("name") or "").lower(),
-        ),
+        key=lambda item: _node_relevance(request, item),
         reverse=True,
     )
 
@@ -348,20 +416,25 @@ def _get_node_types(candidates: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
     definitions = _result_list(
         result,
-        ("nodeTypes", "nodes", "definitions", "results"),
-    )
-    definition_text = _result_text(
-        result,
-        ("definitions", "documentation", "content"),
+        ("nodeTypes", "definitions", "results"),
     )
 
-    if not definitions and definition_text:
-        definitions = [
-            {
-                "nodeIds": refs,
-                "content": _clip(definition_text, MAX_BEST_PRACTICE_CHARS),
-            }
-        ]
+    if definitions and all(
+        not item.get("content")
+        and not item.get("properties")
+        and not item.get("parameters")
+        and not item.get("inputs")
+        for item in definitions
+    ):
+        definition_text = _result_text(
+            result,
+            ("definitions", "documentation", "content"),
+        )
+        definitions = (
+            _definition_items_from_text(definition_text)
+            if definition_text
+            else []
+        )
 
     return {
         "success": result.get("success") is True,
