@@ -292,13 +292,25 @@ def list_tools(force: bool = False) -> List[Dict[str, Any]]:
 
 
 def tool_descriptions() -> Dict[str, str]:
-    return {
-        f"n8n_mcp__{item['name']}": (
+    descriptions: Dict[str, str] = {}
+    for item in list_tools():
+        schema = item.get("inputSchema")
+        schema_text = ""
+        if isinstance(schema, dict):
+            try:
+                schema_text = _bounded_text(
+                    json.dumps(schema, ensure_ascii=False, separators=(",", ":")),
+                    3500,
+                )
+            except (TypeError, ValueError):
+                schema_text = ""
+
+        descriptions[f"n8n_mcp__{item['name']}"] = (
             f"n8n MCP tool: {item.get('description') or item['name']}. "
             "Argument must be a JSON object."
+            + (f" Input schema: {schema_text}" if schema_text else "")
         )
-        for item in list_tools()
-    }
+    return descriptions
 
 
 def is_known_tool(name: str) -> bool:
