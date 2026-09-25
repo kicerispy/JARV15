@@ -67,6 +67,17 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertIn("HARD REPAIR REQUIREMENT:", prompt)
         self.assertIn("ONLY the exact node types listed under ALLOWED NODE TYPES", prompt)
 
+    def test_compiler_for_unspecified_alert_uses_safe_set_output(self):
+        design = self._design()
+        design["required_capabilities"] = ["trigger", "github_source", "summarization", "condition", "alert_output"]
+        prompt = builder._compiler_prompt(
+            design,
+            sdk_reference="workflow('id', 'name')",
+        )
+        self.assertIn('required_capabilities contains "alert_output"', prompt)
+        self.assertIn("NEVER use emailSend, slack, Discord, Telegram", prompt)
+        self.assertIn("n8n-nodes-base.set", prompt)
+
     def test_unknown_node_type_is_rejected_against_verified_schemas(self):
         code = (
             "import { workflow } from '@n8n/workflow-sdk';\n"
