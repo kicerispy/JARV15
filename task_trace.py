@@ -43,8 +43,7 @@ def _connect() -> sqlite3.Connection:
     _TRACE_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(_TRACE_DB), timeout=5.0)
     connection.row_factory = sqlite3.Row
-    if not _SCHEMA_READY:
-        connection.executescript(
+    connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS traces (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +69,6 @@ def _connect() -> sqlite3.Connection:
             """
         )
         connection.commit()
-        _SCHEMA_READY = True
     return connection
 
 
@@ -160,7 +158,14 @@ def record_trace(
                         max(0, int(replans or 0)),
                         _clean(error, 900),
                         _clean(verification_reason, 500),
-                        json.dumps(plan_payload, ensure_ascii=False, default=str)[:12000],
+                        json.dumps(
+                            {
+                                "goal": payload["goal"],
+                                "tools": payload["tools"],
+                            },
+                            ensure_ascii=False,
+                            default=str,
+                        )[:6000],
                         json.dumps(compact_steps, ensure_ascii=False, default=str)[:12000],
                     ),
                 )
