@@ -3458,6 +3458,7 @@ def _run_tool_raw(
     if tool_name in ANIME_STREAMING_TOOLS:
         from anime_streaming import (
             anime_availability,
+            anime_free_watch,
             anime_provider_catalog,
             anime_streaming_links,
         )
@@ -3467,6 +3468,9 @@ def _run_tool_raw(
 
         if tool_name == "anime_availability":
             return anime_availability(argument)
+
+        if tool_name == "anime_free_watch":
+            return anime_free_watch(argument)
 
         return anime_provider_catalog(argument)
 
