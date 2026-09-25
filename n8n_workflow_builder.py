@@ -320,6 +320,43 @@ def _verified_node_types(design: Dict[str, Any]) -> List[str]:
     return list(dict.fromkeys(values))
 
 
+def _enrich_unknown_node_types(
+    design: Dict[str, Any],
+    unknown_node_types: List[str],
+) -> List[str]:
+    """Resolve plausible unknown node IDs through the live schema service."""
+    candidates = [
+        {
+            "nodeId": node_type,
+            "type": node_type,
+            "name": node_type,
+        }
+        for node_type in unknown_node_types
+        if str(node_type).startswith(("n8n-nodes-base.", "@n8n/"))
+    ]
+    if not candidates:
+        return []
+
+    try:
+        from n8n_workflow_architect import _get_node_types
+        result = _get_node_types(candidates)
+    except Exception:
+        return []
+
+    if result.get("success") is not True:
+        return []
+
+    resolved: List[str] = []
+    for item in result.get("definitions", []):
+        if not isinstance(item, dict):
+            continue
+        node_type = str(item.get("nodeId") or item.get("type") or "").strip()
+        if node_type:
+            resolved.append(node_type)
+
+    return list(dict.fromkeys(resolved))
+
+
 def _compiler_prompt(
     design: Dict[str, Any],
     *,
@@ -740,6 +777,35 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         error_payload: Dict[str, Any] = dict(validation)
         if validation_blockers:
             error_payload["blocking_warnings"] = validation_blockers
+
+        guard_errors = _result_data(validation).get("errors", [])
+        unknown_types: List[str] = []
+        for message in guard_errors if isinstance(guard_errors, list) else []:
+            match = re.search(
+                r"verified live n8n schemas:\s*(.*?)(?:\.\s*Do not invent|$)",
+                str(message),
+                re.IGNORECASE,
+            )
+            if match:
+                unknown_types.extend(
+                    item.strip()
+                    for item in match.group(1).split(",")
+                    if item.strip()
+                )
+
+        resolved_types = _enrich_unknown_node_types(design, unknown_types)
+        if resolved_types:
+            error_payload["live_schema_confirmed"] = resolved_types
+            error_payload["repair_instruction"] = (
+                "Use the live-confirmed types only when their schemas support "
+                "the requested operation."
+            )
+        else:
+            error_payload["repair_instruction"] = (
+                "Do not repeat any rejected node type. Use only the allowlisted "
+                "node types in the prompt."
+            )
+
         error_text = json.dumps(
             error_payload,
             ensure_ascii=False,
