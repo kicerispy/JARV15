@@ -3139,6 +3139,35 @@ class JarvisAgent:
                     task_state.set_progress_callback(None)
                     return task
 
+                # A failed bounded change is restored to its checkpoint before
+                # the focused coding model attempts the corrective edit.
+                if task.active_context.pop(
+                    "_change_recovery_pending",
+                    False,
+                ):
+                    logger.info(
+                        "JARVIS AGENT: Change checkpoint restored; "
+                        "planning focused corrective repair from verified failure evidence."
+                    )
+
+                    replanned = self.plan_task(
+                        task,
+                        history_text=history_text,
+                        planning_request=(
+                            self._build_change_repair_request_after_failure(task)
+                        ),
+                        require_repair_plan=True,
+                        require_code_read=False,
+                    )
+
+                    if replanned.status in {
+                        "conversation",
+                        "failed",
+                    }:
+                        return replanned
+
+                    continue
+
                 # Repair requests can legitimately begin with discovery.
                 # Roblox Studio uses its own inspection/test loop and must not
                 # fall into JARVIS's Python-file phase fallback.
@@ -3360,6 +3389,44 @@ class JarvisAgent:
                             return replanned
 
                         continue
+
+                # Every successful source mutation gets one deterministic
+                # diff-integrity check in addition to the requested focused test.
+                if (
+                    is_software_change_request(task.request)
+                    and self._plan_has_mutation(task.planner_result)
+                    and not is_roblox_request(task.request)
+                    and self._has_verified_evidence(
+                        task,
+                        {"code_test"},
+                    )
+                    and not self._has_verified_git_diff_check(task)
+                ):
+                    self._install_phase_plan(
+                        task,
+                        {
+                            "goal": "verify source diff integrity",
+                            "jarvis_internal_phase": True,
+                            "steps": [
+                                {
+                                    "tool": "code_test",
+                                    "argument": json.dumps(
+                                        {"mode": "git_diff_check"}
+                                    ),
+                                }
+                            ],
+                        },
+                    )
+
+                    task.observations.append(
+                        "Automatic post-edit git diff validation scheduled."
+                    )
+
+                    logger.info(
+                        "JARVIS AGENT: Focused tests passed; "
+                        "running deterministic git diff validation before completion."
+                    )
+                    continue
 
                 # Any successful software change must be validated even when
                 # the initial plan did not explicitly include a test step.
