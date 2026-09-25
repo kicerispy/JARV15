@@ -1822,7 +1822,8 @@ def code_search(argument=""):
 
 
 def code_test(argument=""):
-    """Run a safe Python compile check, pytest command, or browser smoke test."""
+    """Run safe source, test-suite, diff, or browser validation."""
+
 
     import ast
     import json
@@ -1859,6 +1860,68 @@ def code_test(argument=""):
     # uses compile. Accept the harmless alias at the tool boundary.
     if mode in {"py_compile", "python_compile"}:
         mode = "compile"
+
+    if mode in {"git_diff_check", "diff_check", "git_diff"}:
+        command = [
+            "git",
+            "diff",
+            "--check",
+            "--",
+        ]
+
+        timeout = int(payload.get("timeout", 60))
+
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(base),
+                capture_output=True,
+                text=True,
+                timeout=max(5, min(timeout, 120)),
+            )
+
+            stdout = (completed.stdout or "").strip()
+            stderr = (completed.stderr or "").strip()
+            success = completed.returncode == 0
+
+            return {
+                "success": success,
+                "verified": success,
+                "message": (
+                    "Git diff whitespace validation passed."
+                    if success
+                    else "Git diff whitespace validation failed."
+                ),
+                "exit_code": completed.returncode,
+                "stdout": stdout[:6000],
+                "stderr": stderr[:6000],
+                "mode": "git_diff_check",
+                "path": ".",
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "verified": False,
+                "message": f"Git diff check timed out after {timeout} seconds.",
+                "exit_code": None,
+                "stdout": "",
+                "stderr": "",
+                "mode": "git_diff_check",
+                "path": ".",
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "verified": False,
+                "message": f"Git diff check failed to start: {e}",
+                "exit_code": None,
+                "stdout": "",
+                "stderr": str(e),
+                "mode": "git_diff_check",
+                "path": ".",
+            }
 
     if mode in {"browser_smoke", "browser_self_test"}:
         try:
@@ -1935,7 +1998,10 @@ def code_test(argument=""):
         command.append("-q")
 
     else:
-        return "Unsupported code test mode. Use 'compile', 'pytest', or 'browser_smoke'."
+        return (
+            "Unsupported code test mode. Use 'compile', 'pytest', "
+            "'git_diff_check', or 'browser_smoke'."
+        )
 
     timeout = int(payload.get("timeout", 120))
 
