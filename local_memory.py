@@ -57,7 +57,6 @@ def _rebuild_fts(records: List[Dict[str, Any]]) -> bool:
         temp = path.with_suffix(".tmp")
         conn = sqlite3.connect(str(temp), timeout=5.0)
         try:
-            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("DROP TABLE IF EXISTS memories")
             conn.execute(
                 """
@@ -239,6 +238,8 @@ def recall(query: str, *, limit: int = 5, kind: str = "") -> List[Dict[str, Any]
 
     with _LOCK:
         records = _load()
+        if records and not _index_path().exists():
+            _rebuild_fts(records)
 
     wanted_kind = str(kind or "").strip().lower()
 
