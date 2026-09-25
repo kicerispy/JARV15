@@ -3764,6 +3764,52 @@ class JarvisAgent:
                 # verified source + diagnostic evidence directly to the
                 # focused repair planner instead of asking the model to
                 # rediscover the task from scratch.
+                # Bounded CHANGE recovery: failed edits/tests restore the
+                # known-good checkpoint before the 14B coding planner retries.
+                latest_failure = self._latest_failed_execution_evidence(task)
+                latest_failure_tool = (
+                    str(latest_failure.get("tool", "") or "").strip()
+                    if latest_failure
+                    else ""
+                )
+
+                if (
+                    is_software_change_request(task.request)
+                    and latest_failure_tool in {
+                        "edit_file",
+                        "write_file",
+                        "delete_file",
+                        "code_test",
+                    }
+                    and task.change_recovery_attempts < 2
+                    and task.replan_count < task.max_replans
+                ):
+                    task.change_recovery_attempts += 1
+                    task.replan_count += 1
+                    self.state["replans"] = task.replan_count
+                    task.active_context["_change_recovery_pending"] = True
+
+                    self._install_phase_plan(
+                        task,
+                        {
+                            "goal": "restore pre-change checkpoint",
+                            "jarvis_internal_phase": True,
+                            "steps": [
+                                {
+                                    "tool": "code_restore_checkpoint",
+                                    "argument": "",
+                                }
+                            ],
+                        },
+                    )
+
+                    logger.warning(
+                        "JARVIS AGENT: Bounded change validation failed; "
+                        f"restoring checkpoint for corrective repair "
+                        f"(attempt {task.change_recovery_attempts}/2)."
+                    )
+                    continue
+
                 latest_diagnostic = None
                 for evidence in reversed(task.evidence):
                     if not isinstance(evidence, dict):
