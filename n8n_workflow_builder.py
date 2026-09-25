@@ -291,6 +291,8 @@ Rules:
 - Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
 - For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
 - Include a real trigger and connect every required stage.
+- For monitoring/polling workflows, prefer a manually testable Schedule Trigger unless the user explicitly requests an external event trigger.
+- Do not choose a service-specific trigger merely because one was discovered; the trigger must support the requested behavior and the requested test lifecycle.
 - Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
 - Keep the graph minimal and deterministic.
 - Preserve the requested notification, condition, summarization, and source behavior.
@@ -309,6 +311,37 @@ VERIFIED ARCHITECTURE:
 {repair}
 {previous}
 """
+
+
+def _validation_blockers(validation: Dict[str, Any]) -> List[str]:
+    """Return live-validator warnings that are structural blockers."""
+    data = _result_data(validation)
+    blockers: List[str] = []
+
+    warnings = data.get("warnings")
+    if isinstance(warnings, list):
+        blocking_codes = {
+            "INVALID_PARAMETER",
+            "MISSING_EXPRESSION_PREFIX",
+        }
+        for warning in warnings:
+            if not isinstance(warning, dict):
+                continue
+            code = str(warning.get("code") or "").strip().upper()
+            message = str(warning.get("message") or "").strip()
+            if code in blocking_codes:
+                blockers.append(
+                    f"{code}: {message}" if message else code
+                )
+
+    errors = data.get("errors")
+    if isinstance(errors, list):
+        for error in errors:
+            text = str(error or "").strip()
+            if text:
+                blockers.append(text)
+
+    return blockers
 
 
 def _validate_code(code: str) -> Dict[str, Any]:
@@ -449,6 +482,15 @@ def _select_trigger(workflow: Dict[str, Any]) -> Optional[str]:
     if not isinstance(nodes, list):
         return None
 
+    # Prefer n8n's explicit trigger marker so service-specific triggers such
+    # as GitHub Trigger are selected even when their type name is not in the
+    # legacy token list.
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get("isTrigger") is True:
+            return str(node.get("name") or "") or None
+
     for node in nodes:
         if not isinstance(node, dict):
             continue
@@ -461,6 +503,8 @@ def _select_trigger(workflow: Dict[str, Any]) -> Optional[str]:
                 "formtrigger",
                 "scheduletrigger",
                 "manualtrigger",
+                "githubtrigger",
+                "trigger",
             )
         ):
             return str(node.get("name") or "") or None
@@ -581,6 +625,9 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         valid = bool(
             data.get("valid", validation.get("valid", False))
         )
+        validation_blockers = _validation_blockers(validation)
+        if validation_blockers:
+            valid = False
 
         if validation.get("success") is True and valid:
             break
@@ -599,8 +646,11 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
                 attempts=attempts,
             )
 
+        error_payload: Dict[str, Any] = dict(validation)
+        if validation_blockers:
+            error_payload["blocking_warnings"] = validation_blockers
         error_text = json.dumps(
-            validation,
+            error_payload,
             ensure_ascii=False,
             default=str,
         )
@@ -686,15 +736,16 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     )
 
     published = None
+    if test_requested and not test_ready:
+        return _failed(
+            "n8n workflow was created and audited, but its requested test did not pass.",
+            stage="test_gate",
+            workflow_id=workflow_id,
+            test=test_result,
+            audit=audit_result,
+        )
+
     if activate_requested:
-        if not test_ready:
-            return _failed(
-                "Activation blocked because the workflow test did not pass.",
-                stage="activate_gate",
-                workflow_id=workflow_id,
-                test=test_result,
-                audit=audit_result,
-            )
         if not audit_ready:
             return _failed(
                 "Activation blocked because the workflow audit has open "
@@ -746,7 +797,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
             "n8n workflow created, verified, tested, and published."
             if published is not None
             else "n8n workflow created, verified, tested, and audited."
-            if test_result is not None
+            if test_result is not None and test_result.get("success")
             else "n8n workflow created, verified, and audited."
         ),
     }
