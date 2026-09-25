@@ -381,6 +381,38 @@ def record_healing_event(event: Mapping[str, Any]) -> None:
             logger.debug(f"JARVIS HEALING: journal write skipped: {exc}")
 
 
+def healing_history(limit: int = 10) -> list[dict[str, Any]]:
+    """Return recent sanitized healing events for diagnostics and user inspection."""
+    with _LOCK:
+        if not _JOURNAL_PATH.exists():
+            return []
+
+        records: list[dict[str, Any]] = []
+        try:
+            with _JOURNAL_PATH.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(item, dict):
+                        records.append(item)
+        except OSError:
+            return []
+
+    return [
+        {
+            key: value
+            for key, value in item.items()
+            if key not in {"result_preview"}
+        }
+        for item in records[-max(1, int(limit)):]
+    ]
+
+
 def healing_status() -> dict[str, Any]:
     """Return compact diagnostics for the local self-healing subsystem."""
     with _LOCK:
@@ -412,6 +444,7 @@ __all__ = [
     "build_healing_evidence",
     "choose_recovery",
     "diagnose_failure",
+    "healing_history",
     "healing_status",
     "record_healing_event",
     "redact_sensitive",
