@@ -1,0 +1,1124 @@
+"""JARVIS n8n workflow builder and guarded deployment lifecycle.
+
+The architect remains responsible for discovery/read-only analysis. This module
+turns a verified architecture into n8n Workflow SDK code, validates it through
+the live n8n MCP builder, creates it, verifies the saved graph, tests it with
+pin data, audits it, and only publishes when activation was explicitly asked
+for and every required gate passes.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.request import Request, urlopen
+
+from n8n_mcp import call_tool
+from n8n_workflow_architect import audit_workflow, design_workflow
+
+DEFAULT_OLLAMA_HOST = os.getenv("JARVIS_OLLAMA_HOST", "http://127.0.0.1:11434")
+DEFAULT_MODEL = os.getenv("JARVIS_N8N_BUILDER_MODEL", os.getenv("JARVIS_CODING_MODEL", "qwen3.5:9b"))
+DEFAULT_TIMEOUT = 180
+MAX_ARCHITECT_CONTEXT = 10000
+MAX_SDK_REFERENCE_CHARS = 12000
+MAX_REPAIR_ATTEMPTS = 2
+
+KNOWN_NODE_TYPES = {
+    "n8n-nodes-base.githubTrigger",
+    "n8n-nodes-base.github",
+    "n8n-nodes-base.manualTrigger",
+    "n8n-nodes-base.scheduleTrigger",
+    "n8n-nodes-base.webhook",
+    "n8n-nodes-base.if",
+    "n8n-nodes-base.switch",
+    "n8n-nodes-base.set",
+    "n8n-nodes-base.httpRequest",
+    "n8n-nodes-base.slack",
+    "n8n-nodes-base.emailSend",
+    "@n8n/n8n-nodes-langchain.chainLlm",
+    "@n8n/n8n-nodes-langchain.lmChatOllama",
+    "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+    "@n8n/n8n-nodes-langchain.agent",
+}
+
+AI_SUBNODE_PATTERN = """
+const openAiModel = languageModel({
+  type: '@n8n/n8n-nodes-langchain.lmChatOpenAi',
+  config: {
+    name: 'OpenAI Model',
+    parameters: {},
+  },
+});
+
+const aiAgent = node({
+  type: '@n8n/n8n-nodes-langchain.agent',
+  config: {
+    name: 'AI Agent',
+    parameters: { promptType: 'define', text: 'Process the input.' },
+    subnodes: { model: openAiModel },
+  },
+});
+
+export default workflow('example', 'AI Example')
+  .add(startTrigger)
+  .to(aiAgent);
+"""
+PROGRESS_ENABLED = os.getenv("JARVIS_N8N_BUILDER_PROGRESS", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _progress(stage: str) -> None:
+    if PROGRESS_ENABLED:
+        print(f"[JARVIS][n8n-builder] {stage}", flush=True)
+
+
+def _clean(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _bounded(value: Any, limit: int) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else text[:limit] + "...<truncated>"
+
+
+def _result_data(result: Dict[str, Any]) -> Dict[str, Any]:
+    data = result.get("data")
+    if not isinstance(data, dict):
+        return {}
+    for key in ("data", "result", "output"):
+        nested = data.get(key)
+        if isinstance(nested, dict):
+            data = nested
+    return data
+
+
+def _failed(message: str, **extra: Any) -> Dict[str, Any]:
+    return {
+        "success": False,
+        "verified": False,
+        "retryable": False,
+        "terminal": True,
+        "execution_owner": "n8n",
+        "message": message,
+        **extra,
+    }
+
+
+def _parse_json_object(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Builder model returned invalid JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Builder model returned a JSON value instead of an object.")
+    return parsed
+
+
+def _ollama_json(prompt: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+    payload = {
+        "model": DEFAULT_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are JARVIS's n8n workflow compiler. Return only a JSON "
+                    "object matching the requested output shape. Do not invent "
+                    "node types or parameters outside supplied verified schemas."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "think": False,
+        "format": "json",
+        "options": {
+            "num_ctx": 16384,
+            "temperature": 0.0,
+            "num_predict": 3000,
+        },
+    }
+    request = Request(
+        DEFAULT_OLLAMA_HOST.rstrip("/") + "/api/chat",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=max(30, int(timeout))) as response:
+        parsed = json.loads(response.read().decode("utf-8", errors="replace"))
+    message = parsed.get("message") if isinstance(parsed, dict) else {}
+    content = message.get("content") if isinstance(message, dict) else None
+
+    # Ollama's chat API normally returns the assistant answer in
+    # message.content. Keep a compatibility fallback for wrappers that
+    # return content at the top level, while preserving a useful diagnostic
+    # when the model actually returned only thinking/metadata.
+    if not isinstance(content, str) or not content.strip():
+        top_level_content = parsed.get("content") if isinstance(parsed, dict) else None
+        if isinstance(top_level_content, str) and top_level_content.strip():
+            content = top_level_content
+
+    if not isinstance(content, str) or not content.strip():
+        thinking = message.get("thinking") if isinstance(message, dict) else None
+        done_reason = parsed.get("done_reason") if isinstance(parsed, dict) else None
+        raise RuntimeError(
+            "Ollama returned no builder content "
+            f"(done_reason={done_reason!r}, thinking_present={bool(thinking)})."
+        )
+    return _parse_json_object(content)
+
+
+def _architecture_context(design: Dict[str, Any]) -> str:
+    payload = {
+        "request": design.get("request"),
+        "requirements": design.get("requirements"),
+        "required_capabilities": design.get("required_capabilities"),
+        "quality_gate": design.get("quality_gate"),
+        "node_candidates": design.get("node_candidates"),
+        "node_definitions": design.get("node_definitions"),
+        "best_practices": design.get("best_practices"),
+    }
+    return _bounded(json.dumps(payload, ensure_ascii=False, indent=2), MAX_ARCHITECT_CONTEXT)
+
+
+def _get_workflow_sdk_reference() -> Dict[str, Any]:
+    """Fetch the live n8n Workflow SDK contract before compiling anything."""
+    result = call_tool("get_workflow_sdk_reference", {"section": "all"})
+    if result.get("success") is not True:
+        return _failed(
+            "n8n Workflow SDK reference could not be loaded.",
+            stage="sdk_reference",
+            details=result,
+        )
+
+    data = _result_data(result)
+    reference = data.get("reference") or result.get("reference")
+    if not isinstance(reference, str) or not reference.strip():
+        return _failed(
+            "n8n Workflow SDK reference returned no reference text.",
+            stage="sdk_reference",
+            details=result,
+        )
+
+    return {
+        "success": True,
+        "verified": True,
+        "reference": _bounded(reference, MAX_SDK_REFERENCE_CHARS),
+        "message": "Live n8n Workflow SDK reference loaded before compilation.",
+    }
+
+
+def _undefined_subnode_identifiers(code: str) -> List[str]:
+    """Detect common AI subnode references that have no declaration."""
+    source = str(code or "")
+    identifiers: List[str] = []
+    for match in re.finditer(r"subnodes\s*:\s*\{([^}]*)\}", source, re.DOTALL):
+        body = match.group(1)
+        for identifier in re.findall(r"\b(?:model|memory|tools?|outputParser|embeddings|vectorStore|retriever)\s*:\s*([A-Za-z_$][\w$]*)", body):
+            identifiers.append(identifier)
+    undefined: List[str] = []
+    for identifier in identifiers:
+        declaration = re.search(
+            rf"\b(?:const|let|var)\s+{re.escape(identifier)}\s*=\s*(?:languageModel|memory|tool|outputParser|embeddings|vectorStore|retriever)\s*\(",
+            source,
+        )
+        if declaration is None:
+            undefined.append(identifier)
+    return list(dict.fromkeys(undefined))
+
+def _unknown_node_types(
+    code: str,
+    allowed_node_types: List[str],
+) -> List[str]:
+    """Detect quoted n8n node type literals not present in verified schemas."""
+    source = str(code or "")
+    allowed = {str(item).strip() for item in allowed_node_types if str(item).strip()}
+    allowed.update(KNOWN_NODE_TYPES)
+
+    found: List[str] = []
+    for match in re.finditer(r'\btype\s*:\s*[\'"]([^\'"]+)[\'"]', source):
+        node_type = match.group(1).strip()
+        if node_type.startswith(("n8n-nodes-base.", "@n8n/")) and node_type not in allowed:
+            found.append(node_type)
+    return list(dict.fromkeys(found))
+
+
+def _extract_node_versions(code: str) -> Dict[str, List[str]]:
+    """Collect explicit node versions from Workflow SDK source."""
+    source = str(code or "")
+    versions: Dict[str, List[str]] = {}
+    pattern = re.compile(
+        r"""type\s*:\s*['"]([^'"]+)['"].{0,700}?(?:version|typeVersion)\s*:\s*([0-9]+(?:\.[0-9]+)*)""",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(source):
+        node_type = match.group(1).strip()
+        version = match.group(2).strip()
+        if not node_type or not version:
+            continue
+        # Only n8n node identifiers participate in the node-version guard.
+        # Workflow parameters can legitimately contain things such as
+        # type: 'string' alongside a numeric version-like field.
+        if not node_type.startswith(("n8n-nodes-base.", "@n8n/")):
+            continue
+        versions.setdefault(node_type, []).append(version)
+    return {key: list(dict.fromkeys(value)) for key, value in versions.items()}
+
+
+def _verified_node_versions(design: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Return only node versions explicitly surfaced by verified architecture data."""
+    versions: Dict[str, List[str]] = {}
+    for item in (
+        list(design.get("node_candidates", []))
+        + list(design.get("node_definitions", []))
+    ):
+        if not isinstance(item, dict):
+            continue
+        node_type = str(item.get("nodeId") or item.get("type") or "").strip()
+        version = item.get("version")
+        if version is None:
+            version = item.get("typeVersion")
+        if node_type and version is not None:
+            value = str(version).strip()
+            if value:
+                versions.setdefault(node_type, []).append(value)
+
+        # Some live schema responses expose the exact node version only inside
+        # the returned TypeScript definition text rather than as a top-level
+        # field. Reuse the same guarded parser so generic parameter fields such
+        # as type: 'string' are never treated as node versions.
+        content = item.get("content")
+        if isinstance(content, str) and content.strip():
+            for content_type, content_versions in _extract_node_versions(content).items():
+                versions.setdefault(content_type, []).extend(content_versions)
+    return {key: list(dict.fromkeys(value)) for key, value in versions.items()}
+
+
+def _sdk_shape_errors(
+    code: str,
+    *,
+    allowed_node_types: Optional[List[str]] = None,
+    verified_node_versions: Optional[Dict[str, List[str]]] = None,
+) -> List[str]:
+    """Reject common model-generated SDK shapes before spending an MCP call."""
+    errors: List[str] = []
+    source = str(code or "")
+
+    if "createWorkflow(" in source or "export default createWorkflow" in source:
+        errors.append(
+            "Do not use createWorkflow(). Import workflow() from @n8n/workflow-sdk "
+            "and export workflow('id', 'name')."
+        )
+
+    if "export type " in source or "export interface " in source:
+        errors.append(
+            "Do not emit TypeScript type/interface exports. The validator expects "
+            "executable Workflow SDK source only."
+        )
+
+    if not source.lstrip().startswith("import "):
+        errors.append(
+            "Workflow SDK code must begin with an import from @n8n/workflow-sdk."
+        )
+
+    if "@n8n/workflow-sdk" not in source:
+        errors.append("Import the Workflow SDK from @n8n/workflow-sdk.")
+
+    explicit_versions = _extract_node_versions(source)
+    known_versions = verified_node_versions or {}
+    for node_type, versions in explicit_versions.items():
+        verified_versions = [str(value) for value in known_versions.get(node_type, [])]
+        for version in versions:
+            if not verified_versions:
+                errors.append(
+                    f"Node type {node_type} specifies invented version {version}. "
+                    "The verified architecture did not provide an exact version; "
+                    "omit the version so n8n can use its installed default/latest version."
+                )
+            elif version not in verified_versions:
+                errors.append(
+                    f"Node type {node_type} specifies version {version}, but verified "
+                    f"versions are: {', '.join(verified_versions)}. Use one of the "
+                    "verified versions or omit the version."
+                )
+
+    unknown_node_types = _unknown_node_types(source, allowed_node_types or [])
+    if unknown_node_types:
+        errors.append(
+            "These node types are not present in the verified live n8n schemas: "
+            + ", ".join(unknown_node_types)
+            + ". Do not invent node types. Replace each with a verified node "
+            + "type from the supplied architecture/schema reference."
+        )
+
+    undefined_subnodes = _undefined_subnode_identifiers(source)
+    if undefined_subnodes:
+        errors.append(
+            "These AI subnode references are undefined: "
+            + ", ".join(undefined_subnodes)
+            + ". Declare each with the documented factory first "
+            + "(for example const openAiModel = languageModel({...})) before "
+            + "referencing it in subnodes."
+        )
+
+    if not re.search(
+        r"export\s+default\s+workflow\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]",
+        source,
+    ):
+        errors.append(
+            "The final export must be export default workflow('stable-id', 'Workflow Name') "
+            "with both required string arguments."
+        )
+
+    return errors
+
+def _verified_node_types(design: Dict[str, Any]) -> List[str]:
+    values: List[str] = list(KNOWN_NODE_TYPES)
+    for item in (
+        list(design.get("node_definitions", []))
+        + list(design.get("node_candidates", []))
+    ):
+        if not isinstance(item, dict):
+            continue
+        node_type = str(item.get("nodeId") or item.get("type") or "").strip()
+        if node_type:
+            values.append(node_type)
+    return list(dict.fromkeys(values))
+
+
+def _enrich_unknown_node_types(
+    design: Dict[str, Any],
+    unknown_node_types: List[str],
+) -> List[str]:
+    """Resolve plausible unknown node IDs through the live schema service."""
+    candidates = [
+        {
+            "nodeId": node_type,
+            "type": node_type,
+            "name": node_type,
+        }
+        for node_type in unknown_node_types
+        if str(node_type).startswith(("n8n-nodes-base.", "@n8n/"))
+    ]
+    if not candidates:
+        return []
+
+    try:
+        from n8n_workflow_architect import _get_node_types
+        result = _get_node_types(candidates)
+    except Exception:
+        return []
+
+    if result.get("success") is not True:
+        return []
+
+    resolved: List[str] = []
+    for item in result.get("definitions", []):
+        if not isinstance(item, dict):
+            continue
+        node_type = str(item.get("nodeId") or item.get("type") or "").strip()
+        if node_type:
+            resolved.append(node_type)
+
+    return list(dict.fromkeys(resolved))
+
+
+def _compiler_prompt(
+    design: Dict[str, Any],
+    *,
+    sdk_reference: str,
+    previous_code: str = "",
+    validation_error: str = "",
+) -> str:
+    repair = ""
+    if validation_error:
+        repair = "\nVALIDATOR FEEDBACK:\n" + _bounded(validation_error, 12000)
+    previous = ""
+    if previous_code:
+        previous = "\nPRIOR CODE:\n" + _bounded(previous_code, 30000)
+
+    allowed_node_types = _verified_node_types(design)
+    allowed_types_text = "\n".join(f"- {item}" for item in allowed_node_types)
+    if validation_error and "not present in the verified live n8n schemas" in validation_error:
+        repair += (
+            "\nHARD REPAIR REQUIREMENT:\n"
+            "The prior code used node types that are NOT allowed. Remove every "
+            "unknown node type and rebuild the workflow using ONLY the exact "
+            "node types listed under ALLOWED NODE TYPES. Do not preserve an "
+            "unknown type merely because its name sounds plausible.\n"
+        )
+
+
+    repair_rules = _schema_repair_instructions(
+        [line for line in validation_error.splitlines() if line.strip()]
+        if validation_error
+        else []
+    )
+    if repair_rules:
+        repair += (
+            "\nSCHEMA-SPECIFIC REPAIR REQUIREMENTS:\n"
+            + "\n".join(f"- {rule}" for rule in repair_rules)
+            + "\n"
+        )
+
+    return f"""
+Build one new n8n workflow from the verified architecture below.
+
+Return exactly:
+{{"name":"short name","description":"short description","code":"full Workflow SDK JavaScript/TypeScript source"}}
+
+Rules:
+- The live SDK reference below is authoritative. Follow it over prior knowledge.
+- Import only from @n8n/workflow-sdk.
+- Define trigger/node instances first, then compose them into the workflow.
+- The final export MUST be exactly the SDK shape: export default workflow('stable-id', 'Workflow Name')...
+- workflow() requires TWO string arguments: a stable workflow id and a workflow name.
+- Put node parameters under config.parameters; do not put parameters directly beside config.
+- Use .add(...), .to(...), and the documented branch helpers to wire nodes.
+- For an IF node with two branches, use the exact chained shape `.add(trigger).to(ifNode).onTrue(trueNode).onFalse(falseNode)`. `.onFalse(...)` must immediately follow the IF node's `.to(ifNode)` chain; never emit `.onFalse(...)` as a detached statement or after unrelated nodes.
+- Do not use createWorkflow, workflow({...}), workflow([ ... ]), a one-argument workflow('name'), or raw workflow JSON.
+- Do not emit export type, export interface, typeof default_, or other type-only exports.
+- Do not leave branch wiring as standalone statements after export default.
+- Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
+- NEVER invent a node version. Only specify a version when that exact version appears in the verified architecture/schema. Otherwise omit version/typeVersion and let n8n use the installed node version.
+- The ALLOWED NODE TYPES list below is a hard allowlist. Every workflow node type MUST match one of those exact strings.
+- Never invent semantic node types such as @n8n/n8n-nodes-langchain.summarize. For summarization, use a verified LLM/AI node or another verified processing node from the supplied schemas.
+- Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
+- For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type. Omit version/typeVersion unless that exact numeric version appears in the verified architecture/schema. The AI subnode pattern below intentionally omits guessed versions.
+- Include a real trigger and connect every required stage.
+- For conditional bug/issue identification, prefer n8n-nodes-base.if. Do not choose n8n-nodes-base.filter unless its exact verified schema and version are supplied in the architecture.
+- For monitoring/polling workflows, prefer a manually testable Schedule Trigger unless the user explicitly requests an external event trigger.
+- Do not choose a service-specific trigger merely because one was discovered; the trigger must support the requested behavior and the requested test lifecycle.
+- Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
+- Keep the graph minimal and deterministic.
+- Preserve the requested notification, condition, summarization, and source behavior.
+- If VERIFIED ARCHITECTURE required_capabilities contains "alert_output", the request did not specify a delivery destination. NEVER use emailSend, slack, Discord, Telegram, or another external notification node in that case. End with n8n-nodes-base.set containing a structured alert payload so the workflow remains valid and testable without invented addresses, channels, or credentials.
+- Use a real external notification node only when the request explicitly names a delivery channel and supplies or references its required destination/configuration.
+- Use n8n expressions for values flowing between nodes.
+- When repairing invalid code, rewrite the whole code into the documented SDK pattern instead of making a local textual patch.
+- Return executable SDK source only, not TypeScript declarations and not raw workflow JSON.
+
+LIVE WORKFLOW SDK REFERENCE:
+{_bounded(sdk_reference, MAX_SDK_REFERENCE_CHARS)}
+
+TARGETED AI SUBNODE REFERENCE:
+{AI_SUBNODE_PATTERN}
+
+ALLOWED NODE TYPES:
+{allowed_types_text}
+
+VERIFIED ARCHITECTURE:
+{_architecture_context(design)}
+{repair}
+{previous}
+"""
+
+
+def _validation_blockers(validation: Dict[str, Any]) -> List[str]:
+    """Return live-validator warnings that are structural blockers."""
+    data = _result_data(validation)
+    blockers: List[str] = []
+
+    warnings = data.get("warnings")
+    if isinstance(warnings, list):
+        blocking_codes = {
+            "INVALID_PARAMETER",
+            "MISSING_EXPRESSION_PREFIX",
+            "SET_INVALID_ASSIGNMENT",
+            "INVALID_INPUT_INDEX",
+            "INVALID_OUTPUT_INDEX",
+        }
+        for warning in warnings:
+            if not isinstance(warning, dict):
+                continue
+            code = str(warning.get("code") or "").strip().upper()
+            message = str(warning.get("message") or "").strip()
+            if code in blocking_codes:
+                blockers.append(
+                    f"{code}: {message}" if message else code
+                )
+
+    errors = data.get("errors")
+    if isinstance(errors, list):
+        for error in errors:
+            text = str(error or "").strip()
+            if text:
+                blockers.append(text)
+
+    return blockers
+
+
+def _schema_repair_instructions(validation_blockers: List[str]) -> List[str]:
+    """Translate recurring live n8n warnings into precise compiler repair rules."""
+    text = "\n".join(validation_blockers).lower()
+    instructions: List[str] = []
+
+    if "missing_expression_prefix" in text or "without '=" in text:
+        instructions.append(
+            "Every dynamic n8n expression must begin with '='. "
+            "Use '={{ $json.foo }}', never '{{ $json.foo }}'."
+        )
+
+    if "invented version" in text or "verified versions are" in text or "omit the version" in text:
+        instructions.append(
+            "Do not invent node versions. Remove the version/typeVersion field unless "
+            "the exact numeric version is present in the verified architecture/schema. "
+            "When verified versions are listed, use only one of those exact values."
+        )
+
+    if "set_invalid_assignment" in text or "parameters.assignments" in text:
+        instructions.append(
+            "For n8n-nodes-base.set, parameters.assignments must be an object "
+            "containing an inner assignments array: { assignments: [...] }. "
+            "Never use an array directly as parameters.assignments."
+        )
+
+    if ("parameters.operation" in text or "operation" in text) and "slack" in text:
+        instructions.append(
+            "For a Slack message alert, pair the discriminator values correctly: "
+            "resource: 'message' and operation: 'post'. Do not use send_message."
+        )
+
+    if "channelid" in text:
+        instructions.append(
+            "Slack must receive a schema-valid channelId value when required; "
+            "do not leave channelId undefined."
+        )
+
+    if "fromemail" in text or "toemail" in text:
+        instructions.append(
+            "The generated email node is missing required sender/recipient fields. "
+            "Do not invent email addresses. When the request did not explicitly "
+            "specify email delivery, replace the email node with a final "
+            "n8n-nodes-base.set alert payload. When email delivery is explicit, "
+            "use the required configured addresses from the request/context."
+        )
+
+    if "invalid_input_index" in text or "invalid_output_index" in text:
+        instructions.append(
+            "Use ordinary main-output to main-input wiring only. .to(target) must "
+            "use output 0 to input 0. Do not invent index 1 connections or error "
+            "branches unless the source node explicitly supports them."
+        )
+
+    if "onfalse()" in text or "immediately follow adding a if node" in text:
+        instructions.append(
+            "For an IF branch, chain both branch helpers directly after the IF node: "
+            ".add(trigger).to(ifNode).onTrue(trueNode).onFalse(falseNode). "
+            "Do not place .onFalse(...) on its own line or after another chained "
+            "node. If only one branch is needed, omit the unused helper."
+        )
+
+    return instructions
+
+
+def _validate_code(
+    code: str,
+    *,
+    allowed_node_types: Optional[List[str]] = None,
+    verified_node_versions: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, Any]:
+    shape_errors = _sdk_shape_errors(
+        code,
+        allowed_node_types=allowed_node_types,
+        verified_node_versions=verified_node_versions,
+    )
+    if shape_errors:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "mcp_tool": "local_sdk_guard",
+            "data": {
+                "valid": False,
+                "errors": shape_errors,
+                "hint": (
+                    "Rewrite the workflow using the live n8n Workflow SDK reference. "
+                    "The final export must call workflow('id', 'name')."
+                ),
+            },
+            "message": "Generated workflow failed the local SDK shape guard.",
+        }
+    return call_tool("validate_workflow", {"code": code})
+
+
+def _create_workflow(
+    code: str,
+    name: str,
+    description: str,
+    project_id: Optional[str],
+    folder_id: Optional[str],
+) -> Dict[str, Any]:
+    arguments: Dict[str, Any] = {
+        "code": code,
+        "name": name[:128],
+        "description": description[:255],
+        "skillsUsed": ["n8n-workflow-architect", "n8n-workflow-builder"],
+    }
+    if project_id:
+        arguments["projectId"] = project_id
+    if folder_id:
+        arguments["folderId"] = folder_id
+    return call_tool("create_workflow_from_code", arguments)
+
+
+def _workflow_from_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    data = _result_data(result)
+    workflow = data.get("workflow")
+    return workflow if isinstance(workflow, dict) else {}
+
+
+def _verify_saved_workflow(workflow_id: str) -> Dict[str, Any]:
+    result = call_tool(
+        "get_workflow_details",
+        {"workflowId": workflow_id, "detailLevel": "full"},
+    )
+    if result.get("success") is not True:
+        return result
+    workflow = _workflow_from_result(result)
+    if not workflow:
+        return _failed("n8n returned no workflow graph after creation.")
+    nodes = workflow.get("nodes") if isinstance(workflow.get("nodes"), list) else []
+    connections = (
+        workflow.get("connections")
+        if isinstance(workflow.get("connections"), dict)
+        else {}
+    )
+    return {
+        "success": True,
+        "verified": True,
+        "workflow": workflow,
+        "node_count": len(nodes),
+        "connection_count": sum(
+            1 for value in connections.values() if isinstance(value, dict)
+        ),
+        "message": "Created workflow graph verified through n8n MCP.",
+    }
+
+
+def _sample_from_schema(schema: Any) -> Any:
+    if not isinstance(schema, dict):
+        return {}
+    schema_type = schema.get("type")
+    if schema_type == "object" or "properties" in schema:
+        props = schema.get("properties")
+        if isinstance(props, dict):
+            return {
+                key: _sample_from_schema(value)
+                for key, value in props.items()
+            }
+        return {}
+    if schema_type == "array":
+        item = schema.get("items")
+        return [_sample_from_schema(item)] if isinstance(item, dict) else []
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        return enum[0]
+    if schema_type in {"number", "integer"}:
+        return 1
+    if schema_type == "boolean":
+        return True
+    return "sample"
+
+
+def _prepare_pin_data(workflow_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    result = call_tool(
+        "prepare_workflow_pin_data",
+        {"workflowId": workflow_id},
+    )
+    if result.get("success") is not True:
+        return {}, result
+
+    data = _result_data(result)
+    pin_data: Dict[str, Any] = {}
+
+    schemas = data.get("nodeSchemasToGenerate")
+    if isinstance(schemas, dict):
+        for node_name, schema in schemas.items():
+            pin_data[str(node_name)] = [
+                {"json": _sample_from_schema(schema)}
+            ]
+
+    without_schema = data.get("nodesWithoutSchema")
+    if isinstance(without_schema, list):
+        for node_name in without_schema:
+            pin_data[str(node_name)] = [{"json": {}}]
+
+    return pin_data, {
+        "success": True,
+        "verified": True,
+        "coverage": data.get("coverage"),
+        "message": "Generated deterministic test pin data from n8n schemas.",
+    }
+
+
+def _select_trigger(workflow: Dict[str, Any]) -> Optional[str]:
+    nodes = workflow.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+
+    # Prefer n8n's explicit trigger marker so service-specific triggers such
+    # as GitHub Trigger are selected even when their type name is not in the
+    # legacy token list.
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get("isTrigger") is True:
+            return str(node.get("name") or "") or None
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("type") or "").lower()
+        if any(
+            token in node_type
+            for token in (
+                "webhook",
+                "chattrigger",
+                "formtrigger",
+                "scheduletrigger",
+                "manualtrigger",
+                "githubtrigger",
+                "trigger",
+            )
+        ):
+            return str(node.get("name") or "") or None
+
+    return None
+
+
+def _test_workflow(
+    workflow_id: str,
+    workflow: Dict[str, Any],
+    timeout: int,
+) -> Dict[str, Any]:
+    pin_data, prep = _prepare_pin_data(workflow_id)
+    if prep.get("success") is not True:
+        return _failed(
+            "Could not prepare n8n test pin data.",
+            stage="test_prepare",
+            details=prep,
+        )
+
+    arguments: Dict[str, Any] = {
+        "workflowId": workflow_id,
+        "pinData": pin_data,
+        "timeout": max(30, min(int(timeout), 3600)),
+    }
+    trigger = _select_trigger(workflow)
+    if trigger:
+        arguments["triggerNodeName"] = trigger
+
+    result = call_tool("test_workflow", arguments)
+    data = _result_data(result)
+    status = str(
+        data.get("status") or result.get("status") or ""
+    ).lower()
+    success = result.get("success") is True and status == "success"
+
+    return {
+        **result,
+        "success": success,
+        "verified": success,
+        "test_status": status,
+        "pin_data_coverage": prep.get("coverage"),
+        "message": (
+            "n8n workflow test completed successfully."
+            if success
+            else str(
+                result.get("message")
+                or data.get("error")
+                or result.get("error")
+                or "n8n workflow test did not pass."
+            )
+        ),
+    }
+
+
+def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    arguments = dict(arguments or {})
+    request = _clean(arguments.get("request"))
+    if not request:
+        return _failed("n8n workflow build request is empty.")
+
+    activate_requested = bool(arguments.get("activate", False))
+    test_requested = bool(arguments.get("test", True))
+    project_id = _clean(arguments.get("project_id")) or None
+    folder_id = _clean(arguments.get("folder_id")) or None
+    timeout = int(arguments.get("test_timeout", 300) or 300)
+
+    _progress("architecture: discovering n8n capabilities")
+    architecture_context = dict(arguments.get("context") or {})
+    architecture_context["fast"] = True
+    design = design_workflow(request, architecture_context)
+    if (
+        design.get("quality_gate", {}).get("ready_to_build")
+        is not True
+    ):
+        return _failed(
+            "n8n architecture is not ready to build.",
+            stage="architecture",
+            architecture=design,
+        )
+
+    _progress("sdk-reference: loading live n8n Workflow SDK contract")
+    sdk_result = _get_workflow_sdk_reference()
+    if sdk_result.get("success") is not True:
+        return sdk_result
+    sdk_reference = str(sdk_result["reference"])
+
+    code = str(arguments.get("workflow_code") or "").strip()
+    name = _clean(arguments.get("name"))
+    description = _clean(arguments.get("description"))
+    attempts: List[Dict[str, Any]] = []
+
+    for attempt in range(MAX_REPAIR_ATTEMPTS + 1):
+        _progress(f"compile/validate: attempt {attempt + 1}/{MAX_REPAIR_ATTEMPTS + 1}")
+        if not code:
+            try:
+                generated = _ollama_json(_compiler_prompt(design, sdk_reference=sdk_reference))
+            except Exception as exc:
+                return _failed(
+                    f"n8n workflow compiler failed: {exc}",
+                    stage="compile",
+                    architecture=design,
+                )
+            code = str(generated.get("code") or "").strip()
+            name = name or _clean(generated.get("name"))
+            description = description or _clean(generated.get("description"))
+
+        if not code:
+            return _failed(
+                "n8n workflow compiler produced empty code.",
+                stage="compile",
+            )
+
+        allowed_node_types = _verified_node_types(design)
+        verified_node_versions = _verified_node_versions(design)
+        validation = _validate_code(
+            code,
+            allowed_node_types=allowed_node_types,
+            verified_node_versions=verified_node_versions,
+        )
+        attempts.append({
+            "attempt": attempt + 1,
+            "validation": validation,
+        })
+        data = _result_data(validation)
+        valid = bool(
+            data.get("valid", validation.get("valid", False))
+        )
+        validation_blockers = _validation_blockers(validation)
+        if validation_blockers:
+            valid = False
+
+        if validation.get("success") is True and valid:
+            break
+
+        if arguments.get("workflow_code") and attempt == 0:
+            return _failed(
+                "Provided n8n workflow code failed validation.",
+                stage="validate",
+                attempts=attempts,
+            )
+
+        if attempt >= MAX_REPAIR_ATTEMPTS:
+            return _failed(
+                "n8n workflow code failed validation after repair attempts.",
+                stage="validate",
+                attempts=attempts,
+            )
+
+        error_payload: Dict[str, Any] = dict(validation)
+        if validation_blockers:
+            error_payload["blocking_warnings"] = validation_blockers
+
+        guard_errors = _result_data(validation).get("errors", [])
+        unknown_types: List[str] = []
+        for message in guard_errors if isinstance(guard_errors, list) else []:
+            match = re.search(
+                r"verified live n8n schemas:\s*(.*?)(?:\.\s*Do not invent|$)",
+                str(message),
+                re.IGNORECASE,
+            )
+            if match:
+                unknown_types.extend(
+                    item.strip()
+                    for item in match.group(1).split(",")
+                    if item.strip()
+                )
+
+        resolved_types = _enrich_unknown_node_types(design, unknown_types)
+        if resolved_types:
+            error_payload["live_schema_confirmed"] = resolved_types
+            error_payload["repair_instruction"] = (
+                "Use the live-confirmed types only when their schemas support "
+                "the requested operation."
+            )
+        else:
+            error_payload["repair_instruction"] = (
+                "Do not repeat any rejected node type. Use only the allowlisted "
+                "node types in the prompt."
+            )
+
+        error_text = json.dumps(
+            error_payload,
+            ensure_ascii=False,
+            default=str,
+        )
+
+        # When n8n reports an undefined AI subnode identifier, make the
+        # structural correction explicit instead of relying on the model to
+        # infer the missing factory declaration from a large SDK reference.
+        if "Unknown identifier:" in error_text and "subnodes" in code:
+            error_text += (
+                "\nSTRUCTURAL REPAIR REQUIREMENT: every identifier referenced "
+                "inside subnodes must be declared earlier with its documented "
+                "factory. For an AI Agent model, declare "
+                "const openAiModel = languageModel({...}) before using "
+                "subnodes: { model: openAiModel }.\n"
+                f"REQUIRED PATTERN:\n{AI_SUBNODE_PATTERN}"
+            )
+
+        repaired = _ollama_json(
+            _compiler_prompt(
+                design,
+                sdk_reference=sdk_reference,
+                previous_code=code,
+                validation_error=error_text,
+            )
+        )
+        code = str(repaired.get("code") or "").strip()
+
+    _progress("create: sending validated workflow to n8n")
+    create_result = _create_workflow(
+        code,
+        name or "JARVIS Generated Workflow",
+        description or request,
+        project_id,
+        folder_id,
+    )
+    if create_result.get("success") is not True:
+        return _failed(
+            "n8n workflow mutation failed during creation.",
+            stage="create",
+            creation=create_result,
+            attempts=attempts,
+        )
+
+    create_data = _result_data(create_result)
+    workflow_id = _clean(
+        create_data.get("workflowId")
+        or create_result.get("workflowId")
+    )
+    if not workflow_id:
+        return _failed(
+            "n8n created the workflow but did not return a workflow ID.",
+            stage="create",
+            creation=create_result,
+        )
+
+    _progress("verify: fetching saved workflow graph")
+    verification = _verify_saved_workflow(workflow_id)
+    if verification.get("success") is not True:
+        return _failed(
+            "Created n8n workflow could not be verified.",
+            stage="verify_creation",
+            workflow_id=workflow_id,
+            creation=create_result,
+            verification=verification,
+        )
+
+    workflow = verification["workflow"]
+    _progress("test: preparing pin data and executing workflow")
+    test_result = (
+        _test_workflow(workflow_id, workflow, timeout)
+        if test_requested
+        else None
+    )
+    _progress("audit: checking live workflow graph")
+    audit_result = audit_workflow(workflow_id)
+
+    audit_ready = bool(
+        audit_result.get("quality_gate", {}).get("ready_to_publish")
+    )
+    test_ready = (
+        not test_requested
+        or bool(test_result and test_result.get("success"))
+    )
+
+    published = None
+    if test_requested and not test_ready:
+        return _failed(
+            "n8n workflow was created and audited, but its requested test did not pass.",
+            stage="test_gate",
+            workflow_id=workflow_id,
+            test=test_result,
+            audit=audit_result,
+        )
+
+    if activate_requested:
+        if not audit_ready:
+            return _failed(
+                "Activation blocked because the workflow audit has open "
+                "high-severity findings.",
+                stage="activate_gate",
+                workflow_id=workflow_id,
+                test=test_result,
+                audit=audit_result,
+            )
+
+        _progress("publish: activation gate passed; publishing workflow")
+        published = call_tool(
+            "publish_workflow",
+            {"workflowId": workflow_id},
+        )
+        if published.get("success") is not True:
+            return _failed(
+                "Workflow was built and tested, but n8n publication failed.",
+                stage="publish",
+                workflow_id=workflow_id,
+                test=test_result,
+                audit=audit_result,
+                publish=published,
+            )
+
+    return {
+        "success": True,
+        "verified": True,
+        "retryable": False,
+        "terminal": True,
+        "execution_owner": "n8n",
+        "mode": "build",
+        "workflow_id": workflow_id,
+        "workflow_name": workflow.get("name"),
+        "workflow_url": create_data.get("url") or create_result.get("url"),
+        "architecture": design,
+        "sdk_reference_loaded": True,
+        "validation_attempts": attempts,
+        "creation": create_result,
+        "verification": {
+            "node_count": verification.get("node_count"),
+            "connection_count": verification.get("connection_count"),
+        },
+        "test": test_result,
+        "audit": audit_result,
+        "published": published,
+        "activation_requested": activate_requested,
+        "message": (
+            "n8n workflow created, verified, tested, and published."
+            if published is not None
+            else "n8n workflow created, verified, tested, and audited."
+            if test_result is not None and test_result.get("success")
+            else "n8n workflow created, verified, and audited."
+        ),
+    }
+
+
+def run_builder(
+    arguments: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return build_workflow(arguments)

@@ -6,6 +6,29 @@ import n8n_workflow_architect as architect
 
 class N8nWorkflowArchitectTests(unittest.TestCase):
 
+    def test_unspecified_alert_uses_local_alert_output_capability(self):
+        capabilities = architect._required_capabilities(
+            "Monitor GitHub issues, summarize bugs, and send me an alert"
+        )
+        ids = [item[0] for item in capabilities]
+        self.assertIn("alert_output", ids)
+        self.assertNotIn("notification", ids)
+
+    def test_explicit_email_requires_notification_capability(self):
+        capabilities = architect._required_capabilities(
+            "Monitor GitHub issues and send me an email alert"
+        )
+        ids = [item[0] for item in capabilities]
+        self.assertIn("notification", ids)
+        self.assertNotIn("alert_output", ids)
+
+    def test_alert_output_has_set_fallback(self):
+        fallback = architect._FALLBACK_NODE_CANDIDATES["alert_output"]
+        self.assertTrue(any(
+            item["nodeId"] == "n8n-nodes-base.set"
+            for item in fallback
+        ))
+
     def test_infer_techniques_prefers_relevant_workflow_patterns(self):
         techniques = architect._infer_techniques(
             "Monitor GitHub issues and send an email alert when a bug appears."
@@ -172,6 +195,33 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(calls[1], {"nodeId": "n8n-nodes-base.githubTrigger"})
 
 
+    def test_get_node_types_batches_requested_nodes_into_one_mcp_call(self):
+        captured = {}
+
+        def fake_call(tool_name, arguments=None):
+            captured["tool"] = tool_name
+            captured["arguments"] = arguments
+            return {
+                "success": True,
+                "data": {
+                    "definitions": (
+                        "type A = { type: 'n8n-nodes-base.if' }; "
+                        "type B = { type: 'n8n-nodes-base.slack' };"
+                    )
+                },
+            }
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect._get_node_types([
+                {"nodeId": "n8n-nodes-base.if", "type": "n8n-nodes-base.if"},
+                {"nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
+            ])
+
+        self.assertTrue(result["success"])
+        self.assertEqual(captured["tool"], "get_node_types")
+        self.assertEqual(len(captured["arguments"]["nodeIds"]), 2)
+
+
     def test_schema_result_validator_rejects_success_without_schema(self):
         self.assertFalse(
             architect._schema_result_is_valid({
@@ -233,7 +283,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertTrue(result["definitions"])
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
 
 
     def test_search_queries_expand_explicit_summarization_and_notification_nodes(self):
@@ -398,9 +448,16 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         def fake_call(tool_name, arguments=None):
             self.assertEqual(tool_name, "search_nodes")
-            query = arguments["queries"][0]
-            payload = fake_results.get(query, {"nodes": []})
-            return {"success": True, "data": payload}
+            requested = arguments["queries"]
+            nodes = []
+            for query in requested:
+                payload = fake_results.get(query, {})
+                nodes.extend(payload.get("nodes", []))
+                if isinstance(payload.get("results"), str):
+                    nodes.extend(
+                        architect._node_items_from_text(payload["results"])
+                    )
+            return {"success": True, "data": {"nodes": nodes}}
 
         with patch.object(architect, "_call", side_effect=fake_call):
             nodes, _ = architect._discover_nodes(
@@ -562,7 +619,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             ["monitoring", "content_generation", "notification"],
         )
         gate = architect._quality_gate(
-            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            "Monitor GitHub issues, summarize bugs, and send me a Slack alert.",
             requirements,
             candidates,
             [
@@ -646,11 +703,11 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
             {"name": "Slack", "nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
         ]
         requirements = architect._requirements(
-            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            "Monitor GitHub issues, summarize bugs, and send me a Slack alert.",
             ["monitoring", "content_generation", "notification"],
         )
         gate = architect._quality_gate(
-            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            "Monitor GitHub issues, summarize bugs, and send me a Slack alert.",
             requirements,
             candidates,
             [
@@ -706,7 +763,7 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
 
     def test_quality_gate_accepts_schema_backed_summarization_not_in_ranked_candidates(self):
-        request = "Monitor GitHub issues, summarize bugs, and send me an alert."
+        request = "Monitor GitHub issues, summarize bugs, and send me a Slack alert."
         candidates = [
             {
                 "name": "GitHub Trigger",
@@ -843,57 +900,54 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
 
     def test_discover_nodes_backfills_missing_required_capabilities(self):
-        request = "Monitor GitHub issues, summarize bugs, and send me an alert"
+        request = "Monitor GitHub issues, summarize bugs, and send me a Slack alert"
 
         def fake_call(tool_name, arguments=None):
             self.assertEqual(tool_name, "search_nodes")
-            query = arguments["queries"][0]
-
-            if query == "GitHub issue trigger":
-                nodes = [{
+            requested = set(arguments["queries"])
+            nodes = [
+                {
+                    "nodeId": "n8n-nodes-base.manualTrigger",
+                    "name": "Manual Trigger",
+                    "type": "n8n-nodes-base.manualTrigger",
+                },
+                {
+                    "nodeId": "n8n-nodes-base.githubTool",
+                    "name": "GitHub",
+                    "type": "n8n-nodes-base.githubTool",
+                    "resource": "file",
+                    "operation": "create",
+                },
+                {
+                    "nodeId": "@n8n/n8n-nodes-langchain.textClassifier",
+                    "name": "Text Classifier",
+                    "type": "@n8n/n8n-nodes-langchain.textClassifier",
+                },
+            ]
+            if "GitHub issue trigger" in requested:
+                nodes.append({
                     "nodeId": "n8n-nodes-base.githubTrigger",
                     "name": "GitHub Trigger",
                     "type": "n8n-nodes-base.githubTrigger",
-                }]
-            elif query == "OpenAI text generation":
-                nodes = [{
-                    "nodeId": "@n8n/n8n-nodes-langchain.openAi",
-                    "name": "OpenAI",
-                    "type": "@n8n/n8n-nodes-langchain.openAi",
-                }]
-            elif query == "IF node":
-                nodes = [{
+                })
+            if "OpenAI text generation" in requested:
+                nodes.append({
+                    "nodeId": "@n8n/n8n-nodes-langchain.chainLlm",
+                    "name": "Basic LLM Chain",
+                    "type": "@n8n/n8n-nodes-langchain.chainLlm",
+                })
+            if "IF node" in requested:
+                nodes.append({
                     "nodeId": "n8n-nodes-base.if",
                     "name": "If",
                     "type": "n8n-nodes-base.if",
-                }]
-            elif query == "Slack send":
-                nodes = [{
+                })
+            if "Slack send" in requested:
+                nodes.append({
                     "nodeId": "n8n-nodes-base.slack",
                     "name": "Slack",
                     "type": "n8n-nodes-base.slack",
-                }]
-            else:
-                nodes = [
-                    {
-                        "nodeId": "n8n-nodes-base.manualTrigger",
-                        "name": "Manual Trigger",
-                        "type": "n8n-nodes-base.manualTrigger",
-                    },
-                    {
-                        "nodeId": "n8n-nodes-base.githubTool",
-                        "name": "GitHub",
-                        "type": "n8n-nodes-base.githubTool",
-                        "resource": "file",
-                        "operation": "create",
-                    },
-                    {
-                        "nodeId": "@n8n/n8n-nodes-langchain.textClassifier",
-                        "name": "Text Classifier",
-                        "type": "@n8n/n8n-nodes-langchain.textClassifier",
-                    },
-                ]
-
+                })
             return {"success": True, "data": {"nodes": nodes}}
 
         with patch.object(architect, "_call", side_effect=fake_call):
@@ -904,9 +958,55 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         node_ids = {item["nodeId"] for item in nodes}
         self.assertIn("n8n-nodes-base.githubTrigger", node_ids)
-        self.assertIn("@n8n/n8n-nodes-langchain.openAi", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.chainLlm", node_ids)
         self.assertIn("n8n-nodes-base.if", node_ids)
         self.assertIn("n8n-nodes-base.slack", node_ids)
+
+
+    def test_discover_nodes_falls_back_when_search_nodes_is_unavailable(self):
+        request = "Build a workflow that monitors GitHub issues, summarizes bugs, and sends me a Slack alert"
+        calls = []
+
+        def fake_call(tool_name, arguments=None):
+            calls.append(tool_name)
+            if tool_name == "search_nodes":
+                return {
+                    "success": False,
+                    "message": "Unknown n8n MCP tool: search_nodes",
+                }
+            if tool_name == "get_node_types":
+                definitions = []
+                for item in arguments["nodeIds"]:
+                    node_id = item["nodeId"]
+                    definitions.append({
+                        "nodeId": node_id,
+                        "type": node_id,
+                        "content": f"interface {node_id.replace('.', '_').replace('@', '_')} {{}}",
+                    })
+                return {
+                    "success": True,
+                    "data": {
+                        "definitions": definitions,
+                    },
+                }
+            if tool_name == "get_workflow_best_practices":
+                return {"success": True, "data": {"documentation": "Use explicit validation and error handling."}}
+            raise AssertionError(tool_name)
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect.design_workflow(request)
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["quality_gate"]["ready_to_build"])
+        self.assertEqual(result["schema_failures"], [])
+        node_ids = {item["nodeId"] for item in result["node_candidates"]}
+        self.assertIn("n8n-nodes-base.githubTrigger", node_ids)
+        self.assertIn("n8n-nodes-base.if", node_ids)
+        self.assertIn("n8n-nodes-base.slack", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.chainLlm", node_ids)
+        self.assertIn("@n8n/n8n-nodes-langchain.lmChatOllama", node_ids)
+        self.assertIn("get_node_types", calls)
 
 
     def test_deprecated_nodes_are_detected_from_type_definitions(self):
@@ -953,12 +1053,60 @@ export type RetiredNode = {
 
     def test_external_alerts_are_treated_as_side_effects(self):
         requirements = architect._requirements(
-            "Monitor GitHub issues and send me an alert when a bug appears.",
+            "Monitor GitHub issues and send me a Slack alert when a bug appears.",
             ["monitoring"],
         )
 
         self.assertTrue(requirements["side_effect_review"]["required"])
         self.assertTrue(requirements["error_handling"]["required"])
+
+    def test_design_workflow_fast_mode_skips_best_practice_fetch(self):
+        request = "Monitor GitHub issues and send me an alert."
+        with patch.object(
+            architect,
+            "_discover_nodes",
+            return_value=(
+                [
+                    {
+                        "name": "GitHub Trigger",
+                        "nodeId": "n8n-nodes-base.githubTrigger",
+                        "type": "n8n-nodes-base.githubTrigger",
+                    }
+                ],
+                ["GitHub issues"],
+            ),
+        ), patch.object(
+            architect,
+            "_best_practice_guidance",
+            side_effect=AssertionError("fast mode must not fetch best practices"),
+        ), patch.object(
+            architect,
+            "_search_nodes_batch",
+            return_value=([], {"success": True}),
+        ), patch.object(
+            architect,
+            "_get_node_types",
+            return_value={
+                "success": True,
+                "definitions": [
+                    {
+                        "nodeId": "n8n-nodes-base.githubTrigger",
+                        "type": "n8n-nodes-base.githubTrigger",
+                    }
+                ],
+                "schema_errors": [],
+                "schema_failures": [],
+                "invalid_node_ids": [],
+                "deprecated_node_ids": [],
+            },
+        ):
+            result = architect.design_workflow(
+                request,
+                {"fast": True},
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["best_practices"], [])
 
     def test_design_workflow_fails_cleanly_for_empty_request(self):
         result = architect.design_workflow("")

@@ -556,16 +556,6 @@ DEBUG = os.environ.get(
 # JARVIS can connect directly to n8n's instance-level MCP server.
 # Keep MCP opt-in and fail closed when no bearer token is available.
 
-N8N_MCP_ENABLED = os.environ.get(
-    "JARVIS_N8N_MCP_ENABLED",
-    "0",
-).strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
-
 N8N_MCP_URL = os.environ.get(
     "JARVIS_N8N_MCP_URL",
     "http://127.0.0.1:5678/mcp-server/http",
@@ -580,6 +570,27 @@ N8N_MCP_TOKEN_FILE = os.environ.get(
     "JARVIS_N8N_MCP_TOKEN_FILE",
     str(BASE_DIR / ".jarvis_runtime" / "n8n_mcp_token"),
 ).strip()
+
+# JARVIS can use the local instance-level MCP endpoint automatically when a
+# token is already configured. An explicit environment value still wins.
+# This avoids a common failure mode where the endpoint and token are present
+# but the client silently remains disabled because the old default was 0.
+_mcp_enabled_env = os.environ.get("JARVIS_N8N_MCP_ENABLED")
+if _mcp_enabled_env is None:
+    _mcp_token_file_exists = Path(
+        os.path.expandvars(os.path.expanduser(N8N_MCP_TOKEN_FILE))
+    ).is_file()
+    N8N_MCP_ENABLED = bool(
+        N8N_MCP_TOKEN
+        or _mcp_token_file_exists
+    )
+else:
+    N8N_MCP_ENABLED = _mcp_enabled_env.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 N8N_MCP_TIMEOUT_SECONDS = float(
     os.environ.get(

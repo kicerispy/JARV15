@@ -3254,7 +3254,10 @@ def _run_tool_raw(
         from product_research import research_product
         return research_product(argument)
 
-    if tool_name in N8N_TOOLS:
+    # Only legacy workflow delegation belongs in this broad bridge branch.
+    # Specialized MCP tools below have their own handlers and must not be
+    # swallowed by n8n_bridge.run_n8n_workflow().
+    if tool_name in {"n8n_status", "n8n_run_workflow"}:
         from n8n_bridge import n8n_status, run_n8n_workflow
 
         if tool_name == "n8n_status":
@@ -3315,6 +3318,33 @@ def _run_tool_raw(
             }
 
         return run_architect(payload)
+
+    if tool_name == "n8n_workflow_builder":
+        from n8n_workflow_builder import run_builder
+
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n workflow builder arguments must be valid JSON.",
+            }
+
+        if not isinstance(payload, dict):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n workflow builder arguments must be a JSON object.",
+            }
+
+        return run_builder(payload)
 
     if tool_name == "n8n_mcp_status":
         from n8n_mcp import status
@@ -3881,3 +3911,11 @@ def run_tool(
         tool_name,
         result,
     )
+
+# Backward-compatible dispatcher alias for scripts and integrations that
+# historically called execute_tool(). The canonical API remains run_tool().
+def execute_tool(
+    tool_name: str,
+    argument: str = "",
+) -> ToolResult:
+    return run_tool(tool_name, argument)
