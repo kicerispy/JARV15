@@ -107,3 +107,13 @@ def test_anime_requests_do_not_fall_into_generic_browser_route(request):
     plan = build_anipy_plan(request)
     assert plan is not None
     assert plan["steps"][0]["tool"].startswith("anipy_")
+
+
+
+def test_numeric_quality_matches_native_cli_parsing():
+    from anipy_integration import _quality
+
+    assert _quality("720") == 720
+    assert _quality(1080) == 1080
+    assert _quality("best") == "best"
+    assert _quality("") is None
