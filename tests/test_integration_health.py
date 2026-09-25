@@ -32,6 +32,7 @@ def test_completion_tool_families_are_registered():
     }
     assert expected_gods_eye <= set(GODS_EYE_TOOLS)
     assert set(SCREEN_MEMORY_TOOLS) == {
+        "screen_memory_setup",
         "screen_memory_status",
         "screen_memory_search",
         "screen_memory_recent",
@@ -76,6 +77,9 @@ def test_gods_eye_routes():
 
 
 def test_screen_memory_routes():
+    assert build_screen_memory_plan("setup screen memory") == {
+        "steps": [{"tool": "screen_memory_setup", "argument": ""}]
+    }
     assert build_screen_memory_plan("screen memory status") == {
         "steps": [{"tool": "screen_memory_status", "argument": ""}]
     }
