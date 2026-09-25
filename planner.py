@@ -897,7 +897,11 @@ def _planner_tool_scope(
     )
 
     if any(signal in text for signal in skill_domain_signals):
-        return set(_AGENT_SKILL_PLANNER_TOOLS) | set(_CONTEXT_MEMORY_PLANNER_TOOLS)
+        return (
+            set(_AGENT_SKILL_PLANNER_TOOLS)
+            | set(_CONTEXT_MEMORY_PLANNER_TOOLS)
+            | set(_CODE_PLANNER_TOOLS)
+        )
 
     code_signals = (
         "code",
