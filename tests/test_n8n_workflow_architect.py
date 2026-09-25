@@ -108,6 +108,77 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         self.assertEqual(values[0]["name"], "Webhook")
 
+    def test_node_search_parsing_preserves_discriminators(self):
+        result = {
+            "success": True,
+            "data": {
+                "results": (
+                    "n8n-nodes-base.github "
+                    "resource: issue operation: get_issues version: 1\n"
+                    "n8n-nodes-base.slack "
+                    "resource: message operation: send version: 2.4\n"
+                    "n8n-nodes-base.switch mode: rules version: 3.4"
+                )
+            },
+        }
+
+        values = architect._result_list(
+            result,
+            ("nodes", "results", "items"),
+        )
+
+        by_id = {item["nodeId"]: item for item in values}
+        self.assertEqual(by_id["n8n-nodes-base.github"]["resource"], "issue")
+        self.assertEqual(by_id["n8n-nodes-base.github"]["operation"], "get_issues")
+        self.assertEqual(by_id["n8n-nodes-base.slack"]["resource"], "message")
+        self.assertEqual(by_id["n8n-nodes-base.slack"]["operation"], "send")
+        self.assertEqual(by_id["n8n-nodes-base.switch"]["mode"], "rules")
+        self.assertEqual(by_id["n8n-nodes-base.switch"]["version"], 3.4)
+
+
+    def test_get_node_types_forwards_search_discriminators(self):
+        captured = {}
+
+        def fake_call(tool_name, arguments=None):
+            self.assertEqual(tool_name, "get_node_types")
+            captured.update(arguments or {})
+            return {
+                "success": True,
+                "data": {
+                    "definitions": (
+                        "interface SlackParams { resource: 'message'; operation: 'send' }"
+                    )
+                },
+            }
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            result = architect._get_node_types(
+                [
+                    {
+                        "nodeId": "n8n-nodes-base.slack",
+                        "type": "n8n-nodes-base.slack",
+                        "resource": "message",
+                        "operation": "send",
+                        "version": 2.4,
+                    }
+                ]
+            )
+
+        self.assertTrue(result["definitions"])
+        self.assertEqual(
+            captured["nodeIds"][0]["resource"],
+            "message",
+        )
+        self.assertEqual(
+            captured["nodeIds"][0]["operation"],
+            "send",
+        )
+        self.assertEqual(
+            captured["nodeIds"][0]["version"],
+            2.4,
+        )
+
+
     def test_result_list_parses_documented_string_search_results(self):
         result = {
             "success": True,
