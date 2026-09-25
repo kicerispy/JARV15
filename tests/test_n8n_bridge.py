@@ -117,6 +117,33 @@ class N8nBridgeTests(unittest.TestCase):
         self.assertTrue(result["terminal"])
         self.assertEqual(result["execution_owner"], "n8n")
 
+    def test_dispatch_prefers_native_mcp_when_enabled(self):
+        with patch.object(n8n_bridge, "N8N_ENABLED", True), \
+             patch.object(n8n_bridge, "N8N_MCP_ENABLED", True):
+            # The config symbol is imported lazily by run_n8n_workflow, so
+            # patching the module import boundary keeps this test isolated.
+            with patch(
+                "n8n_mcp.run_workflow_request",
+                return_value={
+                    "success": True,
+                    "verified": True,
+                    "execution_owner": "n8n",
+                    "message": "MCP workflow completed.",
+                },
+            ) as run:
+                result = n8n_bridge.run_n8n_workflow(
+                    "Run the weather workflow",
+                    "orchestration",
+                    {"location": "Chicago"},
+                )
+
+        self.assertTrue(result["success"])
+        run.assert_called_once_with(
+            request="Run the weather workflow",
+            workflow_class="orchestration",
+            context={"location": "Chicago"},
+        )
+
     def test_dispatch_posts_structured_workflow_request(self):
         with patch.object(n8n_bridge, "N8N_ENABLED", True), patch.object(
             n8n_bridge,
