@@ -47,15 +47,9 @@ def test_anipy_download_routes_to_structured_downloader():
 def test_anipy_watch_range_uses_native_binge_mode():
     plan = build_anipy_plan("watch One Piece episodes 1-3 sub")
 
-    # This request currently uses the native CLI path only when "episode"
-    # is singular in the natural-language route. Verify the broader anime
-    # domain still reaches the planner rather than generic browser routing.
-    assert plan is not None
-    assert plan["steps"][0]["tool"] in {
-        "anipy_cli",
-        "anipy_search",
-        "anipy_download",
-    }
+    assert plan["steps"][0]["tool"] == "anipy_cli"
+    payload = json.loads(plan["steps"][0]["argument"])
+    assert payload["args"] == ["-B", "-s", "One Piece:1-3:sub"]
 
 
 def test_native_cli_args_are_forwarded_without_shell_execution(monkeypatch):
@@ -87,7 +81,7 @@ def test_native_cli_args_are_forwarded_without_shell_execution(monkeypatch):
         "anipy_cli.cli",
         "-D",
     ]
-    assert captured["kwargs"]["shell"] is not True
+    assert captured["kwargs"].get("shell", False) is not True
 
 
 @pytest.mark.parametrize(
