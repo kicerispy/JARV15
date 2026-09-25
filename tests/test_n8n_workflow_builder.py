@@ -50,6 +50,90 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         )
         self.assertFalse(builder._sdk_shape_errors(code))
 
+    def test_validation_warning_blockers_force_repair(self):
+        validation = {
+            "success": True,
+            "data": {
+                "valid": True,
+                "warnings": [
+                    {
+                        "code": "MISSING_EXPRESSION_PREFIX",
+                        "message": "message contains an expression without '=' prefix",
+                    },
+                    {
+                        "code": "INVALID_PARAMETER",
+                        "message": "parameters.text expected string, got undefined",
+                    },
+                ],
+            },
+        }
+        blockers = builder._validation_blockers(validation)
+        self.assertEqual(len(blockers), 2)
+        self.assertTrue(all(":" in item for item in blockers))
+
+    def test_select_trigger_detects_service_specific_trigger(self):
+        graph = {
+            "nodes": [
+                {
+                    "name": "GitHub Trigger",
+                    "type": "n8n-nodes-base.githubTrigger",
+                    "isTrigger": True,
+                },
+            ],
+        }
+        self.assertEqual(builder._select_trigger(graph), "GitHub Trigger")
+
+    def test_failed_requested_test_returns_failure_even_without_activation(self):
+        graph = self._graph()
+        design = self._design()
+
+        def fake_call(name, args=None):
+            if name == "get_workflow_sdk_reference":
+                return {
+                    "success": True,
+                    "data": {"reference": "SDK: workflow('id', 'name')"},
+                }
+            if name == "validate_workflow":
+                return {"success": True, "data": {"valid": True}}
+            if name == "create_workflow_from_code":
+                return {"success": True, "data": {"workflowId": "wf-123"}}
+            if name == "get_workflow_details":
+                return {"success": True, "data": {"workflow": graph}}
+            if name == "prepare_workflow_pin_data":
+                return {
+                    "success": True,
+                    "data": {
+                        "nodeSchemasToGenerate": {},
+                        "nodesWithoutSchema": ["Slack"],
+                        "coverage": {},
+                    },
+                }
+            if name == "test_workflow":
+                return {
+                    "success": True,
+                    "data": {"status": "error", "error": "No active execution found"},
+                }
+            raise AssertionError(name)
+
+        with patch.object(builder, "design_workflow", return_value=design),              patch.object(builder, "_ollama_json", return_value={"name": "x", "code": "code"}),              patch.object(builder, "call_tool", side_effect=fake_call),              patch.object(
+                 builder,
+                 "audit_workflow",
+                 return_value={
+                     "success": True,
+                     "quality_gate": {"ready_to_publish": True},
+                     "findings": [],
+                 },
+             ):
+            result = builder.build_workflow({
+                "request": "Build it",
+                "test": True,
+                "activate": False,
+            })
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["stage"], "test_gate")
+        self.assertEqual(result["workflow_id"], "wf-123")
+
     def test_sdk_reference_loader_requires_live_reference(self):
         with patch.object(
             builder,
@@ -217,6 +301,80 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         self.assertTrue(result["verification"]["node_count"])
         self.assertTrue(result["test"]["success"])
         self.assertIsNone(result["published"])
+
+    def test_validation_warnings_are_repaired_before_creation(self):
+        graph = self._graph()
+        design = self._design()
+        calls = []
+        generated = [
+            {
+                "name": "x",
+                "code": (
+                    "import { workflow } from '@n8n/workflow-sdk';\n"
+                    "export default workflow('id', 'x');"
+                ),
+            },
+            {
+                "name": "x",
+                "code": (
+                    "import { workflow } from '@n8n/workflow-sdk';\n"
+                    "export default workflow('id', 'x');"
+                ),
+            },
+        ]
+
+        def fake_ollama(*args, **kwargs):
+            return generated.pop(0)
+
+        def fake_call(name, args=None):
+            calls.append((name, args))
+            if name == "get_workflow_sdk_reference":
+                return {"success": True, "data": {"reference": "SDK: workflow('id', 'name')"}}
+            if name == "validate_workflow":
+                if sum(1 for call, _ in calls if call == "validate_workflow") == 1:
+                    return {
+                        "success": True,
+                        "data": {
+                            "valid": True,
+                            "warnings": [
+                                {
+                                    "code": "INVALID_PARAMETER",
+                                    "message": "bad type",
+                                }
+                            ],
+                        },
+                    }
+                return {"success": True, "data": {"valid": True, "warnings": []}}
+            if name == "create_workflow_from_code":
+                return {"success": True, "data": {"workflowId": "wf-123"}}
+            if name == "get_workflow_details":
+                return {"success": True, "data": {"workflow": graph}}
+            if name == "prepare_workflow_pin_data":
+                return {"success": True, "data": {"nodeSchemasToGenerate": {}, "nodesWithoutSchema": []}}
+            if name == "test_workflow":
+                return {"success": True, "data": {"status": "success"}}
+            raise AssertionError(name)
+
+        with patch.object(builder, "design_workflow", return_value=design),              patch.object(builder, "_ollama_json", side_effect=fake_ollama),              patch.object(builder, "call_tool", side_effect=fake_call),              patch.object(
+                 builder,
+                 "audit_workflow",
+                 return_value={
+                     "success": True,
+                     "quality_gate": {"ready_to_publish": True},
+                     "findings": [],
+                 },
+             ):
+            result = builder.build_workflow({
+                "request": "Build it",
+                "test": True,
+                "activate": False,
+            })
+
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            sum(1 for call, _ in calls if call == "validate_workflow"),
+            2,
+        )
 
     def test_activation_requires_passing_test_and_audit_then_publishes(self):
         graph = self._graph()
