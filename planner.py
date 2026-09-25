@@ -1680,7 +1680,7 @@ def assess_plan(
     if requires_regression_test(user_command):
         has_test_mutation = _plan_has_test_mutation(tool_names, steps)
 
-        if requires_modification and not has_test_mutation:
+        if require_modification and not has_test_mutation:
             issues.append(
                 "This change requires regression coverage. The plan must "
                 "add or update a test file before validation."
