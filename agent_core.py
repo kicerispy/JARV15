@@ -1434,6 +1434,160 @@ class JarvisAgent:
 
         return None, None
 
+    def _handle_runtime_self_healing_failure(
+        self,
+        task: AgentTask,
+    ) -> bool:
+        """Handle runtime code defects before generic retryability gates."""
+        runtime_state = task.active_context.get("_runtime_code_repair")
+
+        if isinstance(runtime_state, dict):
+            stage = str(runtime_state.get("stage", "") or "").strip()
+            if stage == "repair":
+                latest_failure = self._latest_failed_execution_evidence(task)
+                tool = str(
+                    latest_failure.get("tool", "") if latest_failure else ""
+                ).strip()
+
+                if tool in {
+                    "edit_file",
+                    "write_file",
+                    "delete_file",
+                    "code_test",
+                }:
+                    budget = self._self_healing_budget()
+                    if (
+                        budget > 0
+                        and task.self_healing_repair_attempts < budget
+                    ):
+                        task.self_healing_repair_attempts += 1
+                        task.replan_count += 1
+                        self.state["replans"] = task.replan_count
+                        runtime_state["stage"] = "restore"
+
+                        self._install_phase_plan(
+                            task,
+                            {
+                                "goal": "restore runtime self-healing checkpoint",
+                                "jarvis_internal_phase": True,
+                                "steps": [
+                                    {
+                                        "tool": "code_restore_checkpoint",
+                                        "argument": "",
+                                    }
+                                ],
+                            },
+                        )
+                        record_healing_event(
+                            {
+                                "source": "agent_core",
+                                "action": "repair_code_restore",
+                                "tool": tool,
+                                "target": runtime_state.get("target", ""),
+                                "reason": (
+                                    "Runtime self-healing validation failed; "
+                                    "restoring the checkpoint before the bounded "
+                                    "corrective attempt."
+                                ),
+                            }
+                        )
+                        return True
+
+                    task.active_context[
+                        "_runtime_code_repair_exhausted"
+                    ] = True
+                    task.active_context.pop("_runtime_code_repair", None)
+                    return False
+
+            elif stage in {"source_read", "restore"}:
+                task.active_context.pop("_runtime_code_repair", None)
+                return False
+
+            return False
+
+        if task.active_context.get("_runtime_code_repair_exhausted"):
+            return False
+
+        if not bool(getattr(config, "SELF_HEALING_ENABLED", True)):
+            return False
+
+        budget = self._self_healing_budget()
+        if budget <= 0:
+            return False
+        if task.self_healing_repair_attempts >= budget:
+            return False
+        if task.replan_count >= task.max_replans:
+            return False
+
+        evidence, diagnosis = self._latest_runtime_code_failure(task)
+        if (
+            evidence is None
+            or diagnosis is None
+            or diagnosis.category not in {
+                "code_regression",
+                "runtime_code_defect",
+            }
+        ):
+            return False
+
+        tool = str(evidence.get("tool", "") or "").strip()
+        if tool in {
+            "code_test",
+            "code_diagnose",
+            "edit_file",
+            "write_file",
+            "delete_file",
+            "code_restore_checkpoint",
+        }:
+            return False
+
+        target = self._infer_runtime_source_target_from_evidence(task)
+        if not target:
+            return False
+
+        task.self_healing_repair_attempts += 1
+        task.replan_count += 1
+        self.state["replans"] = task.replan_count
+
+        task.active_context["_runtime_code_repair"] = {
+            "stage": "source_read",
+            "target": target,
+            "category": diagnosis.category,
+            "reason": diagnosis.reason,
+            "signature": diagnosis.signature,
+        }
+
+        record_healing_event(
+            {
+                "source": "agent_core",
+                "action": "repair_code_bridge",
+                "tool": tool,
+                "target": target,
+                "category": diagnosis.category,
+                "reason": diagnosis.reason,
+            }
+        )
+
+        self._install_phase_plan(
+            task,
+            {
+                "goal": "inspect runtime self-healing target",
+                "jarvis_internal_phase": True,
+                "steps": [
+                    {
+                        "tool": "read_file",
+                        "argument": target,
+                    }
+                ],
+            },
+        )
+
+        logger.warning(
+            "JARVIS AGENT: Runtime code defect detected; "
+            f"starting bounded source-repair bridge for {target}."
+        )
+        return True
+
     def _build_runtime_code_repair_request(
         self,
         task: AgentTask,
