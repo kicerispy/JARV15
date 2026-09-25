@@ -10,6 +10,7 @@ import config
 from model_manager import ModelManager
 from logger import logger
 from project_fs import iter_project_files
+from autonomous_engineering import is_test_target, requires_regression_test
 from tool_registry import BROWSER_TOOLS, JSON_ARGUMENT_TOOLS
 
 MODEL_MANAGER = ModelManager()
@@ -133,6 +134,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "code_test": "Validate project code. argument = JSON such as {\"mode\":\"compile\",\"path\":\"main.py\"} or {\"mode\":\"pytest\",\"path\":\"tests/test_x.py\"}.",
     "code_diagnose": "Run a broader JARVIS project diagnostic pass: Python compilation, available tests, and optional static checks. Argument is JSON.",
     "dev_command": "Run an allowlisted developer command from the JARVIS project root. Argument is JSON such as {\"command\":\"python -m pytest tests/test_x.py -q\",\"timeout\":120}.",
+    "git_task_branch": "Create or activate a safe task-scoped Git branch. Argument is JSON with branch.",
     "code_checkpoint": "Create a safe checkpoint of JARVIS project source files before autonomous edits.",
     "code_restore_checkpoint": "Restore the latest JARVIS source checkpoint after an unsuccessful repair.",
     "delete_file": "Delete a file. argument = filename.",
@@ -1550,6 +1552,20 @@ def is_software_change_request(text: str) -> bool:
     )
 
 
+def _plan_has_test_mutation(tool_names: list[str], steps: list[dict]) -> bool:
+    """Return True when a plan mutates a conventional test target."""
+    for step, tool in zip(steps, tool_names):
+        if tool not in {"edit_file", "write_file", "delete_file"}:
+            continue
+
+        argument = str(step.get("argument", "") or "")
+        target = argument.split("|||", 1)[0].strip()
+        if is_test_target(target):
+            return True
+
+    return False
+
+
 def assess_plan(
     user_command: str,
     plan: Dict[str, Any],
@@ -1660,6 +1676,15 @@ def assess_plan(
         for index, tool in enumerate(tool_names)
         if tool in {"code_test", "code_diagnose"}
     ]
+
+    if requires_regression_test(user_command):
+        has_test_mutation = _plan_has_test_mutation(tool_names, steps)
+
+        if requires_modification and not has_test_mutation:
+            issues.append(
+                "This change requires regression coverage. The plan must "
+                "add or update a test file before validation."
+            )
 
     # --------------------------------------------------------
     # File-target sanity checks for diagnostic/repair plans.
