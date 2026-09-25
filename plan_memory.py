@@ -103,12 +103,11 @@ def plan_signature(request: str, plan: dict[str, Any] | None) -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    global _SCHEMA_READY
     _DB_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(_DB_PATH), timeout=5.0)
     connection.row_factory = sqlite3.Row
     connection.executescript(
-            """
+        """
             CREATE TABLE IF NOT EXISTS strategies (
                 fingerprint TEXT PRIMARY KEY,
                 request_key TEXT NOT NULL,
@@ -142,9 +141,9 @@ def _connect() -> sqlite3.Connection:
 
             CREATE INDEX IF NOT EXISTS idx_strategy_events_fp
                 ON strategy_events(fingerprint, timestamp DESC);
-            """
-        )
-        connection.commit()
+        """
+    )
+    connection.commit()
     return connection
 
 
