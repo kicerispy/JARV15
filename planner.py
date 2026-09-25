@@ -93,6 +93,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "musicbrainz_search": "Search MusicBrainz recording metadata. Argument = song, recording, or artist.",
     "anime_search": "Search anime using Jikan/MyAnimeList data. Argument = anime title.",
     "anime_episodes": "Find an anime and return its episodes using AniAPI, Kitsu, and Jikan fallbacks. Argument = anime title or JSON with anime/title and optional page.",
+    "anime_streaming_links": "Find official anime watch pages by combining AniList streaming metadata with web discovery. Returns watch-page URLs only; does not resolve direct media manifests. Argument = anime title, optional episode, or JSON.",
     "ghibli_search": "Search Studio Ghibli films. Argument = title, director, or empty.",
     "openalex_search": "Search scholarly works using OpenAlex. Argument = research topic.",
     "pubchem_lookup": "Look up chemical compound information from PubChem. Argument = compound name.",
@@ -4352,6 +4353,87 @@ def create_plan(command, *args, **kwargs):
         return qol
 
     return _create_plan_original_qol(
+        command,
+        *args,
+        **kwargs,
+    )
+
+
+# ============================================================
+# DETERMINISTIC ANIME STREAMING DISCOVERY PREFLIGHT
+# ============================================================
+# Keep obvious anime watch-page requests deterministic so JARVIS does not
+# depend on the local model remembering the dedicated resolver.
+
+_create_plan_original_anime_streaming = create_plan
+
+
+def _anime_streaming_plan(command):
+    text = str(command or "").strip()
+    lowered = text.lower()
+
+    if not lowered:
+        return None
+
+    strong_markers = (
+        "anime streaming",
+        "anime stream",
+        "streaming links",
+        "streaming link",
+        "watch anime",
+        "anime watch",
+    )
+
+    watch_markers = (
+        "where can i watch",
+        "where do i watch",
+        "find where to watch",
+        "find streaming",
+        "show me where to watch",
+    )
+
+    if not any(marker in lowered for marker in strong_markers) and not (
+        any(marker in lowered for marker in watch_markers)
+        and ("anime" in lowered or "episode" in lowered)
+    ):
+        return None
+
+    argument = text
+    for prefix in (
+        "find streaming links for ",
+        "find streaming link for ",
+        "anime streaming links for ",
+        "anime streaming link for ",
+        "where can i watch ",
+        "where do i watch ",
+        "find where to watch ",
+        "show me where to watch ",
+    ):
+        if lowered.startswith(prefix):
+            argument = text[len(prefix):].strip().rstrip("?.!,")
+            break
+
+    return {
+        "goal": "find official anime streaming pages",
+        "steps": [
+            {
+                "tool": "anime_streaming_links",
+                "argument": argument,
+            }
+        ],
+    }
+
+
+def create_plan(command, *args, **kwargs):
+    anime_streaming = _anime_streaming_plan(command)
+    if anime_streaming is not None:
+        print(
+            "JARVIS DEBUG: deterministic anime streaming discovery -> "
+            "anime_streaming_links"
+        )
+        return anime_streaming
+
+    return _create_plan_original_anime_streaming(
         command,
         *args,
         **kwargs,
