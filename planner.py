@@ -3293,7 +3293,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
 
             if metric_parts:
                 print(
-                    "JARVIS DEBUG: focused coding planner latency breakdown: "
+                    "JARVIS DEBUG: focused planner latency breakdown: "
                     + " | ".join(metric_parts),
                     flush=True,
                 )
@@ -3306,7 +3306,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
                     value = getattr(response, name, None)
                     if value is not None:
                         print(
-                            f"JARVIS DEBUG: focused coding planner {label}={value}",
+                            f"JARVIS DEBUG: focused planner {label}={value}",
                             flush=True,
                         )
                 except Exception:
@@ -3416,7 +3416,7 @@ Return ONLY valid JSON with goal and steps. Every argument must be a string.
             fallback_model = MODEL_MANAGER.coding_fallback_model
             if fallback_model and fallback_model != planner_model:
                 logger.warning(
-                    "JARVIS DEBUG: primary coding planner returned invalid "
+                    "JARVIS DEBUG: focused planner returned invalid "
                     f"output; falling back to {fallback_model}"
                 )
                 try:
