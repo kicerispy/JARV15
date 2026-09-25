@@ -3828,7 +3828,6 @@ def _run_tool_raw(
     elif tool_name == "jarvis_capabilities":
 
         from tool_registry import (
-            BROWSER_TOOLS,
             JARVIS_PLATFORM_TOOLS,
             N8N_TOOLS,
         )
