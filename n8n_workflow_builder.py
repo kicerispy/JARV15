@@ -24,6 +24,31 @@ DEFAULT_TIMEOUT = 180
 MAX_ARCHITECT_CONTEXT = 18000
 MAX_SDK_REFERENCE_CHARS = 22000
 MAX_REPAIR_ATTEMPTS = 2
+
+AI_SUBNODE_PATTERN = """
+const openAiModel = languageModel({
+  type: '@n8n/n8n-nodes-langchain.lmChatOpenAi',
+  version: 1.3,
+  config: {
+    name: 'OpenAI Model',
+    parameters: {},
+  },
+});
+
+const aiAgent = node({
+  type: '@n8n/n8n-nodes-langchain.agent',
+  version: 3.1,
+  config: {
+    name: 'AI Agent',
+    parameters: { promptType: 'define', text: 'Process the input.' },
+    subnodes: { model: openAiModel },
+  },
+});
+
+export default workflow('example', 'AI Example')
+  .add(startTrigger)
+  .to(aiAgent);
+"""
 PROGRESS_ENABLED = os.getenv("JARVIS_N8N_BUILDER_PROGRESS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
@@ -167,6 +192,24 @@ def _get_workflow_sdk_reference() -> Dict[str, Any]:
     }
 
 
+def _undefined_subnode_identifiers(code: str) -> List[str]:
+    """Detect common AI subnode references that have no declaration."""
+    source = str(code or "")
+    identifiers: List[str] = []
+    for match in re.finditer(r"subnodes\\s*:\\s*\\{([^}]*)\\}", source, re.DOTALL):
+        body = match.group(1)
+        for identifier in re.findall(r"\\b(?:model|memory|tools?|outputParser|embeddings|vectorStore|retriever)\\s*:\\s*([A-Za-z_$][\\w$]*)", body):
+            identifiers.append(identifier)
+    undefined: List[str] = []
+    for identifier in identifiers:
+        declaration = re.search(
+            rf"\\b(?:const|let|var)\\s+{re.escape(identifier)}\\s*=\\s*(?:languageModel|memory|tool|outputParser|embeddings|vectorStore|retriever)\\s*\\(",
+            source,
+        )
+        if declaration is None:
+            undefined.append(identifier)
+    return list(dict.fromkeys(undefined))
+
 def _sdk_shape_errors(code: str) -> List[str]:
     """Reject common model-generated SDK shapes before spending an MCP call."""
     errors: List[str] = []
@@ -191,6 +234,16 @@ def _sdk_shape_errors(code: str) -> List[str]:
 
     if "@n8n/workflow-sdk" not in source:
         errors.append("Import the Workflow SDK from @n8n/workflow-sdk.")
+
+    undefined_subnodes = _undefined_subnode_identifiers(source)
+    if undefined_subnodes:
+        errors.append(
+            "These AI subnode references are undefined: "
+            + ", ".join(undefined_subnodes)
+            + ". Declare each with the documented factory first "
+            + "(for example const openAiModel = languageModel({...})) before "
+            + "referencing it in subnodes."
+        )
 
     if not re.search(
         r"export\s+default\s+workflow\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]",
@@ -235,6 +288,8 @@ Rules:
 - Do not emit export type, export interface, typeof default_, or other type-only exports.
 - Do not leave branch wiring as standalone statements after export default.
 - Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
+- Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: { model: openAiModel }` requires `const openAiModel = languageModel({...})` earlier in the code.
+- For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
 - Include a real trigger and connect every required stage.
 - Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
 - Keep the graph minimal and deterministic.
@@ -245,6 +300,9 @@ Rules:
 
 LIVE WORKFLOW SDK REFERENCE:
 {_bounded(sdk_reference, MAX_SDK_REFERENCE_CHARS)}
+
+TARGETED AI SUBNODE REFERENCE:
+{AI_SUBNODE_PATTERN}
 
 VERIFIED ARCHITECTURE:
 {_architecture_context(design)}
@@ -546,6 +604,20 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
             ensure_ascii=False,
             default=str,
         )
+
+        # When n8n reports an undefined AI subnode identifier, make the
+        # structural correction explicit instead of relying on the model to
+        # infer the missing factory declaration from a large SDK reference.
+        if "Unknown identifier:" in error_text and "subnodes" in code:
+            error_text += (
+                "\nSTRUCTURAL REPAIR REQUIREMENT: every identifier referenced "
+                "inside subnodes must be declared earlier with its documented "
+                "factory. For an AI Agent model, declare "
+                "const openAiModel = languageModel({...}) before using "
+                "subnodes: { model: openAiModel }.\n"
+                f"REQUIRED PATTERN:\n{AI_SUBNODE_PATTERN}"
+            )
+
         repaired = _ollama_json(
             _compiler_prompt(
                 design,
