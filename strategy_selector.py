@@ -102,6 +102,83 @@ def strategy_hints(
     return hints
 
 
+def score_plan(
+    request: str,
+    plan: dict[str, Any],
+    *,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score a candidate plan against known strategy history and tool health."""
+    if not isinstance(plan, dict) or not isinstance(plan.get("steps"), list):
+        return {
+            "score": 0.0,
+            "matched_strategy": None,
+            "reason": "No valid plan was supplied.",
+        }
+
+    context = context if isinstance(context, dict) else {}
+    candidates = find_strategies(
+        request,
+        domain=detect_domain(request, context),
+        limit=8,
+        include_quarantined=True,
+    )
+
+    if not candidates:
+        return {
+            "score": 0.0,
+            "matched_strategy": None,
+            "reason": "No historical strategy matched this request.",
+        }
+
+    try:
+        from resilience_kernel import tool_health_status
+        health = tool_health_status(limit=12)
+    except Exception:
+        health = {}
+
+    current_tools = [
+        str(step.get("tool", "") or "").strip()
+        for step in plan.get("steps", [])
+        if isinstance(step, dict) and str(step.get("tool", "") or "").strip()
+    ]
+
+    best = None
+    best_score = 0.0
+    for candidate in candidates:
+        known_tools = [
+            str(step.get("tool", "") or "").strip()
+            for step in candidate.get("steps", [])
+            if isinstance(step, dict) and step.get("tool")
+        ]
+        if not known_tools:
+            continue
+
+        overlap = len(set(current_tools) & set(known_tools))
+        sequence_ratio = overlap / max(1, len(set(current_tools) | set(known_tools)))
+        candidate_score = rank_strategy(
+            request,
+            candidate,
+            tool_health=health,
+        ) * (0.35 + 0.65 * sequence_ratio)
+
+        if candidate_score > best_score:
+            best = candidate
+            best_score = candidate_score
+
+    return {
+        "score": round(best_score, 3),
+        "matched_strategy": best.get("fingerprint") if best else None,
+        "strategy_success_rate": best.get("success_rate") if best else 0.0,
+        "strategy_verified_rate": best.get("verified_rate") if best else 0.0,
+        "reason": (
+            "Historical strategy evidence matched the candidate plan."
+            if best
+            else "No compatible historical strategy sequence was found."
+        ),
+    }
+
+
 def select_learned_plan(
     request: str,
     *,
@@ -269,6 +346,7 @@ def autonomy_status() -> dict[str, Any]:
 __all__ = [
     "autonomy_status",
     "rank_strategy",
+    "score_plan",
     "record_task_outcome",
     "regression_status",
     "select_learned_plan",
