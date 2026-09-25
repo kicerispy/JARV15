@@ -196,14 +196,14 @@ def _undefined_subnode_identifiers(code: str) -> List[str]:
     """Detect common AI subnode references that have no declaration."""
     source = str(code or "")
     identifiers: List[str] = []
-    for match in re.finditer(r"subnodes\\s*:\\s*\\{([^}]*)\\}", source, re.DOTALL):
+    for match in re.finditer(r"subnodes\s*:\s*\{([^}]*)\}", source, re.DOTALL):
         body = match.group(1)
-        for identifier in re.findall(r"\\b(?:model|memory|tools?|outputParser|embeddings|vectorStore|retriever)\\s*:\\s*([A-Za-z_$][\\w$]*)", body):
+        for identifier in re.findall(r"\b(?:model|memory|tools?|outputParser|embeddings|vectorStore|retriever)\s*:\s*([A-Za-z_$][\w$]*)", body):
             identifiers.append(identifier)
     undefined: List[str] = []
     for identifier in identifiers:
         declaration = re.search(
-            rf"\\b(?:const|let|var)\\s+{re.escape(identifier)}\\s*=\\s*(?:languageModel|memory|tool|outputParser|embeddings|vectorStore|retriever)\\s*\\(",
+            rf"\b(?:const|let|var)\s+{re.escape(identifier)}\s*=\s*(?:languageModel|memory|tool|outputParser|embeddings|vectorStore|retriever)\s*\(",
             source,
         )
         if declaration is None:
@@ -288,7 +288,7 @@ Rules:
 - Do not emit export type, export interface, typeof default_, or other type-only exports.
 - Do not leave branch wiring as standalone statements after export default.
 - Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
-- Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: { model: openAiModel }` requires `const openAiModel = languageModel({...})` earlier in the code.
+- Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
 - For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
 - Include a real trigger and connect every required stage.
 - Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
