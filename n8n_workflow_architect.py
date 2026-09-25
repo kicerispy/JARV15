@@ -188,6 +188,43 @@ def _parse_json_text(value: str) -> Any:
     return None
 
 
+_DISCRIMINATOR_PATTERNS = {
+    "resource": re.compile(
+        r"resource\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([A-Za-z0-9_.-]+)",
+        re.IGNORECASE,
+    ),
+    "operation": re.compile(
+        r"operation\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([A-Za-z0-9_.-]+)",
+        re.IGNORECASE,
+    ),
+    "mode": re.compile(
+        r"mode\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([A-Za-z0-9_.-]+)",
+        re.IGNORECASE,
+    ),
+    "version": re.compile(
+        r"version\\s*(?:[:=]|=>|\\()\\s*[\\\"]?([0-9]+(?:\\.[0-9]+)*)",
+        re.IGNORECASE,
+    ),
+}
+
+
+def _parse_node_discriminators(text: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for key, pattern in _DISCRIMINATOR_PATTERNS.items():
+        match = pattern.search(str(text or ""))
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if key == "version":
+            try:
+                result[key] = float(value)
+            except ValueError:
+                result[key] = value
+        else:
+            result[key] = value
+    return result
+
+
 def _node_items_from_text(value: str) -> List[Dict[str, Any]]:
     parsed = _parse_json_text(value)
     if isinstance(parsed, list):
@@ -199,17 +236,41 @@ def _node_items_from_text(value: str) -> List[Dict[str, Any]]:
                 return [item for item in nested if isinstance(item, dict)]
 
     text = str(value or "")
-    ids = _unique_strings(_NODE_ID_RE.findall(text))
+    matches = list(_NODE_ID_RE.finditer(text))
+    if not matches:
+        return []
+
     items: List[Dict[str, Any]] = []
-    for node_id in ids:
-        items.append(
-            {
-                "nodeId": node_id,
-                "type": node_id,
-                "name": node_id.rsplit(".", 1)[-1],
-                "_search_text": text,
-            }
+    for index, match in enumerate(matches):
+        node_id = match.group(0)
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(text)
+
+        # Prefer the text on the same line plus a small following window.
+        window_end = min(
+            next_start,
+            max(line_end, match.end() + 500),
         )
+        window = text[match.end():window_end]
+
+        # If the result formatter puts discriminators before the node id,
+        # include the current line prefix as well.
+        if match.start() > line_start:
+            window = text[line_start:window_end]
+
+        item: Dict[str, Any] = {
+            "nodeId": node_id,
+            "type": node_id,
+            "name": node_id.rsplit(".", 1)[-1],
+            "_search_text": window,
+        }
+        item.update(_parse_node_discriminators(window))
+        items.append(item)
+
     return items
 
 
