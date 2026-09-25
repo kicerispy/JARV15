@@ -31,6 +31,7 @@ voice_model/
 .jarvis_autonomy/
 
 # Runtime/generated data
+self_improvement_suggestions.json
 task_memory.json
 *.wav
 *.db
