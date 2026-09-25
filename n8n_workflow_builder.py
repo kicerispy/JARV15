@@ -697,7 +697,9 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     timeout = int(arguments.get("test_timeout", 300) or 300)
 
     _progress("architecture: discovering n8n capabilities")
-    design = design_workflow(request, arguments.get("context"))
+    architecture_context = dict(arguments.get("context") or {})
+    architecture_context["fast"] = True
+    design = design_workflow(request, architecture_context)
     if (
         design.get("quality_gate", {}).get("ready_to_build")
         is not True
