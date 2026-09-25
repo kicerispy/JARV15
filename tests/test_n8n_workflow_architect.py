@@ -157,6 +157,77 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         )
 
 
+    def test_discover_nodes_prioritizes_request_relevant_nodes_over_trigger_flood(self):
+        fake_results = {
+            "Build a workflow that monitors GitHub issues": {
+                "nodes": [
+                    {
+                        "nodeId": "n8n-nodes-base.github",
+                        "name": "GitHub",
+                        "type": "n8n-nodes-base.github",
+                    },
+                    {
+                        "nodeId": "n8n-nodes-base.githubTrigger",
+                        "name": "GitHub Trigger",
+                        "type": "n8n-nodes-base.githubTrigger",
+                    },
+                ]
+            },
+            "trigger": {
+                "results": (
+                    "n8n-nodes-base.manualTrigger "
+                    "n8n-nodes-base.scheduleTrigger "
+                    "n8n-nodes-base.webhook "
+                    "n8n-nodes-base.formTrigger"
+                )
+            },
+        }
+
+        def fake_call(tool_name, arguments=None):
+            self.assertEqual(tool_name, "search_nodes")
+            query = arguments["queries"][0]
+            payload = fake_results.get(query, {"nodes": []})
+            return {"success": True, "data": payload}
+
+        with patch.object(architect, "_call", side_effect=fake_call):
+            nodes, _ = architect._discover_nodes(
+                "Build a workflow that monitors GitHub issues",
+                ["monitoring"],
+            )
+
+        node_ids = [item["nodeId"] for item in nodes]
+        self.assertEqual(node_ids[0], "n8n-nodes-base.githubTrigger")
+        self.assertIn("n8n-nodes-base.github", node_ids)
+
+
+    def test_node_id_only_definitions_do_not_count_as_exact_schema(self):
+        with patch.object(
+            architect,
+            "_call",
+            return_value={
+                "success": True,
+                "data": {
+                    "definitions": "n8n-nodes-base.github n8n-nodes-base.webhook"
+                },
+            },
+        ):
+            result = architect._get_node_types(
+                [
+                    {
+                        "nodeId": "n8n-nodes-base.github",
+                        "type": "n8n-nodes-base.github",
+                    }
+                ]
+            )
+
+        self.assertTrue(result["definitions"])
+        self.assertNotEqual(
+            result["definitions"][0]["content"].strip(),
+            "n8n-nodes-base.github n8n-nodes-base.webhook",
+        )
+        self.assertIn("n8n-nodes-base.github", result["definitions"][0]["content"])
+
+
     def test_best_practices_prefers_documentation_field(self):
         with patch.object(
             architect,
