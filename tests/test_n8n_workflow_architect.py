@@ -665,6 +665,121 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(gate["missing"], [])
 
 
+    def test_summarization_matching_prefers_verified_chat_models(self):
+        legacy_openai = {
+            "name": "OpenAI",
+            "nodeId": "n8n-nodes-base.openai",
+            "type": "n8n-nodes-base.openai",
+        }
+        langchain_openai = {
+            "name": "OpenAI Chat Model",
+            "nodeId": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        }
+        langchain_gemini = {
+            "name": "Google Gemini Chat Model",
+            "nodeId": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+            "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+        }
+
+        self.assertFalse(
+            architect._capability_matches_node("summarization", legacy_openai)
+        )
+        self.assertTrue(
+            architect._capability_matches_node("summarization", langchain_openai)
+        )
+        self.assertTrue(
+            architect._capability_matches_node("summarization", langchain_gemini)
+        )
+
+
+    def test_summarization_search_queries_include_provider_chat_models(self):
+        queries = architect._capability_search_queries(
+            "Monitor GitHub issues, summarize bugs, and alert me.",
+            "summarization",
+        )
+
+        self.assertIn("OpenAI Chat Model", queries)
+        self.assertIn("@n8n/n8n-nodes-langchain.lmChatOpenAi", queries)
+        self.assertIn("Google Gemini Chat Model", queries)
+        self.assertIn("Basic LLM Chain", queries)
+
+
+    def test_quality_gate_accepts_schema_backed_summarization_not_in_ranked_candidates(self):
+        request = "Monitor GitHub issues, summarize bugs, and send me an alert."
+        candidates = [
+            {
+                "name": "GitHub Trigger",
+                "nodeId": "n8n-nodes-base.githubTrigger",
+                "type": "n8n-nodes-base.githubTrigger",
+            },
+            {
+                "name": "If",
+                "nodeId": "n8n-nodes-base.if",
+                "type": "n8n-nodes-base.if",
+            },
+            {
+                "name": "Slack",
+                "nodeId": "n8n-nodes-base.slack",
+                "type": "n8n-nodes-base.slack",
+            },
+        ]
+        definitions = [
+            {"nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
+            {"nodeId": "n8n-nodes-base.if", "type": "n8n-nodes-base.if"},
+            {"nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
+            {
+                "nodeId": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+                "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            },
+        ]
+
+        requirements = architect._requirements(
+            request,
+            ["monitoring", "content_generation", "notification"],
+        )
+        gate = architect._quality_gate(
+            request,
+            requirements,
+            candidates,
+            definitions,
+        )
+
+        summarization = next(
+            check
+            for check in gate["checks"]
+            if check["id"] == "summarization"
+        )
+
+        self.assertEqual(summarization["status"], "verified")
+        self.assertNotIn("summarization", gate["missing"])
+        self.assertTrue(gate["ready_to_build"])
+
+
+    def test_definition_candidates_expose_schema_node_types_for_building(self):
+        definitions = [
+            {
+                "content": (
+                    "export type LcLmChatOpenAiV13Node = { "
+                    "type: '@n8n/n8n-nodes-langchain.lmChatOpenAi'; "
+                    "version: 1.3; "
+                    "};"
+                )
+            }
+        ]
+
+        candidates = architect._definition_candidates(definitions)
+
+        self.assertEqual(
+            candidates[0]["nodeId"],
+            "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        )
+        self.assertEqual(
+            candidates[0]["type"],
+            "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        )
+
+
     def test_capability_matching_rejects_lookalike_github_file_node(self):
         github_file = {
             "name": "GitHub",
