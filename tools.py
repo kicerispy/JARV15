@@ -3807,6 +3807,10 @@ def _run_tool_raw(
             "browser": sorted(BROWSER_TOOLS),
             "n8n": sorted(N8N_TOOLS),
             "platform": sorted(JARVIS_PLATFORM_TOOLS),
+            "public_api": sorted(API_TOOLS),
+            "gods_eye": sorted(GODS_EYE_TOOLS),
+            "screen_memory": sorted(SCREEN_MEMORY_TOOLS),
+            "qol": sorted(QOL_TOOLS),
         }
 
         try:
