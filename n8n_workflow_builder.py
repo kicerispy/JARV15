@@ -464,6 +464,46 @@ def _validation_blockers(validation: Dict[str, Any]) -> List[str]:
     return blockers
 
 
+def _schema_repair_instructions(validation_blockers: List[str]) -> List[str]:
+    """Translate recurring live n8n warnings into precise compiler repair rules."""
+    text = "\n".join(validation_blockers).lower()
+    instructions: List[str] = []
+
+    if "missing_expression_prefix" in text or "without '=" in text:
+        instructions.append(
+            "Every dynamic n8n expression must begin with '='. "
+            "Use '={{ $json.foo }}', never '{{ $json.foo }}'."
+        )
+
+    if "set_invalid_assignment" in text or "parameters.assignments" in text:
+        instructions.append(
+            "For n8n-nodes-base.set, parameters.assignments must be an object "
+            "containing an inner assignments array: { assignments: [...] }. "
+            "Never use an array directly as parameters.assignments."
+        )
+
+    if "parameters.operation" in text and "slack" in text:
+        instructions.append(
+            "For a Slack message alert, pair the discriminator values correctly: "
+            "resource: 'message' and operation: 'post'. Do not use send_message."
+        )
+
+    if "channelid" in text:
+        instructions.append(
+            "Slack must receive a schema-valid channelId value when required; "
+            "do not leave channelId undefined."
+        )
+
+    if "invalid_input_index" in text or "invalid_output_index" in text:
+        instructions.append(
+            "Use ordinary main-output to main-input wiring only. .to(target) must "
+            "use output 0 to input 0. Do not invent index 1 connections or error "
+            "branches unless the source node explicitly supports them."
+        )
+
+    return instructions
+
+
 def _validate_code(
     code: str,
     *,
