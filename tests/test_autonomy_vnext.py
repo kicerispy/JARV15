@@ -212,3 +212,92 @@ def test_strategy_status_reports_persistent_learning_state():
     assert result.data["enabled"] is True
     assert result.data["trace"]["enabled"] is True
     assert result.data["strategy"]["enabled"] is True
+
+
+def test_silent_executor_failure_enters_bounded_replan_loop():
+    import tool_executor
+    from agent_core import JarvisAgent
+    from state import TaskState
+
+    class VerifyingExecutor:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, plan, active_context, task_state, speak_callback):
+            self.calls += 1
+            if self.calls == 1:
+                tool_executor.LAST_EXECUTION_TRACE = [
+                    {
+                        "index": 1,
+                        "tool": "browser_click_first_result",
+                        "argument": "{}",
+                        "status": "failed",
+                        "success": False,
+                        "verified": False,
+                        "result": {
+                            "success": False,
+                            "verified": False,
+                            "retryable": True,
+                            "message": "No such element",
+                        },
+                        "message": "No such element",
+                        "retryable": True,
+                    }
+                ]
+            else:
+                tool_executor.LAST_EXECUTION_TRACE = [
+                    {
+                        "index": 1,
+                        "tool": "browser_click_first_result",
+                        "argument": "{}",
+                        "status": "completed",
+                        "success": True,
+                        "verified": True,
+                        "result": {
+                            "success": True,
+                            "verified": True,
+                            "message": "clicked",
+                        },
+                        "message": "clicked",
+                        "retryable": False,
+                    }
+                ]
+            return "done"
+
+    def planner(request, active_context=None, history_text=""):
+        return {
+            "goal": "complete browser action",
+            "steps": [
+                {
+                    "tool": "browser_click_first_result",
+                    "argument": "{}",
+                }
+            ],
+        }
+
+    executor = VerifyingExecutor()
+    agent = JarvisAgent(planner=planner, executor=executor)
+    task = agent.create_task("click the first result")
+    agent._install_phase_plan(
+        task,
+        {
+            "goal": "complete browser action",
+            "steps": [
+                {
+                    "tool": "browser_click_first_result",
+                    "argument": "{}",
+                }
+            ],
+        },
+    )
+
+    completed = agent.execute_task(
+        task,
+        {},
+        TaskState(),
+        lambda message: False,
+    )
+
+    assert completed.status == "completed"
+    assert executor.calls == 2
+    assert completed.replan_count == 1
