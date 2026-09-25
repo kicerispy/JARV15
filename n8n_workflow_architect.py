@@ -417,7 +417,9 @@ def _node_relevance(request: str, item: Dict[str, Any]) -> Tuple[int, int, int, 
     )
 
     capability_hits = 0
-    for _, markers in _required_capabilities(request):
+    for capability, markers in _required_capabilities(request):
+        if capability == "trigger":
+            continue
         if any(marker in haystack for marker in markers):
             capability_hits += 1
 
