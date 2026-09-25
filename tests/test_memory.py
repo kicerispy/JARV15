@@ -3,6 +3,7 @@ Tests for JARVIS memory module.
 """
 import os
 import tempfile
+import threading
 import pytest
 from pathlib import Path
 
@@ -109,3 +110,20 @@ class TestMemory:
         
         memory.save_memory("Memory 2")
         assert memory.count() == 2
+
+def test_memory_can_be_used_from_another_thread(memory):
+    memory.save_memory("thread-safe memory")
+    failures = []
+
+    def worker():
+        try:
+            assert memory.get_memories(limit=5)
+            assert memory.count() == 1
+        except Exception as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert failures == []

@@ -220,3 +220,14 @@ class TestBrowserQolFastRoutes:
         scroll = get_fast_command("scroll down")
         assert scroll["steps"][0]["tool"] == "browser_scroll"
         assert json.loads(scroll["steps"][0]["argument"])["direction"] == "down"
+
+
+def test_deterministic_route_allows_roblox_mcp_setup_lifecycle():
+    from commands import deterministic_route
+
+    assert deterministic_route("setup Roblox MCP") == {
+        "steps": [{"tool": "roblox_mcp_setup", "argument": ""}]
+    }
+    assert deterministic_route("check Roblox MCP status") == {
+        "steps": [{"tool": "roblox_mcp_status", "argument": ""}]
+    }

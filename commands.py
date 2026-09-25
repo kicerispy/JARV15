@@ -2048,6 +2048,13 @@ def deterministic_route(user_request, active_context=None):
     )
 
     # ==================================================
+    # Roblox MCP lifecycle commands must be routed before the generic
+    # Roblox-domain guard below.
+    roblox_mcp_plan = build_roblox_mcp_plan(user_request)
+    if roblox_mcp_plan:
+        print("JARVIS: Roblox MCP lifecycle route selected.")
+        return roblox_mcp_plan
+
     # Roblox Studio requests must never be intercepted by the generic
     # browser DOM/search shortcuts. The Roblox MCP planner owns these tasks.
     if (
@@ -2097,11 +2104,6 @@ def deterministic_route(user_request, active_context=None):
     # ==================================================
     # JARVIS / INTEGRATION HEALTH + OPTIONAL OBSERVABILITY
     # ==================================================
-
-    roblox_mcp_plan = build_roblox_mcp_plan(user_request)
-    if roblox_mcp_plan:
-        print("JARVIS: Roblox MCP lifecycle route selected.")
-        return roblox_mcp_plan
 
     health_plan = build_integration_health_plan(user_request)
     if health_plan:
