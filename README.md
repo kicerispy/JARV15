@@ -128,6 +128,7 @@ python -m pytest -q
 ```
 
 JARVIS also exposes deterministic self-service tools:
+- `anime_streaming_links` for official anime watch-page discovery using AniList metadata plus web search, filtered to known streaming services. It returns watch-page URLs and provider names; it does not resolve direct media manifests or protected stream URLs.
 - `jarvis_doctor` for read-only system/model/tool diagnostics
 - `tool_health` for reliability and circuit-breaker state
 - `ollama_models` for local model inventory
