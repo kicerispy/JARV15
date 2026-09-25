@@ -231,3 +231,11 @@ def test_deterministic_route_allows_roblox_mcp_setup_lifecycle():
     assert deterministic_route("check Roblox MCP status") == {
         "steps": [{"tool": "roblox_mcp_status", "argument": ""}]
     }
+
+
+def test_roblox_mcp_lifecycle_is_answer_bearing():
+    from intent_resolver import resolve_intent
+
+    result = resolve_intent("setup Roblox MCP")
+    assert result["domain"] == "roblox"
+    assert result["mode"] == "answer"
