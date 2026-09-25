@@ -363,36 +363,57 @@ def _roblox_component() -> Dict[str, Any]:
             )
 
         data = result.data if isinstance(result.data, dict) else {}
+        health_payload = data.get("health")
         status_payload = data.get("status")
+
         plugin_connected = None
-        if isinstance(status_payload, dict):
-            for key in ("connected", "pluginConnected", "plugin_connected"):
-                if isinstance(status_payload.get(key), bool):
-                    plugin_connected = status_payload[key]
+        instance_count = None
+        mcp_server_active = None
+
+        for payload in (health_payload, status_payload):
+            if not isinstance(payload, dict):
+                continue
+
+            for key in ("pluginConnected", "plugin_connected", "connected"):
+                value = payload.get(key)
+                if isinstance(value, bool):
+                    plugin_connected = value
                     break
-            plugin = status_payload.get("plugin")
-            if plugin_connected is None and isinstance(plugin, dict):
-                connected = plugin.get("connected")
-                if isinstance(connected, bool):
-                    plugin_connected = connected
+
+            if isinstance(payload.get("instanceCount"), int):
+                instance_count = payload["instanceCount"]
+
+            for key in ("mcpServerActive", "mcp_server_active", "mcpConnected", "mcp_connected"):
+                value = payload.get(key)
+                if isinstance(value, bool):
+                    mcp_server_active = value
+                    break
 
         if plugin_connected is False:
             return _component(
                 "Roblox MCP",
                 "DEGRADED",
-                "Roblox MCP server is running, but the Roblox Studio plugin is not connected.",
+                (
+                    "Roblox MCP server is running, but the Roblox Studio plugin is not connected"
+                    + (f" (instance count: {instance_count})." if instance_count is not None else ".")
+                ),
                 live=True,
             )
 
+        if plugin_connected is True and (mcp_server_active is not False):
+            message = "Roblox MCP server is running and the Roblox Studio plugin is connected."
+            status = "READY"
+        elif mcp_server_active is True and plugin_connected is not True:
+            message = "Roblox MCP server is running, but the Roblox Studio plugin is not connected."
+            status = "DEGRADED"
+        else:
+            message = f"Roblox MCP server is reachable ({detail}), but Studio readiness could not be confirmed."
+            status = "DEGRADED"
+
         return _component(
             "Roblox MCP",
-            "READY",
-            f"Roblox MCP server is reachable ({detail})."
-            + (
-                " Roblox Studio plugin is connected."
-                if plugin_connected is True
-                else " Roblox Studio connection could not be confirmed."
-            ),
+            status,
+            message,
             live=True,
         )
     except Exception:
