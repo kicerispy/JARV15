@@ -126,6 +126,42 @@ ROBLOX_MCP_TIMEOUT = float(
 )
 
 # ============================================================
+# UNREAL ENGINE MCP
+# ============================================================
+
+UNREAL_MCP_URL = os.environ.get(
+    "JARVIS_UNREAL_MCP_URL",
+    "http://127.0.0.1:3000/mcp",
+).rstrip("/")
+
+UNREAL_MCP_PROJECT_PATH = os.environ.get(
+    "JARVIS_UNREAL_MCP_PROJECT_PATH",
+    "",
+).strip()
+
+UNREAL_MCP_TOKEN = os.environ.get(
+    "JARVIS_UNREAL_MCP_TOKEN",
+    "",
+).strip()
+
+UNREAL_MCP_TOKEN_FILE = os.environ.get(
+    "JARVIS_UNREAL_MCP_TOKEN_FILE",
+    "",
+).strip()
+
+UNREAL_MCP_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_UNREAL_MCP_TIMEOUT",
+        "120",
+    )
+)
+
+UNREAL_MCP_EXTERNAL_DIR = os.environ.get(
+    "JARVIS_UNREAL_MCP_EXTERNAL_DIR",
+    str(BASE_DIR / "external-tools" / "Unreal_mcp"),
+).strip()
+
+# ============================================================
 # SUPERPOWERS SOFTWARE WORKFLOW
 # ============================================================
 
