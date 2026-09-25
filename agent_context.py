@@ -31,6 +31,9 @@ from config import (
 )
 
 _SESSION_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+_STATUS_CACHE: Optional[Dict[str, Any]] = None
+_STATUS_CACHE_AT = 0.0
+_STATUS_CACHE_TTL = 30.0
 
 
 def _clean(value: Any) -> str:
@@ -115,8 +118,14 @@ def _local_memory():
     return memory
 
 
-def backend_status(timeout: float = 2.5) -> Dict[str, Any]:
+def backend_status(timeout: float = 1.2, force: bool = False) -> Dict[str, Any]:
     """Return reachability for all configured context backends."""
+    global _STATUS_CACHE, _STATUS_CACHE_AT
+
+    now = time.monotonic()
+    if not force and _STATUS_CACHE is not None and (now - _STATUS_CACHE_AT) < _STATUS_CACHE_TTL:
+        return dict(_STATUS_CACHE)
+
     status: Dict[str, Any] = {
         "configured_backend": CONTEXT_MEMORY_BACKEND,
         "backends": {},
@@ -143,12 +152,12 @@ def backend_status(timeout: float = 2.5) -> Dict[str, Any]:
         }
 
     try:
-        _request_json(
-            "GET",
+        response = requests.get(
             _join_url(AGENT_MEMORY_URL, "/agentmemory/livez"),
             headers=_agentmemory_headers(),
             timeout=timeout,
         )
+        response.raise_for_status()
         status["backends"]["agentmemory"] = {
             "reachable": True,
             "healthy": True,
@@ -184,6 +193,8 @@ def backend_status(timeout: float = 2.5) -> Dict[str, Any]:
             selected = backend
             break
     status["selected_backend"] = selected
+    _STATUS_CACHE = dict(status)
+    _STATUS_CACHE_AT = now
     return status
 
 
@@ -252,12 +263,6 @@ def remember(
                         "role": "user",
                         "content": text,
                         "peer_id": "jarvis",
-                        "options": {
-                            "tags": ["jarvis-memory"],
-                            "concepts": concepts,
-                            "memory_type": memory_type,
-                            "project": project,
-                        },
                     },
                 )
                 committed = _openviking_post(
@@ -359,7 +364,7 @@ def context(query: str, limit: int = 8) -> Dict[str, Any]:
                     {
                         "query": query,
                         "limit": limit,
-                        "options": {"mode": "context"},
+                        "mode": "context",
                     },
                 )
                 return {"success": True, "backend": "openviking", "context": result}
