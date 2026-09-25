@@ -1160,7 +1160,7 @@ def _quality_gate(
 
     checks = capability_checks + [
         {
-            "id": "trigger",
+            "id": "trigger_candidate",
             "status": "candidate" if has_trigger_candidate else "missing",
             "message": "A trigger candidate was discovered." if has_trigger_candidate else "No obvious trigger node was discovered; search explicitly for the intended trigger.",
         },
