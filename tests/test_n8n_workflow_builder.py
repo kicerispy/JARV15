@@ -25,6 +25,21 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         )
         self.assertEqual(builder._sdk_shape_errors(good), [])
 
+    def test_compiler_prompt_includes_hard_node_type_allowlist(self):
+        prompt = builder._compiler_prompt(
+            self._design(),
+            sdk_reference="workflow('id', 'name')",
+            previous_code="const x = node({type: 'n8n-nodes-base.fake'});",
+            validation_error=(
+                "These node types are not present in the verified live n8n schemas: "
+                "n8n-nodes-base.fake"
+            ),
+        )
+        self.assertIn("ALLOWED NODE TYPES:", prompt)
+        self.assertIn("n8n-nodes-base.slack", prompt)
+        self.assertIn("HARD REPAIR REQUIREMENT:", prompt)
+        self.assertIn("Remove every unknown node type", prompt)
+
     def test_compiler_prompt_renders_ai_reference_without_python_formatting_error(self):
         prompt = builder._compiler_prompt(
             self._design(),
