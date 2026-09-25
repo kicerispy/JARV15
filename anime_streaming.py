@@ -126,7 +126,7 @@ def _parse_argument(argument: str) -> tuple[str, int | None, int]:
 
         limit = min(20, max(1, int(payload.get("limit", 10))))
     else:
-        match = re.match(r"^(.+?)\\s+episode\\s+(\\d+)\\s*$", raw, re.I)
+        match = re.match(r"^(.+?)\s+episode\s+(\d+)\s*$", raw, re.I)
         if match:
             anime = match.group(1).strip()
             episode = max(1, int(match.group(2)))
@@ -192,7 +192,7 @@ def _anilist_links(anime: str, episode: int | None, limit: int) -> list[dict]:
 
         title = str(item.get("title") or "").strip()
         if episode is not None:
-            match = re.search(r"(?:episode|ep\\.?|#)\\s*(\\d+)", title, re.I)
+            match = re.search(r"(?:episode|ep\.?|#)\s*(\d+)", title, re.I)
             if match and int(match.group(1)) != episode:
                 continue
 
