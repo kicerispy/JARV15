@@ -145,7 +145,10 @@ class N8nBridgeTests(unittest.TestCase):
         )
 
     def test_dispatch_posts_structured_workflow_request(self):
-        with patch.object(n8n_bridge, "N8N_ENABLED", True), patch.object(
+        with patch.object(n8n_bridge, "N8N_ENABLED", True), patch(
+            "config.N8N_MCP_ENABLED",
+            False,
+        ), patch.object(
             n8n_bridge,
             "N8N_BASE_URL",
             "http://127.0.0.1:5678",
@@ -184,7 +187,10 @@ class N8nBridgeTests(unittest.TestCase):
         )
 
     def test_remote_dispatch_requires_token(self):
-        with patch.object(n8n_bridge, "N8N_ENABLED", True), patch.object(
+        with patch.object(n8n_bridge, "N8N_ENABLED", True), patch(
+            "config.N8N_MCP_ENABLED",
+            False,
+        ), patch.object(
             n8n_bridge,
             "N8N_BASE_URL",
             "https://n8n.example.com",
