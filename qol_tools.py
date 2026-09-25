@@ -191,6 +191,99 @@ def service_status(argument: str = "") -> dict[str, Any]:
     }
 
 
+
+def dependency_status() -> dict[str, Any]:
+    """Check declared Python distributions against the active environment."""
+    try:
+        from importlib import metadata
+    except ImportError:
+        return {
+            "success": False,
+            "verified": False,
+            "message": "Python package metadata support is unavailable.",
+        }
+
+    base = Path(getattr(config, "BASE_DIR", Path.cwd())).resolve()
+    files = [
+        base / "requirements.txt",
+        base / "requirements-dev.txt",
+        base / "requirements-browser-agent.txt",
+    ]
+
+    requirements: list[tuple[str, str, str]] = []
+    for path in files:
+        if not path.exists():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith(("-e ", "git+", "http://", "https://")):
+                continue
+
+            raw = line.split("#", 1)[0].strip()
+            package = re.split(r"[<>=!~;\[]", raw, maxsplit=1)[0].strip()
+            if not package:
+                continue
+            requirements.append((path.name, package, raw))
+
+    missing = []
+    installed = []
+    seen = set()
+
+    for source, package, raw in requirements:
+        key = package.lower().replace("_", "-")
+        if key in seen:
+            continue
+        seen.add(key)
+
+        try:
+            version = metadata.version(package)
+            installed.append(
+                {
+                    "package": package,
+                    "version": version,
+                    "source": source,
+                    "requirement": raw,
+                }
+            )
+        except metadata.PackageNotFoundError:
+            missing.append(
+                {
+                    "package": package,
+                    "source": source,
+                    "requirement": raw,
+                }
+            )
+        except Exception as exc:
+            missing.append(
+                {
+                    "package": package,
+                    "source": source,
+                    "requirement": raw,
+                    "error": str(exc)[:200],
+                }
+            )
+
+    return {
+        "success": not missing,
+        "verified": True,
+        "requirements_checked": len(installed) + len(missing),
+        "installed": installed,
+        "missing": missing,
+        "message": (
+            "All declared dependencies are present."
+            if not missing
+            else f"{len(missing)} declared dependency(s) are missing."
+        ),
+    }
+
+
 def jarvis_quickcheck() -> dict[str, Any]:
     """Fast deterministic readiness snapshot for voice/status commands."""
     started = time.perf_counter()
@@ -230,6 +323,7 @@ def jarvis_quickcheck() -> dict[str, Any]:
 
 
 __all__ = [
+    "dependency_status",
     "jarvis_quickcheck",
     "process_snapshot",
     "project_snapshot",
