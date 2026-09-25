@@ -108,6 +108,76 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
 
         self.assertEqual(values[0]["name"], "Webhook")
 
+    def test_result_list_parses_documented_string_search_results(self):
+        result = {
+            "success": True,
+            "data": {
+                "results": (
+                    "Found nodes:\n"
+                    "- n8n-nodes-base.scheduleTrigger [TRIGGER]\n"
+                    "- n8n-nodes-base.github"
+                )
+            },
+        }
+
+        values = architect._result_list(
+            result,
+            ("nodes", "results", "items"),
+        )
+
+        node_ids = {item["nodeId"] for item in values}
+        self.assertIn("n8n-nodes-base.scheduleTrigger", node_ids)
+        self.assertIn("n8n-nodes-base.github", node_ids)
+
+
+    def test_get_node_types_accepts_documented_string_definitions(self):
+        with patch.object(
+            architect,
+            "_call",
+            return_value={
+                "success": True,
+                "data": {
+                    "definitions": "interface ScheduleTriggerParameters { cronExpression: string }"
+                },
+            },
+        ):
+            result = architect._get_node_types(
+                [
+                    {
+                        "nodeId": "n8n-nodes-base.scheduleTrigger",
+                        "type": "n8n-nodes-base.scheduleTrigger",
+                    }
+                ]
+            )
+
+        self.assertTrue(result["definitions"])
+        self.assertIn(
+            "ScheduleTriggerParameters",
+            result["definitions"][0]["content"],
+        )
+
+
+    def test_best_practices_prefers_documentation_field(self):
+        with patch.object(
+            architect,
+            "_call",
+            return_value={
+                "success": True,
+                "data": {
+                    "technique": "monitoring",
+                    "message": "summary",
+                    "documentation": "Use bounded polling and explicit failure handling.",
+                },
+            },
+        ):
+            result = architect._best_practice_guidance(["monitoring"])
+
+        self.assertEqual(
+            result[0]["guidance"],
+            "Use bounded polling and explicit failure handling.",
+        )
+
+
     def test_external_alerts_are_treated_as_side_effects(self):
         requirements = architect._requirements(
             "Monitor GitHub issues and send me an alert when a bug appears.",
