@@ -525,6 +525,62 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertEqual(summarization["status"], "candidate")
 
 
+    def test_quality_gate_does_not_duplicate_trigger_capability_id(self):
+        request = "Monitor GitHub issues, summarize bugs, and send me an alert."
+        candidates = [
+            {
+                "name": "GitHub Trigger",
+                "nodeId": "n8n-nodes-base.githubTrigger",
+                "type": "n8n-nodes-base.githubTrigger",
+            },
+            {
+                "name": "OpenAI",
+                "nodeId": "n8n-nodes-langchain.openAi",
+                "type": "n8n-nodes-langchain.openAi",
+            },
+            {
+                "name": "If",
+                "nodeId": "n8n-nodes-base.if",
+                "type": "n8n-nodes-base.if",
+            },
+            {
+                "name": "Slack",
+                "nodeId": "n8n-nodes-base.slack",
+                "type": "n8n-nodes-base.slack",
+            },
+        ]
+        requirements = architect._requirements(
+            request,
+            ["monitoring", "content_generation", "notification"],
+        )
+        definitions = [
+            {"nodeId": node["nodeId"], "type": node["type"]}
+            for node in candidates
+        ]
+
+        gate = architect._quality_gate(
+            request,
+            requirements,
+            candidates,
+            definitions,
+        )
+
+        trigger_checks = [
+            check for check in gate["checks"]
+            if check["id"] in {"trigger", "trigger_candidate"}
+        ]
+
+        self.assertEqual(
+            [check["id"] for check in trigger_checks],
+            ["trigger", "trigger_candidate"],
+        )
+        self.assertEqual(
+            trigger_checks[0]["status"],
+            "verified",
+        )
+        self.assertNotIn("trigger", gate["missing"])
+
+
     def test_quality_gate_requires_requested_capabilities(self):
         candidates = [
             {"name": "GitHub Trigger", "nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
