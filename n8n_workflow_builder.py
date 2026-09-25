@@ -289,6 +289,26 @@ def _sdk_shape_errors(
 
     return errors
 
+def _verified_node_types(design: Dict[str, Any]) -> List[str]:
+    values: List[str] = []
+    for item in (
+        list(design.get("node_definitions", []))
+        + list(design.get("node_candidates", []))
+    ):
+        if not isinstance(item, dict):
+            continue
+        node_type = str(item.get("nodeId") or item.get("type") or "").strip()
+        if node_type:
+            values.append(node_type)
+    # These are explicitly documented by the targeted SDK pattern embedded
+    # above; keep them available even when discovery omitted their parent.
+    values.extend([
+        "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "@n8n/n8n-nodes-langchain.agent",
+    ])
+    return list(dict.fromkeys(values))
+
+
 def _compiler_prompt(
     design: Dict[str, Any],
     *,
@@ -302,6 +322,17 @@ def _compiler_prompt(
     previous = ""
     if previous_code:
         previous = "\nPRIOR CODE:\n" + _bounded(previous_code, 30000)
+
+    allowed_node_types = _verified_node_types(design)
+    allowed_types_text = "\n".join(f"- {item}" for item in allowed_node_types)
+    if validation_error and "not present in the verified live n8n schemas" in validation_error:
+        repair += (
+            "\nHARD REPAIR REQUIREMENT:\n"
+            "The prior code used node types that are NOT allowed. Remove every "
+            "unknown node type and rebuild the workflow using ONLY the exact "
+            "node types listed under ALLOWED NODE TYPES. Do not preserve an "
+            "unknown type merely because its name sounds plausible.\n"
+        )
 
     return f"""
 Build one new n8n workflow from the verified architecture below.
@@ -321,6 +352,7 @@ Rules:
 - Do not emit export type, export interface, typeof default_, or other type-only exports.
 - Do not leave branch wiring as standalone statements after export default.
 - Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
+- The ALLOWED NODE TYPES list below is a hard allowlist. Every workflow node type MUST match one of those exact strings.
 - Never invent semantic node types such as @n8n/n8n-nodes-langchain.summarize. For summarization, use a verified LLM/AI node or another verified processing node from the supplied schemas.
 - Every identifier used in an AI parent's `subnodes` object MUST have a prior factory declaration in the same source. For example, `subnodes: {{ model: openAiModel }}` requires `const openAiModel = languageModel(...)` earlier in the code.
 - For AI Agent models use the documented `languageModel()` factory, not `node()`, and use the exact verified model type/version. For the OpenAI Chat Model, the current pattern is shown below.
@@ -339,6 +371,9 @@ LIVE WORKFLOW SDK REFERENCE:
 
 TARGETED AI SUBNODE REFERENCE:
 {AI_SUBNODE_PATTERN}
+
+ALLOWED NODE TYPES:
+{allowed_types_text}
 
 VERIFIED ARCHITECTURE:
 {_architecture_context(design)}
@@ -657,14 +692,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
                 stage="compile",
             )
 
-        allowed_node_types = [
-            str(item.get("nodeId") or item.get("type") or "").strip()
-            for item in (
-                list(design.get("node_definitions", []))
-                + list(design.get("node_candidates", []))
-            )
-            if isinstance(item, dict)
-        ]
+        allowed_node_types = _verified_node_types(design)
         validation = _validate_code(
             code,
             allowed_node_types=allowed_node_types,
