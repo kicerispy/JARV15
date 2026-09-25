@@ -35,6 +35,13 @@ ANIPY_TOOLS = frozenset(
     }
 )
 
+ROBLOX_MCP_TOOLS = frozenset(
+    {
+        "roblox_mcp_status",
+        "roblox_mcp_setup",
+    }
+)
+
 UNREAL_MCP_TOOLS = frozenset(
     {
         "unreal_mcp",
@@ -185,6 +192,7 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in JSON_ARGUMENT_TOOLS
         and str(name) not in N8N_TOOLS
         and str(name) not in ANIPY_TOOLS
+        and str(name) not in ROBLOX_MCP_TOOLS
         and str(name) not in UNREAL_MCP_TOOLS
         and str(name) not in CONTEXT_MEMORY_TOOLS
         and str(name) not in AGENT_SKILL_TOOLS
