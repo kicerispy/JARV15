@@ -1534,7 +1534,7 @@ def build_anipy_plan(user_request):
         return None
 
     explicit = re.match(
-        r"^(?:run|use|launch|start)\s+(?:the\s+)?anipy(?:-|\s+)cli(?:\s+(.*))?$",
+        r"^(?:(?:run|use|launch|start)\s+(?:the\s+)?|)anipy(?:-|\s+)cli(?:\s+(.*))?$",
         original,
         re.IGNORECASE,
     )
