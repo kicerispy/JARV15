@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from logger import logger
+import config
 from project_fs import iter_project_files
 from autonomy_memory import get_failure_hints, record_episode
 from answer_composer import compose_task_answer
@@ -137,6 +138,10 @@ class AgentTask:
     # Failed post-edit validation can trigger a checkpoint restore + focused
     # repair loop. Keep that loop bounded independently of generic replans.
     change_recovery_attempts: int = 0
+
+    # Runtime-triggered source repair is separately bounded so an ordinary
+    # failing task can never become an unbounded code-mutation loop.
+    self_healing_repair_attempts: int = 0
 
     max_replans: int = 2
 
@@ -1192,6 +1197,291 @@ class JarvisAgent:
 
         return None
 
+
+    @staticmethod
+    def _self_healing_budget() -> int:
+        try:
+            return max(
+                0,
+                int(
+                    getattr(
+                        config,
+                        "SELF_HEALING_MAX_ATTEMPTS",
+                        2,
+                    )
+                ),
+            )
+        except (TypeError, ValueError):
+            return 2
+
+    @staticmethod
+    def _resolve_project_python_target(raw_path: str) -> Optional[str]:
+        """Return an existing in-project Python file, or None."""
+        base = Path.cwd().resolve()
+        raw = (
+            str(raw_path or "")
+            .strip()
+            .strip('"')
+            .strip("'")
+            .replace("\\", "/")
+        )
+
+        if not raw or not raw.lower().endswith(".py"):
+            return None
+
+        try:
+            candidate = Path(raw)
+            if not candidate.is_absolute():
+                candidate = base / raw
+
+            candidate = candidate.resolve()
+            relative = candidate.relative_to(base)
+        except (OSError, ValueError):
+            return None
+
+        ignored = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "jarvis_cuda",
+            "venv",
+            ".venv",
+            "node_modules",
+            "build",
+            "dist",
+            ".jarvis_checkpoints",
+            ".jarvis_runtime",
+        }
+
+        if any(part.lower() in ignored for part in relative.parts):
+            return None
+
+        if not candidate.is_file():
+            return None
+
+        return relative.as_posix()
+
+    @staticmethod
+    def _infer_runtime_source_target_from_evidence(
+        task: AgentTask,
+    ) -> Optional[str]:
+        """Infer a real in-project Python target from a runtime traceback/error."""
+        candidates: list[tuple[str, int]] = []
+
+        for evidence_index, evidence in enumerate(
+            reversed(task.evidence),
+            start=1,
+        ):
+            if not isinstance(evidence, dict) or evidence.get("success"):
+                continue
+
+            raw_strings = [
+                str(evidence.get("target", "") or ""),
+                str(evidence.get("detail", "") or ""),
+            ]
+
+            data = evidence.get("data")
+            if isinstance(data, dict):
+                for key in (
+                    "path",
+                    "file",
+                    "filename",
+                    "source_file",
+                    "traceback",
+                    "error",
+                    "message",
+                    "stdout",
+                    "stderr",
+                ):
+                    value = data.get(key)
+                    if value:
+                        raw_strings.append(str(value))
+            elif data is not None:
+                raw_strings.append(str(data))
+
+            blob = "\n".join(raw_strings)
+
+            matches = re.findall(
+                r'File\s+[\'"]([^\'"]+\.py)[\'"]',
+                blob,
+            )
+            matches.extend(
+                re.findall(
+                    r'(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_./\\:-]*\.py)(?![A-Za-z0-9_.-])',
+                    blob,
+                )
+            )
+
+            for raw_path in matches:
+                target = JarvisAgent._resolve_project_python_target(
+                    raw_path,
+                )
+                if not target:
+                    continue
+                if any(existing == target for existing, _ in candidates):
+                    continue
+                candidates.append((target, evidence_index))
+
+        if not candidates:
+            return None
+
+        request_lower = str(task.request or "").lower()
+        request_terms = {
+            term
+            for term in re.findall(
+                r"[a-z_][a-z0-9_]{3,}",
+                request_lower,
+            )
+            if term not in {
+                "run",
+                "start",
+                "launch",
+                "the",
+                "and",
+                "with",
+                "from",
+                "runtime",
+                "error",
+                "failure",
+                "problem",
+                "broken",
+                "fix",
+                "repair",
+            }
+        }
+
+        def score(item: tuple[str, int]) -> tuple:
+            path, evidence_index = item
+            lowered = path.lower()
+            terms = set(
+                re.findall(
+                    r"[a-z_][a-z0-9_]{3,}",
+                    lowered,
+                )
+            )
+            overlap = len(request_terms & terms)
+            penalty = (
+                -3
+                if lowered.startswith("tests/")
+                and "test" not in request_lower
+                else 0
+            )
+            freshness = max(0, 6 - evidence_index)
+            return (
+                overlap + penalty + freshness,
+                -lowered.count("/"),
+                -len(lowered),
+            )
+
+        return max(candidates, key=score)[0]
+
+    @staticmethod
+    def _latest_runtime_code_failure(
+        task: AgentTask,
+    ):
+        """Return (evidence, diagnosis) for the latest trusted code-defect failure."""
+        for evidence in reversed(task.evidence):
+            if not isinstance(evidence, dict) or evidence.get("success"):
+                continue
+
+            tool = str(
+                evidence.get("tool", "") or ""
+            ).strip()
+
+            detail = str(
+                evidence.get("detail", "") or ""
+            )
+
+            data = evidence.get("data")
+            error_parts = [detail]
+
+            if isinstance(data, dict):
+                for key in (
+                    "error",
+                    "message",
+                    "traceback",
+                    "stderr",
+                    "stdout",
+                ):
+                    value = data.get(key)
+                    if value:
+                        error_parts.append(str(value))
+            elif data is not None:
+                error_parts.append(str(data))
+
+            error_text = "\n".join(
+                part
+                for part in error_parts
+                if part
+            )
+
+            diagnosis = diagnose_failure(
+                tool,
+                error_text,
+                argument=str(
+                    evidence.get("target", "") or ""
+                ),
+                result=data,
+            )
+
+            if diagnosis.category in {
+                "code_regression",
+                "runtime_code_defect",
+            }:
+                return evidence, diagnosis
+
+        return None, None
+
+    def _build_runtime_code_repair_request(
+        self,
+        task: AgentTask,
+    ) -> str:
+        state = task.active_context.get(
+            "_runtime_code_repair",
+            {},
+        )
+        target = str(
+            state.get("target", "")
+            if isinstance(state, dict)
+            else ""
+        ).strip()
+        category = str(
+            state.get("category", "")
+            if isinstance(state, dict)
+            else ""
+        ).strip()
+        reason = str(
+            state.get("reason", "")
+            if isinstance(state, dict)
+            else ""
+        ).strip()
+
+        return "\n".join([
+            "[JARVIS_INTERNAL_PHASE:REPAIR]",
+            "A runtime execution failure was classified as a likely Python code defect.",
+            "The target below was resolved to a real file inside the JARVIS project.",
+            "",
+            f"Target file: {target}",
+            f"Failure category: {category}",
+            f"Diagnosis: {reason}",
+            f"Original request: {task.request}",
+            "",
+            self._build_evidence_packet(task),
+            "",
+            "RUNTIME SELF-REPAIR RULES:",
+            "1. Treat the runtime failure and current source as authoritative evidence.",
+            "2. Modify only the verified target file unless another project Python file is explicitly proven necessary.",
+            "3. Use code_checkpoint BEFORE any mutation.",
+            "4. Make the smallest safe correction that addresses the observed runtime defect.",
+            "5. Do not edit Python environments, dependencies, generated files, or files outside the project root.",
+            "6. Run code_test AFTER the modification.",
+            "7. Do not claim success without a passing validation trace.",
+            "8. Do not perform speculative refactors or unrelated cleanup.",
+            "",
+            "Return ONLY JSON.",
+        ])
 
     def _build_phase_fallback_plan(
         self,
@@ -3152,6 +3442,157 @@ class JarvisAgent:
 
             if result == "done":
 
+                # Runtime-triggered source repair is a first-class bounded phase.
+                # It intentionally runs before the normal software-repair state
+                # machine so ordinary runtime tasks can heal a proven code defect.
+                runtime_state = task.active_context.get(
+                    "_runtime_code_repair"
+                )
+
+                if isinstance(runtime_state, dict):
+                    runtime_stage = str(
+                        runtime_state.get("stage", "")
+                        or ""
+                    ).strip()
+
+                    if runtime_stage in {
+                        "source_read",
+                        "restore",
+                    }:
+                        target = str(
+                            runtime_state.get("target", "")
+                            or ""
+                        ).strip()
+
+                        if runtime_stage == "source_read":
+                            task.active_context[
+                                "_runtime_code_repair"
+                            ]["stage"] = "repair"
+                        else:
+                            task.active_context[
+                                "_runtime_code_repair"
+                            ]["stage"] = "repair"
+
+                        replanned = self.plan_task(
+                            task,
+                            history_text=history_text,
+                            planning_request=(
+                                self._build_runtime_code_repair_request(
+                                    task
+                                )
+                            ),
+                            require_repair_plan=True,
+                            require_code_read=False,
+                            require_code_test=False,
+                            require_code_diagnose=False,
+                        )
+
+                        if replanned.status in {
+                            "conversation",
+                            "failed",
+                        }:
+                            task.active_context.pop(
+                                "_runtime_code_repair",
+                                None,
+                            )
+                            return replanned
+
+                        task.observations.append(
+                            "Runtime self-healing source evidence accepted; "
+                            "focused repair planning started for "
+                            f"{target or 'the verified target'}."
+                        )
+                        continue
+
+                    if runtime_stage == "repair":
+                        if not self._plan_has_mutation(
+                            task.planner_result
+                        ):
+                            task.active_context.pop(
+                                "_runtime_code_repair",
+                                None,
+                            )
+                            task.status = "failed"
+                            task.error = (
+                                "Runtime self-healing planner did not produce "
+                                "a mutation-bearing repair plan."
+                            )
+                            task.completed_at = time.time()
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = task.error
+                            self._record_autonomy_episode(task)
+                            task_state.set_progress_callback(None)
+                            return task
+
+                        if not self._latest_verified_code_test_evidence(task):
+                            task.active_context.pop(
+                                "_runtime_code_repair",
+                                None,
+                            )
+                            task.status = "failed"
+                            task.error = (
+                                "Runtime self-healing repair completed without "
+                                "verified code-test evidence."
+                            )
+                            task.completed_at = time.time()
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = task.error
+                            self._record_autonomy_episode(task)
+                            task_state.set_progress_callback(None)
+                            return task
+
+                        task.active_context[
+                            "_runtime_code_repair"
+                        ]["stage"] = "diff"
+
+                        self._install_phase_plan(
+                            task,
+                            {
+                                "goal": "verify runtime self-repair diff integrity",
+                                "jarvis_internal_phase": True,
+                                "steps": [
+                                    {
+                                        "tool": "code_test",
+                                        "argument": json.dumps(
+                                            {"mode": "git_diff_check"}
+                                        ),
+                                    }
+                                ],
+                            },
+                        )
+
+                        task.observations.append(
+                            "Runtime self-healing repair passed its focused "
+                            "validation; deterministic diff validation scheduled."
+                        )
+                        continue
+
+                    if runtime_stage == "diff":
+                        if not self._has_verified_git_diff_check(task):
+                            task.status = "failed"
+                            task.error = (
+                                "Runtime self-healing diff validation did not "
+                                "produce verified evidence."
+                            )
+                            task.completed_at = time.time()
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = task.error
+                            self._record_autonomy_episode(task)
+                            task_state.set_progress_callback(None)
+                            return task
+
+                        task.observations.append(
+                            "Runtime self-healing completed checkpointed "
+                            "repair, focused validation, and diff validation."
+                        )
+                        task.active_context.pop(
+                            "_runtime_code_repair",
+                            None,
+                        )
+                        task.active_context[
+                            "_runtime_code_repair_completed"
+                        ] = True
+
                 # A self-repair request is satisfied when the full-project
                 # diagnostic passes and no verified defect remains. Do not
                 # invoke the coding planner merely because the original
@@ -3862,6 +4303,208 @@ class JarvisAgent:
                         f"(attempt {task.change_recovery_attempts}/2)."
                     )
                     continue
+
+                # Runtime -> source repair bridge.
+                # Only trusted code-defect classifications with a concrete,
+                # in-project Python target can enter autonomous mutation.
+                runtime_state = task.active_context.get(
+                    "_runtime_code_repair"
+                )
+
+                if isinstance(runtime_state, dict):
+                    runtime_stage = str(
+                        runtime_state.get("stage", "")
+                        or ""
+                    ).strip()
+
+                    if runtime_stage == "repair":
+                        latest_failure = self._latest_failed_execution_evidence(
+                            task
+                        )
+                        latest_failure_tool = (
+                            str(
+                                latest_failure.get("tool", "")
+                                if latest_failure
+                                else ""
+                            )
+                            .strip()
+                        )
+
+                        if latest_failure_tool in {
+                            "edit_file",
+                            "write_file",
+                            "delete_file",
+                            "code_test",
+                        }:
+                            budget = self._self_healing_budget()
+
+                            if (
+                                budget > 0
+                                and task.self_healing_repair_attempts < budget
+                            ):
+                                task.self_healing_repair_attempts += 1
+                                task.replan_count += 1
+                                self.state["replans"] = task.replan_count
+                                runtime_state["stage"] = "restore"
+
+                                self._install_phase_plan(
+                                    task,
+                                    {
+                                        "goal": "restore runtime self-healing checkpoint",
+                                        "jarvis_internal_phase": True,
+                                        "steps": [
+                                            {
+                                                "tool": "code_restore_checkpoint",
+                                                "argument": "",
+                                            }
+                                        ],
+                                    },
+                                )
+
+                                record_healing_event(
+                                    {
+                                        "source": "agent_core",
+                                        "action": "repair_code_restore",
+                                        "tool": latest_failure_tool,
+                                        "target": runtime_state.get(
+                                            "target",
+                                            "",
+                                        ),
+                                        "reason": (
+                                            "Runtime self-healing validation failed; "
+                                            "restoring the pre-repair checkpoint before "
+                                            "the bounded corrective attempt."
+                                        ),
+                                    }
+                                )
+                                continue
+
+                            task.active_context.pop(
+                                "_runtime_code_repair",
+                                None,
+                            )
+                            task.status = "failed"
+                            task.error = (
+                                "Runtime self-healing repair budget exhausted "
+                                "after a failed source validation."
+                            )
+                            task.completed_at = time.time()
+                            self.state["last_status"] = task.status
+                            self.state["last_error"] = task.error
+                            self._record_autonomy_episode(task)
+                            task_state.set_progress_callback(None)
+                            return task
+
+                    elif runtime_stage in {
+                        "source_read",
+                        "restore",
+                    }:
+                        task.active_context.pop(
+                            "_runtime_code_repair",
+                            None,
+                        )
+
+                if not isinstance(
+                    task.active_context.get("_runtime_code_repair"),
+                    dict,
+                ) and not task.active_context.get(
+                    "_runtime_code_repair_exhausted"
+                ):
+                    runtime_evidence, runtime_diagnosis = (
+                        self._latest_runtime_code_failure(task)
+                    )
+
+                    runtime_tool = (
+                        str(
+                            runtime_evidence.get("tool", "")
+                            if runtime_evidence
+                            else ""
+                        )
+                        .strip()
+                    )
+
+                    runtime_target = (
+                        self._infer_runtime_source_target_from_evidence(
+                            task
+                        )
+                        if runtime_evidence is not None
+                        else None
+                    )
+
+                    healing_enabled = bool(
+                        getattr(
+                            config,
+                            "SELF_HEALING_ENABLED",
+                            True,
+                        )
+                    )
+                    budget = self._self_healing_budget()
+
+                    if (
+                        healing_enabled
+                        and budget > 0
+                        and runtime_evidence is not None
+                        and runtime_diagnosis is not None
+                        and runtime_diagnosis.category in {
+                            "code_regression",
+                            "runtime_code_defect",
+                        }
+                        and runtime_tool not in {
+                            "code_test",
+                            "code_diagnose",
+                            "edit_file",
+                            "write_file",
+                            "delete_file",
+                            "code_restore_checkpoint",
+                        }
+                        and runtime_target
+                        and task.self_healing_repair_attempts < budget
+                        and task.replan_count < task.max_replans
+                    ):
+                        task.self_healing_repair_attempts += 1
+                        task.replan_count += 1
+                        self.state["replans"] = task.replan_count
+
+                        task.active_context[
+                            "_runtime_code_repair"
+                        ] = {
+                            "stage": "source_read",
+                            "target": runtime_target,
+                            "category": runtime_diagnosis.category,
+                            "reason": runtime_diagnosis.reason,
+                            "signature": runtime_diagnosis.signature,
+                        }
+
+                        record_healing_event(
+                            {
+                                "source": "agent_core",
+                                "action": "repair_code_bridge",
+                                "tool": runtime_tool,
+                                "target": runtime_target,
+                                "category": runtime_diagnosis.category,
+                                "reason": runtime_diagnosis.reason,
+                            }
+                        )
+
+                        self._install_phase_plan(
+                            task,
+                            {
+                                "goal": "inspect runtime self-healing target",
+                                "jarvis_internal_phase": True,
+                                "steps": [
+                                    {
+                                        "tool": "read_file",
+                                        "argument": runtime_target,
+                                    }
+                                ],
+                            },
+                        )
+
+                        logger.warning(
+                            "JARVIS AGENT: Runtime code defect detected; "
+                            f"starting bounded source-repair bridge for {runtime_target}."
+                        )
+                        continue
 
                 latest_diagnostic = None
                 for evidence in reversed(task.evidence):
