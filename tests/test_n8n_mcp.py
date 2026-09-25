@@ -320,7 +320,10 @@ class N8nMcpTests(unittest.TestCase):
             }
         ]
 
+        calls_seen = []
+
         def fake_call_tool(name, arguments=None):
+            calls_seen.append((name, arguments))
             return tool_calls.pop(0)
 
         with patch.object(n8n_mcp, "call_tool", side_effect=fake_call_tool), \
@@ -335,6 +338,26 @@ class N8nMcpTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["execution_id"], "9001")
         self.assertEqual(result["data"]["result"], "72F and sunny")
+
+        execute_calls = [
+            arguments
+            for name, arguments in calls_seen
+            if name == "execute_workflow"
+        ]
+        self.assertEqual(len(execute_calls), 1)
+        self.assertEqual(
+            execute_calls[0]["inputs"],
+            {
+                "webhookData": {
+                    "method": "POST",
+                    "body": {
+                        "location": "Chicago",
+                        "workflow_class": "orchestration",
+                        "request": "Chicago weather today",
+                    },
+                }
+            },
+        )
 
     def test_run_workflow_request_refuses_unpublished_non_manual_workflow(self):
         calls = [
