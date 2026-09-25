@@ -1881,6 +1881,8 @@ def code_test(argument=""):
         payload.get("mode", "compile")
     ).strip().lower()
 
+    base = __import__("pathlib").Path.cwd().resolve()
+
     # Qwen sometimes emits py_compile while the public tool contract
     # uses compile. Accept the harmless alias at the tool boundary.
     if mode in {"py_compile", "python_compile"}:
@@ -1983,8 +1985,6 @@ def code_test(argument=""):
     target = str(
         payload.get("path", "")
     ).strip()
-
-    base = __import__("pathlib").Path.cwd().resolve()
 
     if target:
         target_path = (base / target).resolve()
