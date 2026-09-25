@@ -145,6 +145,35 @@ class N8nMcpTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("token", result["message"].lower())
 
+    def test_planner_opens_native_mcp_for_explicit_build_request(self):
+        import config
+        import planner
+
+        with patch.object(config, "N8N_MCP_ENABLED", True),              patch.object(
+                 planner,
+                 "config",
+                 config,
+             ),              patch(
+                 "n8n_mcp.tool_descriptions",
+                 return_value={
+                     "n8n_mcp__create_workflow": (
+                         "Create a workflow. "
+                         "Input schema: {workflowData}"
+                     )
+                 },
+             ):
+            plan = planner._deterministic_n8n_plan(
+                "Create a workflow that sends me an email",
+                {},
+            )
+            scope = planner._planner_tool_scope(
+                "Create an n8n workflow that sends me an email",
+                {},
+            )
+
+        self.assertIsNone(plan)
+        self.assertIn("n8n_mcp__create_workflow", scope)
+
     def test_run_workflow_request_selects_mcp_workflow_and_polls(self):
         tool_calls = [
             {
