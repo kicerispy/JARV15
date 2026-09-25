@@ -41,6 +41,36 @@ def test_autonomous_coding_benchmark_contract_is_complete():
     assert all(case.get("requires_validation") for case in change_cases)
 
 
+def test_repairs_do_not_force_test_file_mutation():
+    from autonomous_engineering import requires_regression_test
+
+    repair_requests = (
+        "inspect the browser automation and fix the problem",
+        "diagnose and repair the malformed Python component",
+        "debug the failing JARVIS module",
+    )
+
+    assert all(
+        requires_regression_test(request) is False
+        for request in repair_requests
+    )
+
+
+def test_explicit_regression_requests_require_test_coverage():
+    from autonomous_engineering import requires_regression_test
+
+    regression_requests = (
+        "add a regression test for the browser click bug",
+        "add regression coverage for the planner change",
+        "add tests for this repair",
+    )
+
+    assert all(
+        requires_regression_test(request) is True
+        for request in regression_requests
+    )
+
+
 def test_read_only_benchmark_cases_stay_out_of_superpowers():
     payload = json.loads(BENCHMARK_PATH.read_text(encoding="utf-8"))
 
