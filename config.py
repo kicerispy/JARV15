@@ -534,14 +534,6 @@ SELF_HEALING_MAX_ATTEMPTS = int(
     )
 )
 
-# Keep automatic source mutation opt-in until the runtime self-heal bridge
-# has its own target-discovery and approval-grade regression coverage.
-SELF_HEALING_AUTO_CODE_REPAIR = os.environ.get(
-    "JARVIS_SELF_HEALING_AUTO_CODE_REPAIR",
-    "0",
-).strip().lower() not in {"0", "false", "no", "off"}
-
-
 # ============================================================
 # DEBUG
 # ============================================================
