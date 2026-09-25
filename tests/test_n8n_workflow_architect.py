@@ -22,6 +22,13 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         self.assertIn("notification", ids)
         self.assertNotIn("alert_output", ids)
 
+    def test_alert_output_has_set_fallback(self):
+        fallback = architect._FALLBACK_NODE_CANDIDATES["alert_output"]
+        self.assertTrue(any(
+            item["nodeId"] == "n8n-nodes-base.set"
+            for item in fallback
+        ))
+
     def test_infer_techniques_prefers_relevant_workflow_patterns(self):
         techniques = architect._infer_techniques(
             "Monitor GitHub issues and send an email alert when a bug appears."
