@@ -194,7 +194,7 @@ def backend_status(timeout: float = 0.6, force: bool = False) -> Dict[str, Any]:
         }
 
     selected = None
-    for backend in _backend_order():
+    for backend in ("openviking", "agentmemory", "local"):
         entry = status["backends"].get(backend, {})
         if entry.get("reachable") and entry.get("healthy"):
             selected = backend
