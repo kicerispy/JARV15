@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
+import subprocess
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
@@ -52,6 +55,8 @@ _DISCOVERY_LOCK = threading.RLock()
 _DISCOVERY_CACHE: Dict[str, Dict[str, Any]] = {}
 _DISCOVERY_EXPIRES_AT = 0.0
 _DISCOVERY_ERROR = ""
+_SERVER_PROCESS: subprocess.Popen | None = None
+_SERVER_LOCK = threading.RLock()
 
 
 def _run_async(factory: Callable[[], Any]) -> Any:
@@ -473,19 +478,27 @@ def roblox_mcp_status(
     argument: str = "",
 ) -> ToolResult:
     """Return concise Roblox MCP server and Studio plugin status."""
-    del argument
+    timeout_value = min(_REQUEST_TIMEOUT, 10.0)
+    raw_argument = str(argument or "").strip()
+    if raw_argument:
+        try:
+            payload = json.loads(raw_argument)
+            if isinstance(payload, dict) and payload.get("timeout") is not None:
+                timeout_value = max(0.5, min(float(payload["timeout"]), 10.0))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
 
     try:
         health_response = requests.get(
             f"{ROBLOX_MCP_URL}/health",
-            timeout=min(_REQUEST_TIMEOUT, 10.0),
+            timeout=timeout_value,
         )
         health_response.raise_for_status()
         health = health_response.json()
 
         status_response = requests.get(
             f"{ROBLOX_MCP_URL}/status",
-            timeout=min(_REQUEST_TIMEOUT, 10.0),
+            timeout=timeout_value,
         )
         status_response.raise_for_status()
         status = status_response.json()
@@ -511,5 +524,98 @@ def roblox_mcp_status(
             error=(
                 f"Roblox MCP status unavailable: {exc}"
             ),
+            retryable=True,
+        )
+
+
+def roblox_mcp_setup(argument: str = "") -> ToolResult:
+    """Ensure the local Roblox MCP server is available.
+
+    The server is started through npx when it is not already reachable. Studio
+    plugin activation remains an explicit Roblox Studio step because JARVIS
+    cannot activate a Studio plugin inside the editor process itself.
+    """
+    global _SERVER_PROCESS
+
+    del argument
+
+    try:
+        existing = roblox_mcp_status('{"timeout":1.5}')
+        if existing.success:
+            return ToolResult(
+                success=True,
+                tool="roblox_mcp_setup",
+                data=existing.data,
+                observation=existing.observation,
+            )
+
+        npx_cmd = (
+            shutil.which("npx.cmd")
+            or shutil.which("npx")
+        )
+        if not npx_cmd:
+            return ToolResult(
+                success=False,
+                tool="roblox_mcp_setup",
+                error="npx was not found. Install Node.js and ensure npx is on PATH.",
+                retryable=False,
+            )
+
+        with _SERVER_LOCK:
+            if _SERVER_PROCESS is None or _SERVER_PROCESS.poll() is not None:
+                package = os.environ.get(
+                    "JARVIS_ROBLOX_MCP_PACKAGE",
+                    "robloxstudio-mcp@latest",
+                ).strip() or "robloxstudio-mcp@latest"
+
+                kwargs = {
+                    "cwd": os.getcwd(),
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL,
+                }
+                if os.name == "nt":
+                    kwargs["creationflags"] = (
+                        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    )
+
+                _SERVER_PROCESS = subprocess.Popen(
+                    [
+                        npx_cmd,
+                        "-y",
+                        package,
+                    ],
+                    **kwargs,
+                )
+
+        deadline = time.monotonic() + 12.0
+        last_error = ""
+        while time.monotonic() < deadline:
+            checked = roblox_mcp_status('{"timeout":1.5}')
+            if checked.success:
+                return ToolResult(
+                    success=True,
+                    tool="roblox_mcp_setup",
+                    data=checked.data,
+                    observation=checked.observation,
+                )
+            last_error = str(checked.error or "")
+            time.sleep(0.4)
+
+        return ToolResult(
+            success=False,
+            tool="roblox_mcp_setup",
+            error=(
+                "Roblox MCP server did not become reachable. "
+                "Start Roblox Studio with the MCP plugin activated. "
+                + (last_error if last_error else "")
+            ).strip(),
+            retryable=True,
+        )
+    except Exception as exc:
+        return ToolResult(
+            success=False,
+            tool="roblox_mcp_setup",
+            error=f"Roblox MCP setup failed: {exc}",
             retryable=True,
         )
