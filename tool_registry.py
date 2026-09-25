@@ -66,6 +66,7 @@ ANIME_TOOLS = frozenset(
         "anime_streaming_links",
         "anime_availability",
         "anime_provider_catalog",
+        "anime_free_watch",
     }
 )
 
