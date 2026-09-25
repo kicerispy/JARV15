@@ -1037,6 +1037,54 @@ export type RetiredNode = {
         self.assertTrue(requirements["side_effect_review"]["required"])
         self.assertTrue(requirements["error_handling"]["required"])
 
+    def test_design_workflow_fast_mode_skips_best_practice_fetch(self):
+        request = "Monitor GitHub issues and send me an alert."
+        with patch.object(
+            architect,
+            "_discover_nodes",
+            return_value=(
+                [
+                    {
+                        "name": "GitHub Trigger",
+                        "nodeId": "n8n-nodes-base.githubTrigger",
+                        "type": "n8n-nodes-base.githubTrigger",
+                    }
+                ],
+                ["GitHub issues"],
+            ),
+        ), patch.object(
+            architect,
+            "_best_practice_guidance",
+            side_effect=AssertionError("fast mode must not fetch best practices"),
+        ), patch.object(
+            architect,
+            "_search_nodes_batch",
+            return_value=([], {"success": True}),
+        ), patch.object(
+            architect,
+            "_get_node_types",
+            return_value={
+                "success": True,
+                "definitions": [
+                    {
+                        "nodeId": "n8n-nodes-base.githubTrigger",
+                        "type": "n8n-nodes-base.githubTrigger",
+                    }
+                ],
+                "schema_errors": [],
+                "schema_failures": [],
+                "invalid_node_ids": [],
+                "deprecated_node_ids": [],
+            },
+        ):
+            result = architect.design_workflow(
+                request,
+                {"fast": True},
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["best_practices"], [])
+
     def test_design_workflow_fails_cleanly_for_empty_request(self):
         result = architect.design_workflow("")
 
