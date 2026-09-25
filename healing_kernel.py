@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import threading
 import time
@@ -311,6 +312,64 @@ def choose_recovery(
     )
 
 
+def recovery_backoff_seconds(
+    attempt: int,
+    *,
+    base_seconds: float | None = None,
+    max_seconds: float | None = None,
+) -> float:
+    """Return a bounded exponential delay for transient recovery retries."""
+    attempt = max(1, int(attempt))
+    base = (
+        float(base_seconds)
+        if base_seconds is not None
+        else float(
+            getattr(
+                config,
+                "SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS",
+                0.25,
+            )
+        )
+    )
+    maximum = (
+        float(max_seconds)
+        if max_seconds is not None
+        else float(
+            getattr(
+                config,
+                "SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS",
+                4.0,
+            )
+        )
+    )
+    base = max(0.0, base)
+    maximum = max(0.0, maximum)
+    if maximum <= 0.0 or base <= 0.0:
+        return 0.0
+    return round(min(maximum, base * math.pow(2.0, attempt - 1)), 3)
+
+
+def healing_hints(
+    tool_name: str = "",
+    *,
+    category: str = "",
+    error: str = "",
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Return sanitized prior failure patterns for recovery planning."""
+    try:
+        from healing_playbook import failure_hints
+        return failure_hints(
+            tool=tool_name,
+            category=category,
+            error=error,
+            limit=limit,
+        )
+    except Exception as exc:
+        logger.debug(f"JARVIS HEALING: playbook lookup skipped: {exc}")
+        return []
+
+
 def build_healing_evidence(
     tool_name: str,
     argument: Any,
@@ -377,6 +436,25 @@ def record_healing_event(event: Mapping[str, Any]) -> None:
                     )
 
             temp_path.replace(_JOURNAL_PATH)
+
+            try:
+                from healing_playbook import record_failure
+
+                diagnosis = record.get("diagnosis")
+                if isinstance(diagnosis, Mapping):
+                    record_failure(
+                        signature=str(diagnosis.get("signature", "") or ""),
+                        tool=str(record.get("tool", "") or ""),
+                        category=str(diagnosis.get("category", "") or ""),
+                        error=record.get("error", ""),
+                        argument=record.get("argument", ""),
+                        action=str(record.get("action", "") or ""),
+                        reason=str(record.get("decision_reason", "") or ""),
+                    )
+            except Exception as playbook_exc:
+                logger.debug(
+                    f"JARVIS HEALING: playbook write skipped: {playbook_exc}"
+                )
         except OSError as exc:
             logger.debug(f"JARVIS HEALING: journal write skipped: {exc}")
 
@@ -435,6 +513,29 @@ def healing_status() -> dict[str, Any]:
         "runtime_code_repair_bridge": bool(
             getattr(config, "SELF_HEALING_ENABLED", True)
         ),
+        "failure_memory_enabled": bool(
+            getattr(
+                config,
+                "SELF_HEALING_FAILURE_MEMORY_ENABLED",
+                True,
+            )
+        ),
+        "retry_backoff": {
+            "base_seconds": float(
+                getattr(
+                    config,
+                    "SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS",
+                    0.25,
+                )
+            ),
+            "max_seconds": float(
+                getattr(
+                    config,
+                    "SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS",
+                    4.0,
+                )
+            ),
+        },
     }
 
 
@@ -448,4 +549,6 @@ __all__ = [
     "healing_status",
     "record_healing_event",
     "redact_sensitive",
+    "recovery_backoff_seconds",
+    "healing_hints",
 ]
