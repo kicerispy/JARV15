@@ -3752,6 +3752,11 @@ class JarvisAgent:
                 # expensive global Ollama replanner. The fixed plan must fail
                 # cleanly and report the concrete tool error instead.
                 if not task.allow_replanning:
+                    _, deterministic_failure = self._failure_is_retryable()
+
+                    if deterministic_failure:
+                        task.error = deterministic_failure
+
                     task.status = "failed"
                     task.completed_at = time.time()
 
