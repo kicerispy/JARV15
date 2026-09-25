@@ -228,32 +228,84 @@ class ModelManager:
             think=self.chat_think,
         )
 
+    def _structured_generation(
+        self,
+        *,
+        primary: str,
+        fallbacks: list[str],
+        messages: list,
+        format: str,
+        num_predict: int,
+    ):
+        """Run a bounded structured generation with deterministic role fallbacks."""
+        models = []
+        for model in [primary, *fallbacks]:
+            name = str(model or "").strip()
+            if name and name not in models:
+                models.append(name)
+
+        last_error = None
+        for index, model in enumerate(models):
+            try:
+                result = self.generate(
+                    model=model,
+                    messages=messages,
+                    format=format,
+                    options={
+                        "temperature": 0,
+                        "num_predict": num_predict,
+                    },
+                    keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
+                    think=False,
+                )
+                if index:
+                    logger.warning(
+                        "JARVIS MODEL: structured role recovered with "
+                        f"fallback model {model}."
+                    )
+                return result
+            except ModelGenerationError as exc:
+                last_error = exc
+                if index < len(models) - 1:
+                    logger.warning(
+                        "JARVIS MODEL: structured model "
+                        f"{model} failed; trying fallback role: {exc}"
+                    )
+                    continue
+                raise
+
+        if last_error is not None:
+            raise last_error
+        raise ModelGenerationError(
+            "No structured generation model was configured.",
+            attempts=1,
+            retryable=False,
+        )
+
     def planner(self, messages: list, *, format: str = "json"):
-        """Generate a bounded, deterministic planner response."""
-        return self.generate(
-            model=self.planner_model,
+        """Generate a bounded planner response with role fallbacks."""
+        return self._structured_generation(
+            primary=self.planner_model,
+            fallbacks=[
+                self.change_planner_model,
+                self.chat_model,
+            ],
             messages=messages,
             format=format,
-            options={
-                "temperature": 0,
-                "num_predict": config.PLANNER_NUM_PREDICT,
-            },
-            keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
-            think=False,
+            num_predict=config.PLANNER_NUM_PREDICT,
         )
 
     def change_planner(self, messages: list, *, format: str = "json"):
-        """Generate a fast structured software-change plan with the bounded planner model."""
-        return self.generate(
-            model=self.change_planner_model,
+        """Generate a fast change plan with role fallbacks."""
+        return self._structured_generation(
+            primary=self.change_planner_model,
+            fallbacks=[
+                self.planner_model,
+                self.chat_model,
+            ],
             messages=messages,
             format=format,
-            options={
-                "temperature": 0,
-                "num_predict": config.CHANGE_PLANNER_NUM_PREDICT,
-            },
-            keep_alive=config.PLANNER_MODEL_KEEP_ALIVE,
-            think=False,
+            num_predict=config.CHANGE_PLANNER_NUM_PREDICT,
         )
 
     def recovery(self, messages: list, *, format: str = "json"):
