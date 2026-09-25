@@ -223,6 +223,51 @@ class ToolExecutorFailureTests(unittest.TestCase):
         self.assertEqual(trace[0]["attempts"], 2)
         self.assertEqual(trace[0]["recovery_count"], 1)
 
+    def test_safe_retry_skips_second_attempt_when_resilience_circuit_is_open(self):
+        import tool_executor
+        from state import ActiveContext, TaskState
+        from tool_result import ToolResult
+
+        task_state = TaskState()
+        calls = {"count": 0}
+
+        def fake_run_tool(tool_name, argument):
+            calls["count"] += 1
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                error="tool circuit open",
+                retryable=True,
+                observation={
+                    "resilience": {
+                        "circuit_open": True,
+                    }
+                },
+            )
+
+        with mock.patch.object(
+            tool_executor,
+            "run_tool",
+            side_effect=fake_run_tool,
+        ):
+            result = tool_executor.execute_plan(
+                {
+                    "goal": "respect circuit",
+                    "steps": [
+                        {
+                            "tool": "weather",
+                            "argument": "Chicago",
+                        }
+                    ],
+                },
+                ActiveContext(),
+                task_state,
+                lambda message: None,
+            )
+
+        self.assertEqual(result, "failed")
+        self.assertEqual(calls["count"], 1)
+
     def test_safe_retry_resumes_existing_multi_step_plan(self):
         import tool_executor
         from state import ActiveContext, TaskState
