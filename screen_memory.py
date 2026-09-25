@@ -168,6 +168,7 @@ def screen_memory_setup(argument: str = "") -> dict:
     status = screen_memory_status()
     return {
         "success": bool(status.get("data", {}).get("reachable")),
+        "verified": bool(status.get("data", {}).get("reachable")),
         "tool": "screen_memory_setup",
         "data": status.get("data", {}),
         "message": str(status.get("message") or "Screenpipe setup completed."),
@@ -201,6 +202,7 @@ def screen_memory_status(argument: str = "") -> dict:
 
     return {
         "success": True,
+        "verified": reachable,
         "tool": "screen_memory_status",
         "data": {
             "configured": key_configured,
