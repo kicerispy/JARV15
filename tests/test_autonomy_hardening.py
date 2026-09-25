@@ -7,6 +7,7 @@ import tool_executor
 from agent_core import JarvisAgent
 from superpowers_engine import classify_software_request
 from tool_result import ToolResult
+from state import TaskState
 
 
 BENCHMARK_PATH = Path("benchmarks/autonomous_coding_cases.json")
@@ -262,11 +263,7 @@ def test_failed_change_test_restores_checkpoint_and_repairs():
     completed = agent.execute_task(
         planned,
         {},
-        type("TaskStateStub", (), {
-            "set_progress_callback": lambda self, cb: None,
-            "is_cancelled": lambda self: False,
-            "finish": lambda self: None,
-        })(),
+        TaskState(),
         lambda message: False,
     )
 
