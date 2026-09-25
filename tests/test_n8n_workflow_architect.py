@@ -170,11 +170,9 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
                  planner,
                  "config",
                  config,
-             ),              patch.object(
-                 planner,
-                 "classify_n8n_request",
+             ),              patch(
+                 "n8n_bridge.classify_n8n_request",
                  return_value="orchestration",
-                 create=True,
              ):
             scope = planner._planner_tool_scope(
                 "Create an n8n workflow that monitors GitHub issues",
