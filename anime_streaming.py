@@ -1,0 +1,287 @@
+"""Legal anime streaming-page discovery for JARVIS.
+
+This module intentionally discovers *watch pages* on established streaming
+services. It does not resolve/bypass DRM, scrape player tokens, extract direct
+media manifests, or download protected streams.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from urllib.parse import urlparse
+
+import requests
+
+from web_tools import web_search
+
+USER_AGENT = "JARVIS/1.0 (local personal assistant)"
+
+# Restrict web-discovered links to known consumer streaming services. This is
+# deliberately a small allowlist so generic search results cannot turn into
+# arbitrary mirror/host extraction.
+OFFICIAL_STREAMING_DOMAINS = {
+    "crunchyroll.com": "Crunchyroll",
+    "hidive.com": "HIDIVE",
+    "netflix.com": "Netflix",
+    "hulu.com": "Hulu",
+    "max.com": "Max",
+    "disneyplus.com": "Disney+",
+    "primevideo.com": "Prime Video",
+    "adultswim.com": "Adult Swim",
+    "tubitv.com": "Tubi",
+    "pluto.tv": "Pluto TV",
+    "aniplus-asia.com": "Ani-One / ANIPLUS",
+}
+
+
+def _error(message: str, *, retryable: bool = True) -> dict:
+    return {
+        "success": False,
+        "tool": "anime_streaming_links",
+        "error": str(message),
+        "retryable": retryable,
+    }
+
+
+def _success(data: dict, message: str) -> dict:
+    return {
+        "success": True,
+        "tool": "anime_streaming_links",
+        "data": data,
+        "message": message,
+    }
+
+
+def _domain_match(host: str, domain: str) -> bool:
+    host = host.lower().split(":", 1)[0].rstrip(".")
+    domain = domain.lower().lstrip(".")
+    return host == domain or host.endswith("." + domain)
+
+
+def _provider_for_url(url: str) -> str | None:
+    try:
+        host = urlparse(url).netloc
+    except ValueError:
+        return None
+    for domain, provider in OFFICIAL_STREAMING_DOMAINS.items():
+        if _domain_match(host, domain):
+            return provider
+    return None
+
+
+def _parse_argument(argument: str) -> tuple[str, int | None, int]:
+    raw = str(argument or "").strip()
+    if not raw:
+        raise ValueError("Provide an anime title.")
+
+    anime = raw
+    episode: int | None = None
+    limit = 10
+
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+
+    if isinstance(payload, dict):
+        anime = str(
+            payload.get("anime")
+            or payload.get("title")
+            or payload.get("query")
+            or ""
+        ).strip()
+
+        raw_episode = payload.get("episode")
+        if raw_episode not in (None, ""):
+            episode = max(1, int(raw_episode))
+
+        limit = min(20, max(1, int(payload.get("limit", 10))))
+    else:
+        match = re.match(r"^(.+?)\\s+episode\\s+(\\d+)\\s*$", raw, re.I)
+        if match:
+            anime = match.group(1).strip()
+            episode = max(1, int(match.group(2)))
+
+    if not anime:
+        raise ValueError("Provide an anime title.")
+
+    return anime, episode, limit
+
+
+def _anilist_links(anime: str, episode: int | None, limit: int) -> list[dict]:
+    query = """
+        query ($search: String) {
+            Media(search: $search, type: ANIME) {
+                id
+                idMal
+                title { romaji english native }
+                siteUrl
+                streamingEpisodes {
+                    title
+                    thumbnail
+                    url
+                    site
+                }
+            }
+        }
+    """
+
+    response = requests.post(
+        "https://graphql.anilist.co",
+        json={"query": query, "variables": {"search": anime}},
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        timeout=12.0,
+    )
+    response.raise_for_status()
+
+    payload = response.json()
+    media = ((payload.get("data") or {}).get("Media"))
+    if not isinstance(media, dict):
+        return []
+
+    title_data = media.get("title") or {}
+    canonical_title = (
+        title_data.get("english")
+        or title_data.get("romaji")
+        or title_data.get("native")
+        or anime
+    )
+
+    links: list[dict] = []
+    for item in media.get("streamingEpisodes") or []:
+        if not isinstance(item, dict):
+            continue
+
+        url = str(item.get("url") or "").strip()
+        provider = _provider_for_url(url)
+        if not url or not provider:
+            continue
+
+        title = str(item.get("title") or "").strip()
+        if episode is not None:
+            match = re.search(r"(?:episode|ep\\.?|#)\\s*(\\d+)", title, re.I)
+            if match and int(match.group(1)) != episode:
+                continue
+
+        links.append({
+            "anime": canonical_title,
+            "episode": episode,
+            "title": title,
+            "provider": provider,
+            "url": url,
+            "thumbnail": item.get("thumbnail"),
+            "source": "anilist",
+            "official_domain": True,
+        })
+
+        if len(links) >= limit:
+            break
+
+    return links
+
+
+def _web_links(anime: str, episode: int | None, limit: int) -> list[dict]:
+    episode_text = f" episode {episode}" if episode is not None else ""
+    query = f'"{anime}"{episode_text} watch anime official streaming'
+
+    results = web_search(query, max_results=max(8, min(20, limit * 2)))
+    links: list[dict] = []
+
+    for result in results:
+        url = str(result.get("url") or "").strip()
+        provider = _provider_for_url(url)
+        if not provider:
+            continue
+
+        title = str(result.get("title") or "").strip()
+        snippet = str(result.get("snippet") or "").strip()
+
+        links.append({
+            "anime": anime,
+            "episode": episode,
+            "title": title,
+            "provider": provider,
+            "url": url,
+            "snippet": snippet[:400],
+            "source": "web_search",
+            "official_domain": True,
+        })
+
+        if len(links) >= limit:
+            break
+
+    return links
+
+
+def anime_streaming_links(argument: str = "") -> dict:
+    """Find official streaming watch pages for an anime.
+
+    Accepts:
+      - "Frieren"
+      - "Frieren episode 12"
+      - JSON: {"anime":"Frieren","episode":12,"limit":10}
+    """
+    try:
+        anime, episode, limit = _parse_argument(argument)
+    except (TypeError, ValueError) as exc:
+        return _error(str(exc), retryable=False)
+
+    combined: list[dict] = []
+    errors: list[str] = []
+
+    try:
+        combined.extend(_anilist_links(anime, episode, limit))
+    except Exception as exc:
+        errors.append(f"AniList: {exc}")
+
+    try:
+        combined.extend(_web_links(anime, episode, limit))
+    except Exception as exc:
+        errors.append(f"web search: {exc}")
+
+    deduped: list[dict] = []
+    seen: set[str] = set()
+
+    for item in combined:
+        url = str(item.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+
+    providers = []
+    seen_providers = set()
+    for item in deduped:
+        provider = item.get("provider")
+        if provider and provider not in seen_providers:
+            seen_providers.add(provider)
+            providers.append(provider)
+
+    if not deduped:
+        if errors:
+            return _error(
+                "No official streaming pages found. " + " | ".join(errors[:2]),
+            )
+        return _error(
+            f"No official streaming pages found for '{anime}'.",
+            retryable=False,
+        )
+
+    return _success(
+        {
+            "anime": anime,
+            "episode": episode,
+            "providers": providers,
+            "links": deduped,
+            "count": len(deduped),
+            "official_only": True,
+        },
+        f"Found {len(deduped)} official streaming page(s) for {anime}.",
+    )
