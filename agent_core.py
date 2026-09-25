@@ -59,6 +59,7 @@ from postcondition_verifier import (
 )
 from strategy_selector import (
     record_task_outcome,
+    score_plan,
     select_learned_plan,
     strategy_hints,
 )
@@ -2156,6 +2157,26 @@ class JarvisAgent:
 
                 return task
 
+            if (
+                isinstance(plan, dict)
+                and getattr(config, "AUTONOMY_LEARNED_STRATEGY_ENABLED", True)
+            ):
+                try:
+                    plan_score = score_plan(
+                        task.request,
+                        plan,
+                        context=task.active_context,
+                    )
+                    plan["strategy_score"] = plan_score.get("score", 0.0)
+                    if plan_score.get("matched_strategy"):
+                        plan["strategy_match"] = plan_score.get(
+                            "matched_strategy"
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        f"JARVIS AGENT: plan scoring skipped: {exc}"
+                    )
+
             candidate_has_mutation = any(
                 (
                     str(step.get("tool", "") or "").strip()
@@ -3580,6 +3601,62 @@ class JarvisAgent:
                     success=True,
                     result=result,
                 )
+
+                if getattr(config, "AUTONOMY_AUTO_VERIFICATION_ENABLED", True):
+                    execution_verification = verify_execution_trace(task)
+                    task.active_context["_execution_verification"] = execution_verification
+
+                    # A top-level "done" is not enough when the underlying trace
+                    # contains a failed step. Feed a synthetic retryable failure
+                    # into the normal bounded replan path.
+                    if (
+                        execution_verification.get("trace_available")
+                        and execution_verification.get("failed_steps")
+                    ):
+                        reason = str(
+                            execution_verification.get(
+                                "reason",
+                                "Execution trace verification found a failed step.",
+                            )
+                        )
+                        task.execution_result = "failed"
+                        task.error = reason
+                        try:
+                            import tool_executor
+
+                            prior_trace = list(
+                                tool_executor.get_last_execution_trace() or []
+                            )
+                            prior_trace.append(
+                                {
+                                    "index": len(task.steps) + 1,
+                                    "tool": "agent_execution_verifier",
+                                    "argument": "",
+                                    "status": "failed",
+                                    "success": False,
+                                    "verified": False,
+                                    "result": {
+                                        "success": False,
+                                        "verified": False,
+                                        "retryable": True,
+                                        "message": reason,
+                                    },
+                                    "message": reason,
+                                    "retryable": True,
+                                    "terminal": False,
+                                }
+                            )
+                            tool_executor.LAST_EXECUTION_TRACE = prior_trace
+                        except Exception as trace_exc:
+                            logger.debug(
+                                f"JARVIS AGENT: verification trace patch skipped: {trace_exc}"
+                            )
+
+                        task.observations.append(
+                            "Automatic execution verification detected a failed "
+                            "step despite a top-level successful executor result."
+                        )
+                        return "failed"
 
                 return "done"
 
