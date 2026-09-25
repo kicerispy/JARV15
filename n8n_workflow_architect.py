@@ -22,7 +22,7 @@ MAX_DESCRIPTION_CHARS = 3000
 
 
 _NODE_ID_RE = re.compile(
-    r"(?:@n8n/n8n-nodes-[A-Za-z0-9_-]+|n8n-nodes-[A-Za-z0-9_-]+)\\.[A-Za-z0-9_.-]+"
+    r"(?:@n8n/n8n-nodes-[A-Za-z0-9_-]+|n8n-nodes-[A-Za-z0-9_-]+)\.[A-Za-z0-9_.-]+"
 )
 
 
