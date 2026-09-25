@@ -267,6 +267,83 @@ class N8nWorkflowArchitectTests(unittest.TestCase):
         )
 
 
+    def test_search_queries_include_workflow_capabilities(self):
+        queries = architect._search_queries(
+            "Build a workflow that monitors GitHub issues, summarizes bugs, and sends me an alert",
+            ["monitoring", "content_generation", "notification"],
+        )
+
+        self.assertIn("GitHub issues", queries)
+        self.assertIn("notification", queries)
+        self.assertIn("text generation", queries)
+
+
+    def test_node_relevance_ignores_other_nodes_in_search_text(self):
+        relevant = architect._node_relevance(
+            "Build a workflow that monitors GitHub issues",
+            {
+                "name": "manualTrigger",
+                "nodeId": "n8n-nodes-base.manualTrigger",
+                "type": "n8n-nodes-base.manualTrigger",
+                "_search_text": "n8n-nodes-base.github n8n-nodes-base.githubTrigger",
+            },
+        )
+        github = architect._node_relevance(
+            "Build a workflow that monitors GitHub issues",
+            {
+                "name": "GitHub",
+                "nodeId": "n8n-nodes-base.github",
+                "type": "n8n-nodes-base.github",
+                "_search_text": "n8n-nodes-base.manualTrigger n8n-nodes-base.github",
+            },
+        )
+
+        self.assertGreater(github[0], relevant[0])
+
+
+    def test_quality_gate_requires_requested_capabilities(self):
+        candidates = [
+            {"name": "GitHub Trigger", "nodeId": "n8n-nodes-base.githubTrigger", "type": "n8n-nodes-base.githubTrigger"},
+            {"name": "OpenAI", "nodeId": "n8n-nodes-langchain.openAi", "type": "n8n-nodes-langchain.openAi"},
+            {"name": "If", "nodeId": "n8n-nodes-base.if", "type": "n8n-nodes-base.if"},
+            {"name": "Slack", "nodeId": "n8n-nodes-base.slack", "type": "n8n-nodes-base.slack"},
+        ]
+        requirements = architect._requirements(
+            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            ["monitoring", "content_generation", "notification"],
+        )
+        gate = architect._quality_gate(
+            "Monitor GitHub issues, summarize bugs, and send me an alert.",
+            requirements,
+            candidates,
+            [{"content": "valid schema"}],
+        )
+
+        self.assertTrue(gate["ready_to_build"])
+        self.assertEqual(gate["missing"], [])
+
+
+    def test_deprecated_nodes_are_detected_from_type_definitions(self):
+        definition_text = """
+/** @deprecated Do not use this node. */
+export type RetiredNode = {
+  type: 'n8n-nodes-base.workflowTrigger';
+  version: 1;
+};
+"""
+        ids = architect._deprecated_node_ids(
+            definition_text,
+            [
+                {
+                    "nodeId": "n8n-nodes-base.workflowTrigger",
+                    "type": "n8n-nodes-base.workflowTrigger",
+                }
+            ],
+        )
+
+        self.assertIn("n8n-nodes-base.workflowTrigger", ids)
+
+
     def test_best_practices_prefers_documentation_field(self):
         with patch.object(
             architect,
