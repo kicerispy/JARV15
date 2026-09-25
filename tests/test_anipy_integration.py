@@ -95,7 +95,7 @@ def test_native_cli_args_are_forwarded_without_shell_execution(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "request",
+    "user_request",
     [
         "search anime One Piece",
         "list episodes for Cowboy Bebop",
@@ -103,11 +103,10 @@ def test_native_cli_args_are_forwarded_without_shell_execution(monkeypatch):
         "download Demon Slayer episodes 1-3",
     ],
 )
-def test_anime_requests_do_not_fall_into_generic_browser_route(request):
-    plan = build_anipy_plan(request)
+def test_anime_requests_do_not_fall_into_generic_browser_route(user_request):
+    plan = build_anipy_plan(user_request)
     assert plan is not None
     assert plan["steps"][0]["tool"].startswith("anipy_")
-
 
 
 def test_numeric_quality_matches_native_cli_parsing():
