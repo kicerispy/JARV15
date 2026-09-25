@@ -12,11 +12,14 @@ def test_recovery_backoff_is_bounded_and_exponential():
 
 
 def test_healing_hints_fail_closed(monkeypatch):
-    monkeypatch.setattr(
-        healing_kernel,
-        "logger",
-        type("Logger", (), {"debug": lambda *args, **kwargs: None})(),
-    )
+    class FailingPlaybook:
+        @staticmethod
+        def failure_hints(**kwargs):
+            raise RuntimeError("playbook unavailable")
 
-    monkeypatch.setitem(healing_kernel.__dict__, "healing_hints", lambda *args, **kwargs: [])
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "healing_playbook",
+        FailingPlaybook,
+    )
     assert healing_kernel.healing_hints("unknown_tool") == []
