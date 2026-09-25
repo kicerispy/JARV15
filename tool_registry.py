@@ -124,6 +124,8 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "memory_forget",
         "code_diagnose",
         "dev_command",
+        "strategy_history",
+        "regression_status",
     }
 )
 
