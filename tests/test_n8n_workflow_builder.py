@@ -21,6 +21,27 @@ class N8nWorkflowBuilderTests(unittest.TestCase):
         )
         self.assertEqual(builder._sdk_shape_errors(good), [])
 
+    def test_undefined_ai_subnode_reference_is_rejected(self):
+        code = (
+            "import { workflow, node } from '@n8n/workflow-sdk';\n"
+            "const startTrigger = trigger({});\n"
+            "const aiAgent = node({config: {subnodes: {model: openAiModel}}});\n"
+            "export default workflow('id', 'name').add(startTrigger).to(aiAgent);"
+        )
+        errors = builder._sdk_shape_errors(code)
+        self.assertTrue(any("undefined" in error.lower() for error in errors))
+        self.assertTrue(any("openAiModel" in error for error in errors))
+
+    def test_defined_ai_subnode_reference_passes_shape_guard(self):
+        code = (
+            "import { workflow, node, trigger, languageModel } from '@n8n/workflow-sdk';\n"
+            "const openAiModel = languageModel({type: '@n8n/n8n-nodes-langchain.lmChatOpenAi', version: 1.3, config: {name: 'OpenAI Model', parameters: {}}});\n"
+            "const startTrigger = trigger({});\n"
+            "const aiAgent = node({config: {subnodes: {model: openAiModel}}});\n"
+            "export default workflow('id', 'name').add(startTrigger).to(aiAgent);"
+        )
+        self.assertFalse(builder._sdk_shape_errors(code))
+
     def test_sdk_reference_loader_requires_live_reference(self):
         with patch.object(
             builder,
