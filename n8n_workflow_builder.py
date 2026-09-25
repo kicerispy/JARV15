@@ -21,6 +21,7 @@ DEFAULT_OLLAMA_HOST = os.getenv("JARVIS_OLLAMA_HOST", "http://127.0.0.1:11434")
 DEFAULT_MODEL = os.getenv("JARVIS_N8N_BUILDER_MODEL", os.getenv("JARVIS_CODING_MODEL", "qwen3.5:9b"))
 DEFAULT_TIMEOUT = 180
 MAX_ARCHITECT_CONTEXT = 24000
+MAX_SDK_REFERENCE_CHARS = 28000
 MAX_REPAIR_ATTEMPTS = 2
 PROGRESS_ENABLED = os.getenv("JARVIS_N8N_BUILDER_PROGRESS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
@@ -119,9 +120,73 @@ def _architecture_context(design: Dict[str, Any]) -> str:
     return _bounded(json.dumps(payload, ensure_ascii=False, indent=2), MAX_ARCHITECT_CONTEXT)
 
 
+def _get_workflow_sdk_reference() -> Dict[str, Any]:
+    """Fetch the live n8n Workflow SDK contract before compiling anything."""
+    result = call_tool("get_workflow_sdk_reference", {"section": "all"})
+    if result.get("success") is not True:
+        return _failed(
+            "n8n Workflow SDK reference could not be loaded.",
+            stage="sdk_reference",
+            details=result,
+        )
+
+    data = _result_data(result)
+    reference = data.get("reference") or result.get("reference")
+    if not isinstance(reference, str) or not reference.strip():
+        return _failed(
+            "n8n Workflow SDK reference returned no reference text.",
+            stage="sdk_reference",
+            details=result,
+        )
+
+    return {
+        "success": True,
+        "verified": True,
+        "reference": _bounded(reference, MAX_SDK_REFERENCE_CHARS),
+        "message": "Live n8n Workflow SDK reference loaded before compilation.",
+    }
+
+
+def _sdk_shape_errors(code: str) -> List[str]:
+    """Reject common model-generated SDK shapes before spending an MCP call."""
+    errors: List[str] = []
+    source = str(code or "")
+
+    if "createWorkflow(" in source or "export default createWorkflow" in source:
+        errors.append(
+            "Do not use createWorkflow(). Import workflow() from @n8n/workflow-sdk "
+            "and export workflow('id', 'name')."
+        )
+
+    if "export type " in source or "export interface " in source:
+        errors.append(
+            "Do not emit TypeScript type/interface exports. The validator expects "
+            "executable Workflow SDK source only."
+        )
+
+    if not source.lstrip().startswith("import "):
+        errors.append(
+            "Workflow SDK code must begin with an import from @n8n/workflow-sdk."
+        )
+
+    if "@n8n/workflow-sdk" not in source:
+        errors.append("Import the Workflow SDK from @n8n/workflow-sdk.")
+
+    if not re.search(
+        r"export\s+default\s+workflow\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]",
+        source,
+    ):
+        errors.append(
+            "The final export must be export default workflow('stable-id', 'Workflow Name') "
+            "with both required string arguments."
+        )
+
+    return errors
+
 def _compiler_prompt(
     design: Dict[str, Any],
     *,
+    sdk_reference: str,
     previous_code: str = "",
     validation_error: str = "",
 ) -> str:
@@ -139,14 +204,27 @@ Return exactly:
 {{"name":"short name","description":"short description","code":"full Workflow SDK JavaScript/TypeScript source"}}
 
 Rules:
-- The code must include the complete workflow export expected by n8n's create_workflow_from_code tool.
-- Use only node types and parameters supported by the supplied verified definitions.
+- The live SDK reference below is authoritative. Follow it over prior knowledge.
+- Import only from @n8n/workflow-sdk.
+- Define trigger/node instances first, then compose them into the workflow.
+- The final export MUST be exactly the SDK shape: export default workflow('stable-id', 'Workflow Name')...
+- workflow() requires TWO string arguments: a stable workflow id and a workflow name.
+- Put node parameters under config.parameters; do not put parameters directly beside config.
+- Use .add(...), .to(...), and the documented branch helpers to wire nodes.
+- Do not use createWorkflow, workflow({...}), workflow([ ... ]), a one-argument workflow('name'), or raw workflow JSON.
+- Do not emit export type, export interface, typeof default_, or other type-only exports.
+- Do not leave branch wiring as standalone statements after export default.
+- Use only node types, versions, parameters, and SDK functions supported by the supplied verified definitions and SDK reference.
 - Include a real trigger and connect every required stage.
-- Do not invent credentials or secrets. Leave credential references for n8n to resolve.
+- Do not invent credentials or secrets. Use only documented newCredential(...) references when the verified architecture requires credentials.
 - Keep the graph minimal and deterministic.
 - Preserve the requested notification, condition, summarization, and source behavior.
 - Use n8n expressions for values flowing between nodes.
-- The validator is authoritative; return valid SDK code, not raw workflow JSON.
+- When repairing invalid code, rewrite the whole code into the documented SDK pattern instead of making a local textual patch.
+- Return executable SDK source only, not TypeScript declarations and not raw workflow JSON.
+
+LIVE WORKFLOW SDK REFERENCE:
+{_bounded(sdk_reference, MAX_SDK_REFERENCE_CHARS)}
 
 VERIFIED ARCHITECTURE:
 {_architecture_context(design)}
@@ -156,6 +234,25 @@ VERIFIED ARCHITECTURE:
 
 
 def _validate_code(code: str) -> Dict[str, Any]:
+    shape_errors = _sdk_shape_errors(code)
+    if shape_errors:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "terminal": True,
+            "execution_owner": "n8n",
+            "mcp_tool": "local_sdk_guard",
+            "data": {
+                "valid": False,
+                "errors": shape_errors,
+                "hint": (
+                    "Rewrite the workflow using the live n8n Workflow SDK reference. "
+                    "The final export must call workflow('id', 'name')."
+                ),
+            },
+            "message": "Generated workflow failed the local SDK shape guard.",
+        }
     return call_tool("validate_workflow", {"code": code})
 
 
@@ -353,6 +450,12 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     folder_id = _clean(arguments.get("folder_id")) or None
     timeout = int(arguments.get("test_timeout", 300) or 300)
 
+    _progress("sdk-reference: loading live n8n Workflow SDK contract")
+    sdk_result = _get_workflow_sdk_reference()
+    if sdk_result.get("success") is not True:
+        return sdk_result
+    sdk_reference = str(sdk_result["reference"])
+
     _progress("architecture: discovering n8n capabilities")
     design = design_workflow(request, arguments.get("context"))
     if (
@@ -374,7 +477,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         _progress(f"compile/validate: attempt {attempt + 1}/{MAX_REPAIR_ATTEMPTS + 1}")
         if not code:
             try:
-                generated = _ollama_json(_compiler_prompt(design))
+                generated = _ollama_json(_compiler_prompt(design, sdk_reference=sdk_reference))
             except Exception as exc:
                 return _failed(
                     f"n8n workflow compiler failed: {exc}",
@@ -426,6 +529,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         repaired = _ollama_json(
             _compiler_prompt(
                 design,
+                sdk_reference=sdk_reference,
                 previous_code=code,
                 validation_error=error_text,
             )
@@ -535,6 +639,7 @@ def build_workflow(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         "workflow_name": workflow.get("name"),
         "workflow_url": create_data.get("url") or create_result.get("url"),
         "architecture": design,
+        "sdk_reference_loaded": True,
         "validation_attempts": attempts,
         "creation": create_result,
         "verification": {
