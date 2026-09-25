@@ -1944,6 +1944,7 @@ def test_deterministic_fast_plan_does_not_replan_after_tool_failure(monkeypatch)
 
     assert completed.status == "failed"
     assert completed.replan_count == 0
+    assert completed.error == "Provider unavailable"
     assert planner_calls == []
 
 
