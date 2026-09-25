@@ -20,6 +20,24 @@ DEFAULT_BROWSER_MODEL = os.getenv("JARVIS_BROWSER_MODEL", "qwen3.5:9b")
 DEFAULT_MAX_STEPS = 12
 DEFAULT_TIMEOUT_SECONDS = 300
 
+_WORKER_OPTION_KEYS = (
+    "advanced",
+    "use_vision",
+    "use_thinking",
+    "use_judge",
+    "enable_planning",
+    "planning_replan_on_stall",
+    "planning_exploration_limit",
+    "loop_detection_window",
+    "loop_detection_enabled",
+    "message_compaction",
+    "max_actions_per_step",
+    "max_failures",
+    "max_history_items",
+    "llm_timeout",
+    "step_timeout",
+)
+
 
 def _browser_agent_python() -> Path:
     override = str(os.getenv("JARVIS_BROWSER_AGENT_PYTHON", "")).strip()
@@ -134,6 +152,7 @@ def browser_agent_status() -> dict:
         f"ollama={'online' if ollama_ok else 'offline'}",
         f"cdp={'online' if cdp_ok else 'offline'}",
         f"model={DEFAULT_BROWSER_MODEL}",
+        f"advanced={os.getenv('JARVIS_BROWSER_ADVANCED', '0')}",
     ]
 
     return {
@@ -148,6 +167,8 @@ def browser_agent_status() -> dict:
         "cdp_url": DEFAULT_CDP_URL,
         "ollama_host": DEFAULT_OLLAMA_HOST,
         "model": DEFAULT_BROWSER_MODEL,
+        "advanced_mode": os.getenv("JARVIS_BROWSER_ADVANCED", "0"),
+        "supported_worker_options": list(_WORKER_OPTION_KEYS),
         "message": "Browser agent status: " + ", ".join(details),
     }
 
@@ -268,8 +289,16 @@ def browser_agent_run(argument: str = "") -> dict:
                     exc,
                 )
 
+        worker_request = {
+            "task": task,
+            "max_steps": max_steps,
+        }
+        for key in _WORKER_OPTION_KEYS:
+            if key in payload:
+                worker_request[key] = payload[key]
+
         worker_payload = json.dumps(
-            {"task": task, "max_steps": max_steps},
+            worker_request,
             ensure_ascii=False,
         )
 
