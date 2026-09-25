@@ -1211,10 +1211,20 @@ def _quality_gate(
             ),
         })
 
+    required_capability_ids = {
+        capability
+        for capability, _markers in _required_capabilities(request)
+    }
     missing = [
         check["id"]
         for check in checks
-        if check["status"] in {"missing", "blocked"}
+        if (
+            check["status"] in {"missing", "blocked"}
+            or (
+                check["id"] in required_capability_ids
+                and check["status"] != "verified"
+            )
+        )
     ]
 
     return {
