@@ -1806,6 +1806,25 @@ def code_search(argument=""):
     if not query:
         return "Code search query cannot be empty."
 
+    try:
+        import code_index
+
+        indexed = code_index.search(
+            query,
+            limit=50,
+        )
+        if indexed.get("success"):
+            matches = indexed.get("matches") or []
+            if matches:
+                header = (
+                    f"Found {len(matches)} match(es) for "
+                    f"'{query}' via local code index:"
+                )
+                return header + "\n" + "\n".join(matches)
+    except Exception:
+        # The direct scan below remains the authoritative fallback.
+        pass
+
     base = __import__("pathlib").Path.cwd().resolve()
     matches = []
     query_lower = query.lower()
@@ -3796,6 +3815,14 @@ def _run_tool_raw(
         if tool_name in {"process_snapshot", "service_status"}:
             return handler(argument)
         return handler()
+
+    elif tool_name == "code_index_rebuild":
+        import code_index
+        return code_index.rebuild()
+
+    elif tool_name == "code_index_status":
+        import code_index
+        return code_index.status()
 
     elif tool_name == "jarvis_capabilities":
 
