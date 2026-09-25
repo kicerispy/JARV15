@@ -18,7 +18,13 @@ import certifi
 import psutil
 
 from tool_result import ToolResult
-from tool_registry import BROWSER_TOOLS, ANIPY_TOOLS, UNREAL_MCP_TOOLS
+from tool_registry import (
+    AGENT_SKILL_TOOLS,
+    ANIPY_TOOLS,
+    BROWSER_TOOLS,
+    CONTEXT_MEMORY_TOOLS,
+    UNREAL_MCP_TOOLS,
+)
 from project_fs import iter_project_files
 
 import barehands_tools
@@ -3307,6 +3313,27 @@ def _run_tool_raw(
             tool_name,
             argument,
         )
+
+    if tool_name in CONTEXT_MEMORY_TOOLS:
+        from agent_context import run_context_tool
+
+        return run_context_tool(
+            tool_name,
+            argument,
+        )
+
+    if tool_name in AGENT_SKILL_TOOLS:
+        if tool_name == "harness_review":
+            from harness_policy import review_plan
+            try:
+                payload = json.loads(str(argument or "{}"))
+            except (json.JSONDecodeError, TypeError):
+                return {"success": False, "message": "harness_review expects JSON."}
+            steps = payload.get("steps", []) if isinstance(payload, dict) else []
+            return review_plan(steps)
+
+        from skill_catalog import run_skill_tool
+        return run_skill_tool(tool_name, argument)
 
     if tool_name in EXTENDED_API_TOOLS:
         from extended_api_tools import run_extended_api_tool
