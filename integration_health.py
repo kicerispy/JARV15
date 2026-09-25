@@ -322,11 +322,52 @@ def _parse_argument(argument: str) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _static_components() -> list[Dict[str, Any]]:
+    return [
+        _component(
+            "Ollama",
+            "READY" if getattr(config, "OLLAMA_HOST", "") else "NOT_CONFIGURED",
+            "Ollama endpoint is configured." if getattr(config, "OLLAMA_HOST", "") else "Ollama endpoint is not configured.",
+            live=False,
+            optional=False,
+        ),
+        _component(
+            "Browser",
+            "READY" if _module_available("playwright") else "NOT_INSTALLED",
+            "Playwright is installed." if _module_available("playwright") else "Playwright is not installed.",
+            tool_count=len(BROWSER_TOOLS),
+            optional=False,
+        ),
+        _component(
+            "Browser Agent",
+            "READY" if _module_available("browser_agent") else "NOT_INSTALLED",
+            "Browser agent integration is installed." if _module_available("browser_agent") else "Browser agent module is unavailable.",
+            tool_count=2,
+        ),
+        _component(
+            "Anipy",
+            "READY" if (_module_available("anipy_api") and _module_available("anipy_cli")) else "NOT_INSTALLED",
+            "anipy API/CLI modules are installed." if (_module_available("anipy_api") and _module_available("anipy_cli")) else "anipy modules are not both installed.",
+            tool_count=len(ANIPY_TOOLS),
+        ),
+        _component("External Memory", "READY", "JARVIS context-memory integration is installed.", tool_count=len(CONTEXT_MEMORY_TOOLS)),
+        _component("Agent Skills", "READY" if _module_available("skill_catalog") else "NOT_INSTALLED", "Agent Skills catalog is installed." if _module_available("skill_catalog") else "Agent Skills catalog is unavailable.", tool_count=len(AGENT_SKILL_TOOLS)),
+        _component("Unreal MCP", "READY" if getattr(config, "UNREAL_MCP_URL", "") else "NOT_CONFIGURED", "Unreal MCP endpoint is configured." if getattr(config, "UNREAL_MCP_URL", "") else "Unreal MCP endpoint is not configured.", tool_count=len(UNREAL_MCP_TOOLS)),
+        _component("Roblox MCP", "READY" if getattr(config, "ROBLOX_MCP_URL", "") else "NOT_CONFIGURED", "Roblox MCP endpoint is configured." if getattr(config, "ROBLOX_MCP_URL", "") else "Roblox MCP endpoint is not configured."),
+        _component("n8n", "READY" if getattr(config, "N8N_ENABLED", False) else "DISABLED", "n8n delegation is configured." if getattr(config, "N8N_ENABLED", False) else "n8n delegation is disabled."),
+    ]
+
+
 def integration_health(argument: str = "") -> Dict[str, Any]:
     """Run a bounded, read-only health sweep across JARVIS integrations."""
     options = _parse_argument(argument)
     include_optional = options.get("include_optional", True) is not False
-    components = [
+    probe = options.get("probe", True) is not False
+
+    components = (
+        _static_components()
+        if not probe
+        else [
         _ollama_component(),
         _browser_component(),
         _browser_agent_component(),
@@ -337,7 +378,8 @@ def integration_health(argument: str = "") -> Dict[str, Any]:
         _roblox_component(),
         _n8n_component(),
     ]
-    if include_optional:
+    )
+    if include_optional and probe:
         components.extend([_screenpipe_component(), _gods_eye_component()])
 
     counts: Dict[str, int] = {}
