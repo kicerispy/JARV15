@@ -158,7 +158,7 @@ UNREAL_MCP_TIMEOUT_SECONDS = float(
 
 UNREAL_MCP_EXTERNAL_DIR = os.environ.get(
     "JARVIS_UNREAL_MCP_EXTERNAL_DIR",
-    str(BASE_DIR / "external-tools" / "Unreal_mcp"),
+    str(BASE_DIR / ".jarvis_external" / "Unreal_mcp"),
 ).strip()
 
 # ============================================================
