@@ -199,8 +199,14 @@ def run_doctor(
         else "JARVIS doctor: attention required."
     )
 
+    healthy = not failures
+
     return {
-        "success": not failures,
+        # Diagnostic execution succeeded even when the diagnosis is degraded.
+        # Keep the health state explicit so the agent does not turn an
+        # informational health finding into a failed task.
+        "success": True,
+        "healthy": healthy,
         "verified": True,
         "mode": "doctor",
         "summary": summary,
