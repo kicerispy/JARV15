@@ -19,6 +19,7 @@ import psutil
 
 from tool_result import ToolResult
 from tool_registry import (
+    ADAPTIVE_RUNTIME_TOOLS,
     AGENT_SKILL_TOOLS,
     ANIPY_TOOLS,
     BROWSER_TOOLS,
@@ -3302,6 +3303,11 @@ def _run_tool_raw(
         from integration_health import run_integration_health
 
         return run_integration_health(argument)
+
+    if tool_name in ADAPTIVE_RUNTIME_TOOLS:
+        from adaptive_runtime import run_adaptive_tool
+
+        return run_adaptive_tool(tool_name, argument)
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
