@@ -24,6 +24,7 @@ from tool_registry import (
     ANIPY_TOOLS,
     BROWSER_TOOLS,
     CONTEXT_MEMORY_TOOLS,
+    N8N_TOOLS,
     ROBLOX_MCP_TOOLS,
     SYSTEM_HEALTH_TOOLS,
     UNREAL_MCP_TOOLS,
@@ -3769,7 +3770,6 @@ def _run_tool_raw(
             CONTEXT_MEMORY_TOOLS,
             GODS_EYE_TOOLS,
             JARVIS_PLATFORM_TOOLS,
-            N8N_TOOLS,
             SCREEN_MEMORY_TOOLS,
         )
         inventory = {
