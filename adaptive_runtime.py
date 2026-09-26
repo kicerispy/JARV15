@@ -361,12 +361,36 @@ AGENT_BROWSER_ALLOW_WEBMCP = _bool(
 
 
 def _agent_browser_executable() -> str:
+    """Resolve the real agent-browser launcher, preferring the Windows shim.
+
+    npm installs a native agent-browser binary behind a platform-specific
+    launcher. On Windows the .cmd shim is the stable entry point; resolving
+    the extensionless npm file first can select a non-Win32 wrapper and raise
+    WinError 193 from subprocess.
+    """
     explicit = AGENT_BROWSER_EXECUTABLE
-    if explicit and shutil.which(explicit):
-        return explicit
-    if explicit and os.path.isfile(explicit):
-        return explicit
-    return shutil.which("agent-browser") or shutil.which("agent-browser.cmd") or ""
+    if explicit:
+        explicit_candidates = [explicit]
+        if os.name == "nt" and not str(explicit).lower().endswith(".cmd"):
+            explicit_candidates.insert(0, f"{explicit}.cmd")
+        for candidate in explicit_candidates:
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved
+            if os.path.isfile(candidate):
+                return candidate
+
+    if os.name == "nt":
+        for name in ("agent-browser.cmd", "agent-browser.exe", "agent-browser"):
+            resolved = shutil.which(name)
+            if resolved:
+                return resolved
+    else:
+        resolved = shutil.which("agent-browser")
+        if resolved:
+            return resolved
+
+    return ""
 
 
 def _agent_browser_json(value: str) -> Any:
