@@ -654,6 +654,73 @@ DEBUG = os.environ.get(
 
 
 # ============================================================
+# N8N MCP CLIENT
+# ============================================================
+#
+# Optional direct n8n instance-level MCP. It remains fail-closed unless
+# explicitly enabled or a token is already configured.
+
+N8N_MCP_URL = os.environ.get(
+    "JARVIS_N8N_MCP_URL",
+    "http://127.0.0.1:5678/mcp-server/http",
+).strip().rstrip("/")
+
+N8N_MCP_TOKEN = os.environ.get(
+    "JARVIS_N8N_MCP_TOKEN",
+    "",
+).strip()
+
+N8N_MCP_TOKEN_FILE = os.environ.get(
+    "JARVIS_N8N_MCP_TOKEN_FILE",
+    str(BASE_DIR / ".jarvis_runtime" / "n8n_mcp_token"),
+).strip()
+
+_mcp_enabled_env = os.environ.get("JARVIS_N8N_MCP_ENABLED")
+if _mcp_enabled_env is None:
+    _mcp_token_file_exists = Path(
+        os.path.expandvars(os.path.expanduser(N8N_MCP_TOKEN_FILE))
+    ).is_file()
+    N8N_MCP_ENABLED = bool(
+        N8N_MCP_TOKEN
+        or _mcp_token_file_exists
+    )
+else:
+    N8N_MCP_ENABLED = _mcp_enabled_env.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+N8N_MCP_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_MCP_TIMEOUT_SECONDS",
+        "20",
+    )
+)
+
+N8N_MCP_DISCOVERY_TTL_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_MCP_DISCOVERY_TTL_SECONDS",
+        "30",
+    )
+)
+
+N8N_MCP_MAX_RESPONSE_BYTES = int(
+    os.environ.get(
+        "JARVIS_N8N_MCP_MAX_RESPONSE_BYTES",
+        str(2 * 1024 * 1024),
+    )
+)
+
+N8N_MCP_EXECUTION_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_MCP_EXECUTION_TIMEOUT_SECONDS",
+        "60",
+    )
+)
+
+# ============================================================
 # N8N WORKFLOW ORCHESTRATION
 # ============================================================
 #
