@@ -364,6 +364,7 @@ SYSTEM_ROUTE_TOOLS = frozenset(
         "roblox_mcp_setup",
         "screen_memory_setup",
         "tool_contract_audit",
+        "browser_agent_setup",
     }
 )
 
