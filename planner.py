@@ -53,6 +53,8 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "coding_style_review": "Review a proposed coding/tool plan for unnecessary complexity, scope creep, reuse opportunities, and missing verification. Argument is JSON.",
     "response_style": "Compact a response into an action-first, state-aware spoken answer.",
     "magnitude_status": "Detect optional Magnitude local inference runtime and report whether it is available; do not switch runtimes automatically.",
+    "agent_browser_status": "Check whether the optional Vercel agent-browser CLI is installed and usable.",
+    "agent_browser_action": "Execute one allowlisted agent-browser action as a browser fallback. Argument is JSON with action and target/text.",
     "unreal_mcp": "Call the upstream Unreal_mcp native MCP gateway. Argument is JSON using the upstream unreal gateway operations: search, describe, execute, or configure. Preserve upstream capability names and parameter contracts.",
     "unreal_mcp_status": "Check whether the local Unreal_mcp native MCP endpoint is reachable, authenticated, and exposing the upstream unreal gateway.",
     "unreal_mcp_setup": "Clone or refresh ChiR24/Unreal_mcp into JARVIS external-tools and report the Unreal plugin path. Do not silently modify an Unreal project.",
