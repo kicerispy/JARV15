@@ -1684,6 +1684,34 @@ def build_integration_health_plan(user_request):
     return None
 
 
+def build_tool_contract_audit_plan(user_request):
+    """Build a deterministic read-only route for planner/registry drift."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact = {
+        "audit tool registry",
+        "audit the tool registry",
+        "audit tool contracts",
+        "check tool contracts",
+        "check tool registry",
+        "check tool registry drift",
+        "check planner tool drift",
+        "audit planner tools",
+        "audit jarvis tools",
+    }
+    if text in exact or (
+        "tool" in text
+        and "registry" in text
+        and any(token in text for token in ("audit", "check", "drift", "contract"))
+    ):
+        return {"steps": [{"tool": "tool_contract_audit", "argument": ""}]}
+
+    return None
+
+
 def build_gods_eye_plan(user_request):
     """Build deterministic routes for Bilawal Sidhu's God's Eye View."""
     original = str(user_request or "").strip()
@@ -2195,6 +2223,11 @@ def deterministic_route(user_request, active_context=None):
     if health_plan:
         print("JARVIS: Integration health route selected.")
         return health_plan
+
+    tool_contract_plan = build_tool_contract_audit_plan(user_request)
+    if tool_contract_plan:
+        print("JARVIS: Tool contract audit route selected.")
+        return tool_contract_plan
 
     gods_eye_plan = build_gods_eye_plan(user_request)
     if gods_eye_plan:
