@@ -3842,6 +3842,34 @@ class JarvisAgent:
 
                 task.status = "completed"
 
+                try:
+                    autonomy_failure = task.active_context.get(
+                        "_autonomy_failure",
+                        {},
+                    )
+                    if isinstance(autonomy_failure, dict) and autonomy_failure:
+                        from autonomy_kernel import record_repair_event
+
+                        record_repair_event(
+                            {
+                                "tool": str(
+                                    autonomy_failure.get("tool")
+                                    or "agent_core"
+                                ),
+                                "category": autonomy_failure.get("category", "unknown"),
+                                "signature": autonomy_failure.get("signature", ""),
+                                "action": "resolved",
+                                "reason": "Task completed after bounded recovery.",
+                                "replans": task.replan_count,
+                            },
+                            kind="resolution",
+                        )
+                except Exception as autonomy_resolution_exc:
+                    logger.debug(
+                        "JARVIS AGENT: autonomy resolution ledger skipped: "
+                        f"{autonomy_resolution_exc}"
+                    )
+
                 task.completed_at = (
                     time.time()
                 )
