@@ -320,9 +320,10 @@ class BrowserAgentTests(unittest.TestCase):
         ]
 
         def fake_is_file(path):
-            if path == requirements:
-                return True
-            return False
+            # The worker interpreter already exists in this fixture. This keeps
+            # the test focused on pip self-upgrade recovery rather than venv
+            # creation/ensurepip sequencing.
+            return path in {fake_python, requirements}
 
         with (
             patch.object(module, "_browser_agent_python", return_value=fake_python),
@@ -340,6 +341,10 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertEqual(result["install_returncode"], 0)
         self.assertIn("pip self-upgrade was skipped", result["warning"])
         self.assertEqual(len(run_mock.call_args_list), 3)
+        self.assertEqual(
+            run_mock.call_args_list[0].args[0][3:5],
+            ["pip", "--version"],
+        )
         install_args = run_mock.call_args_list[-1].args[0]
         self.assertEqual(
             install_args[-3:],
