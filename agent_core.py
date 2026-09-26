@@ -499,6 +499,44 @@ class JarvisAgent:
     def _compact_structured_evidence(tool: str, data: Any) -> Any:
         """Preserve useful structured payloads without truncating JSON."""
         if (
+            str(tool or "").strip() == "integration_health"
+            and isinstance(data, dict)
+        ):
+            components = []
+            for component in data.get("components") or []:
+                if not isinstance(component, dict):
+                    continue
+                compact_component = {
+                    "name": str(component.get("name") or "").strip(),
+                    "status": str(component.get("status") or "UNKNOWN").strip(),
+                    "message": str(component.get("message") or "").strip()[:500],
+                }
+                if component.get("tool_count") is not None:
+                    try:
+                        compact_component["tool_count"] = int(component.get("tool_count"))
+                    except (TypeError, ValueError):
+                        pass
+                components.append(compact_component)
+
+            autonomy = data.get("autonomy")
+            if not isinstance(autonomy, dict):
+                autonomy = {}
+
+            return {
+                "success": bool(data.get("success", True)),
+                "verified": bool(data.get("verified", True)),
+                "tool": "integration_health",
+                "status": str(data.get("status") or "UNKNOWN"),
+                "message": str(data.get("message") or "").strip()[:900],
+                "counts": dict(data.get("counts") or {}),
+                "components": components,
+                "autonomy": {
+                    "version": autonomy.get("version", 3),
+                    "suspect_tools": autonomy.get("suspect_tools", 0),
+                },
+            }
+
+        if (
             str(tool or "").strip() == "n8n_mcp_list_tools"
             and isinstance(data, dict)
             and isinstance(data.get("tools"), list)

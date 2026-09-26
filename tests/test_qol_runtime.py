@@ -416,6 +416,41 @@ def test_browser_title_speech_uses_task_goal():
 
 
 
+
+
+def test_quickcheck_humanizes_internal_browser_agent_tool_name(monkeypatch):
+    import qol_tools
+
+    monkeypatch.setattr(
+        qol_tools.runtime_health,
+        "collect_health",
+        lambda: {"overall": "DEGRADED", "ollama": True},
+    )
+    monkeypatch.setattr(qol_tools, "memory_status", lambda: {"records": 0})
+    monkeypatch.setattr(
+        qol_tools,
+        "healing_status",
+        lambda: {"events": 0},
+    )
+    monkeypatch.setattr(
+        qol_tools,
+        "tool_health_status",
+        lambda limit=8: {
+            "tool_count": 4,
+            "degraded_tools": [{"tool": "agentbrowsersetup"}],
+        },
+    )
+    monkeypatch.setattr(
+        qol_tools,
+        "resource_status",
+        lambda: {"success": True, "verified": True},
+    )
+
+    result = qol_tools.jarvis_quickcheck()
+
+    assert result["success"] is True
+    assert result["tool_health"]["degraded"] == ["Browser Agent Setup"]
+
 def test_planner_exposes_platform_autonomy_tools():
     import planner
 

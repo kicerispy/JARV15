@@ -278,6 +278,75 @@ class BrowserAgentTests(unittest.TestCase):
             result = module.browser_agent_setup('{"action":"status"}')
         self.assertEqual(result, expected)
 
+    def test_setup_is_idempotent_when_worker_is_already_ready(self):
+        module = importlib.import_module("browser_agent")
+        fake_python = Path(module.BASE_DIR) / ".browser_agent_venv" / (
+            "Scripts/python.exe" if module.os.name == "nt" else "bin/python"
+        )
+        with (
+            patch.object(module, "_browser_agent_python", return_value=fake_python),
+            patch.object(module, "_worker_import_ok", return_value=True),
+            patch.object(module, "browser_agent_status", return_value={
+                "success": True,
+                "verified": True,
+                "available": True,
+                "browser_use_installed": True,
+            }),
+            patch("subprocess.run") as run_mock,
+        ):
+            result = module.browser_agent_setup('{"action":"install"}')
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["message"], "Browser Use worker environment is already ready.")
+        run_mock.assert_not_called()
+
+
+    def test_setup_continues_when_pip_self_upgrade_fails(self):
+        module = importlib.import_module("browser_agent")
+        fake_root = Path(module.BASE_DIR) / ".browser_agent_venv"
+        fake_python = fake_root / ("Scripts/python.exe" if module.os.name == "nt" else "bin/python")
+        requirements = module.BASE_DIR / "requirements-browser-agent.txt"
+
+        class Completed:
+            def __init__(self, returncode, stdout="", stderr=""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        calls = [
+            Completed(0, "pip 25.0"),
+            Completed(1, "", "CERTIFICATE_VERIFY_FAILED"),
+            Completed(0, "installed", ""),
+        ]
+
+        def fake_is_file(path):
+            if path == requirements:
+                return True
+            return False
+
+        with (
+            patch.object(module, "_browser_agent_python", return_value=fake_python),
+            patch.object(Path, "is_file", autospec=True, side_effect=lambda self: fake_is_file(self)),
+            patch.object(module, "_worker_import_ok", return_value=False),
+            patch.object(module, "browser_agent_status", return_value={
+                "browser_use_installed": True,
+                "success": True,
+            }),
+            patch("subprocess.run", side_effect=calls) as run_mock,
+        ):
+            result = module.browser_agent_setup('{"action":"install"}')
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["install_returncode"], 0)
+        self.assertIn("pip self-upgrade was skipped", result["warning"])
+        self.assertEqual(len(run_mock.call_args_list), 3)
+        install_args = run_mock.call_args_list[-1].args[0]
+        self.assertEqual(
+            install_args[-3:],
+            ["--disable-pip-version-check", "-r", str(requirements)],
+        )
+
+
     def test_setup_uses_isolated_worker_python_and_requirements(self):
         module = importlib.import_module("browser_agent")
         fake_root = Path(module.BASE_DIR) / ".browser_agent_venv"
@@ -313,8 +382,9 @@ class BrowserAgentTests(unittest.TestCase):
             calls[0][:4],
             [module.sys.executable, "-m", "venv", str(fake_root)],
         )
+        self.assertEqual(len(calls), 4)
         self.assertEqual(
-            calls[2][-3:],
+            calls[-1][-3:],
             ["--disable-pip-version-check", "-r", str(requirements)],
         )
 
