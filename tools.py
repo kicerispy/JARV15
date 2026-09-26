@@ -3304,6 +3304,34 @@ def _run_tool_raw(
 
         return run_integration_health(argument)
 
+    if tool_name == "n8n_mcp_status":
+        from n8n_mcp import status
+        return status()
+
+    if tool_name == "n8n_mcp_list_tools":
+        from n8n_mcp import list_tools
+        return {
+            "success": True,
+            "verified": True,
+            "tools": list_tools(),
+        }
+
+    if tool_name == "n8n_workflow_architect":
+        from n8n_workflow_architect import run_architect
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {"success": False, "verified": False, "message": "n8n_workflow_architect expects JSON."}
+        return run_architect(payload if isinstance(payload, dict) else {})
+
+    if tool_name == "n8n_workflow_builder":
+        from n8n_workflow_builder import run_builder
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {"success": False, "verified": False, "message": "n8n_workflow_builder expects JSON."}
+        return run_builder(payload if isinstance(payload, dict) else {})
+
     if tool_name in ADAPTIVE_RUNTIME_TOOLS:
         from adaptive_runtime import run_adaptive_tool
 
