@@ -161,3 +161,69 @@ def test_agent_browser_webmcp_discovery_is_read_only(monkeypatch):
 
     assert result["success"] is True
     assert calls[-1][:4] == ["agent-browser", "webmcp", "list", "search"]
+
+
+def test_agent_browser_executable_prefers_windows_cmd_shim(monkeypatch):
+    monkeypatch.setattr(adaptive_runtime.os, "name", "nt")
+    monkeypatch.setattr(adaptive_runtime, "AGENT_BROWSER_EXECUTABLE", "")
+
+    paths = {
+        "agent-browser.cmd": r"C:\npm\agent-browser.cmd",
+        "agent-browser.exe": r"C:\npm\agent-browser.exe",
+        "agent-browser": r"C:\npm\agent-browser",
+    }
+
+    monkeypatch.setattr(
+        adaptive_runtime.shutil,
+        "which",
+        lambda name: paths.get(name),
+    )
+
+    assert (
+        adaptive_runtime._agent_browser_executable()
+        == paths["agent-browser.cmd"]
+    )
+
+
+def test_agent_browser_setup_uses_windows_cmd_launcher(monkeypatch):
+    monkeypatch.setattr(adaptive_runtime.os, "name", "nt")
+    monkeypatch.setattr(adaptive_runtime, "AGENT_BROWSER_EXECUTABLE", "")
+    monkeypatch.setattr(
+        adaptive_runtime.shutil,
+        "which",
+        lambda name: {
+            "agent-browser.cmd": r"C:\npm\agent-browser.cmd",
+            "node": r"C:\node\node.exe",
+            "npm": r"C:\node\npm.cmd",
+        }.get(name),
+    )
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1] == "--version":
+            return type("NodeResult", (), {
+                "returncode": 0,
+                "stdout": "v24.16.0",
+                "stderr": "",
+            })()
+        return Result()
+
+    monkeypatch.setattr(adaptive_runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        adaptive_runtime,
+        "agent_browser_status",
+        lambda: {"installed": True, "ready": True, "success": True, "verified": True},
+    )
+
+    result = adaptive_runtime.agent_browser_setup('{"action":"install"}')
+
+    assert result["success"] is True
+    assert calls[-1][0] == r"C:\npm\agent-browser.cmd"
+    assert calls[-1][1] == "install"
