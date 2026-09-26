@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import adaptive_runtime
 from tool_registry import ADAPTIVE_RUNTIME_TOOLS, JSON_ARGUMENT_TOOLS
 
@@ -34,7 +36,7 @@ def test_coding_style_review_flags_overlarge_plan():
         {"tool": "write_file", "description": "create helper"},
     ] * 5
     result = adaptive_runtime.coding_style_review(
-        '{"request":"small fix","steps":' + repr(steps).replace("'", '"') + '}'
+        json.dumps({"request": "small fix", "steps": steps})
     )
     assert result["success"] is True
     assert result["lean"] is False
@@ -53,3 +55,9 @@ def test_hindsight_status_is_disabled_by_default(monkeypatch):
     result = adaptive_runtime.hindsight_status()
     assert result["success"] is True
     assert result["enabled"] is False
+
+def test_agent_browser_status_is_nonfatal_when_missing(monkeypatch):
+    monkeypatch.setattr(adaptive_runtime.shutil, "which", lambda _: None)
+    result = adaptive_runtime.agent_browser_status()
+    assert result["success"] is True
+    assert result["installed"] is False
