@@ -30,7 +30,12 @@ jobs:
       - name: Install development dependencies
         run: |
           python -m pip install -r requirements-dev.txt
-          python -m pip install -r requirements-browser-agent.txt
+
+      - name: Install Browser Use worker dependencies
+        run: |
+          python -m venv .browser_agent_venv
+          .browser_agent_venv/bin/python -m pip install --upgrade pip
+          .browser_agent_venv/bin/python -m pip install -r requirements-browser-agent.txt
 
       - name: Compile active JARVIS modules
         run: |
