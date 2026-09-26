@@ -499,12 +499,6 @@ def agent_browser_setup(argument: str = "") -> Dict[str, Any]:
                 ),
             }
 
-        npm = npm
-                        "success": False,
-                "verified": False,
-                "retryable": False,
-                "message": "npm was not found. Install Node.js/npm first, then retry agent-browser setup.",
-            }
         command = [npm, "install", "-g", "agent-browser"]
 
     env = os.environ.copy()
