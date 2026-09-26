@@ -670,6 +670,38 @@ def test_code_index_status_has_a_compact_speech_answer():
     ) == "The local code index contains 792 indexed files."
 
 
+def test_n8n_mcp_evidence_compacts_large_tool_catalog():
+    from agent_core import JarvisAgent
+
+    catalog = {
+        "success": True,
+        "verified": True,
+        "tools": [
+            {
+                "name": f"tool_{index}",
+                "description": "x" * 1500,
+                "inputSchema": {"properties": {"value": "x" * 1000}},
+            }
+            for index in range(20)
+        ],
+    }
+
+    compact = JarvisAgent._compact_structured_evidence(
+        "n8n_mcp_list_tools",
+        catalog,
+    )
+
+    assert compact["tool_count"] == 20
+    assert [item["name"] for item in compact["tools"][:3]] == [
+        "tool_0",
+        "tool_1",
+        "tool_2",
+    ]
+    assert len(compact["tools"][0]["description"]) == 500
+    assert "inputSchema" not in compact["tools"][0]
+
+
+
 def test_n8n_mcp_negotiates_modern_protocol_and_lists_tools(monkeypatch):
     import n8n_mcp
 
