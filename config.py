@@ -162,6 +162,72 @@ UNREAL_MCP_EXTERNAL_DIR = os.environ.get(
 ).strip()
 
 # ============================================================
+# SELF-HEALING / RESILIENCE / LEARNED AUTONOMY
+# ============================================================
+
+SELF_HEALING_ENABLED = os.environ.get(
+    "JARVIS_SELF_HEALING_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SELF_HEALING_MAX_ATTEMPTS = int(
+    os.environ.get("JARVIS_SELF_HEALING_MAX_ATTEMPTS", "2")
+)
+
+TOOL_RESILIENCE_ENABLED = os.environ.get(
+    "JARVIS_TOOL_RESILIENCE_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+TOOL_CIRCUIT_BREAKER_ENABLED = os.environ.get(
+    "JARVIS_TOOL_CIRCUIT_BREAKER_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+TOOL_CIRCUIT_FAILURE_THRESHOLD = int(
+    os.environ.get("JARVIS_TOOL_CIRCUIT_FAILURE_THRESHOLD", "4")
+)
+
+TOOL_CIRCUIT_COOLDOWN_SECONDS = float(
+    os.environ.get("JARVIS_TOOL_CIRCUIT_COOLDOWN_SECONDS", "20")
+)
+
+AUTONOMY_LEARNED_STRATEGY_ENABLED = os.environ.get(
+    "JARVIS_AUTONOMY_LEARNED_STRATEGY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+AUTONOMY_AUTO_VERIFICATION_ENABLED = os.environ.get(
+    "JARVIS_AUTONOMY_AUTO_VERIFICATION_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+AUTONOMY_STRATEGY_QUARANTINE_SECONDS = float(
+    os.environ.get("JARVIS_AUTONOMY_STRATEGY_QUARANTINE_SECONDS", "3600")
+)
+
+AUTONOMY_STRATEGY_MIN_SUCCESSES = int(
+    os.environ.get("JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESSES", "3")
+)
+
+AUTONOMY_STRATEGY_MIN_SUCCESS_RATE = float(
+    os.environ.get("JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESS_RATE", "0.75")
+)
+
+SELF_HEALING_FAILURE_MEMORY_ENABLED = os.environ.get(
+    "JARVIS_SELF_HEALING_FAILURE_MEMORY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS = float(
+    os.environ.get("JARVIS_SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS", "0.25")
+)
+
+SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS = float(
+    os.environ.get("JARVIS_SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS", "4.0")
+)
+
+# ============================================================
 # EXTERNAL CONTEXT / MEMORY
 # ============================================================
 
