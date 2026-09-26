@@ -318,6 +318,7 @@ def jarvis_quickcheck() -> dict[str, Any]:
 
     display_names = {
         "agentbrowsersetup": "Browser Agent Setup",
+        "agent_browser_setup": "Browser Agent Setup",
         "browser_agent_setup": "Browser Agent Setup",
         "integrationhealth": "Integration Health",
         "integration_health": "Integration Health",
