@@ -441,6 +441,14 @@ def test_platform_diagnostics_routes_are_deterministic():
     assert build_platform_diagnostics_plan("rebuild code index")["steps"][0]["tool"] == "code_index_rebuild"
     assert build_platform_diagnostics_plan("strategy history for browser search")["steps"][0]["tool"] == "strategy_history"
 
+def test_deterministic_n8n_router_skips_existing_workflow_mutations():
+    from planner import _deterministic_n8n_plan
+
+    assert _deterministic_n8n_plan(
+        "add a node to my n8n workflow"
+    ) is None
+
+
 def test_planner_exposes_live_n8n_mutation_tools(monkeypatch):
     import planner
 
