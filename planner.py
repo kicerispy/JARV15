@@ -23,6 +23,10 @@ PLANNER_MODEL = MODEL_MANAGER.planner_model
 AVAILABLE_TOOLS: Dict[str, str] = {
     "n8n_status": "Check whether the configured n8n workflow orchestrator is enabled and reachable.",
     "n8n_run_workflow": "Delegate a workflow-class task to n8n. Argument is JSON with request, workflow_class, and optional context.",
+    "n8n_mcp_status": "Check the direct n8n instance-level MCP connection.",
+    "n8n_mcp_list_tools": "Discover the live n8n MCP workflow/tool catalog.",
+    "n8n_workflow_architect": "Design or audit an n8n workflow using live node discovery and schema-backed guidance. Argument is JSON.",
+    "n8n_workflow_builder": "Build, validate, create, test, audit, and optionally publish an n8n workflow from a verified architecture. Argument is JSON.",
     "anipy_cli": "Run the upstream anipy-cli CLI unchanged. Argument is the native CLI argument string or JSON with args.",
     "anipy_providers": "List the providers exposed by the installed anipy-api package.",
     "anipy_search": "Search anime through anipy-api providers. Argument is JSON with query and optional provider/index/all_providers.",
