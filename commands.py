@@ -2069,6 +2069,14 @@ def build_platform_diagnostics_plan(user_request):
         "list jarvis capabilities": ("jarvis_capabilities", ""),
         "ollama models": ("ollama_models", ""),
         "list ollama models": ("ollama_models", ""),
+        "n8n mcp status": ("n8n_mcp_status", ""),
+        "check n8n mcp status": ("n8n_mcp_status", ""),
+        "n8n mcp health": ("n8n_mcp_status", ""),
+        "check n8n mcp health": ("n8n_mcp_status", ""),
+        "list n8n mcp tools": ("n8n_mcp_list_tools", ""),
+        "show n8n mcp tools": ("n8n_mcp_list_tools", ""),
+        "list n8n tools": ("n8n_mcp_list_tools", ""),
+        "show n8n tools": ("n8n_mcp_list_tools", ""),
     }
 
     selected = exact_map.get(text)
