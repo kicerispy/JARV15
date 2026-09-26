@@ -382,8 +382,9 @@ class BrowserAgentTests(unittest.TestCase):
             calls[0][:4],
             [module.sys.executable, "-m", "venv", str(fake_root)],
         )
+        self.assertEqual(len(calls), 4)
         self.assertEqual(
-            calls[2][-3:],
+            calls[-1][-3:],
             ["--disable-pip-version-check", "-r", str(requirements)],
         )
 
