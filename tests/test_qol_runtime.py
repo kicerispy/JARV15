@@ -602,3 +602,132 @@ def test_diagnostic_answer_composer_is_concise():
     )
 
     assert answer == "Context memory backend 'local' is available."
+
+
+def test_resilience_health_clears_active_degradation_after_success(tmp_path, monkeypatch):
+    import resilience_kernel
+
+    monkeypatch.setattr(
+        resilience_kernel,
+        "_HEALTH_PATH",
+        tmp_path / "tool_health.json",
+    )
+    monkeypatch.setattr(
+        resilience_kernel,
+        "_MEMORY_DIR",
+        tmp_path,
+    )
+
+    runtime = resilience_kernel.RuntimeResilience()
+    runtime.record("example_tool", success=False, error="temporary")
+    runtime.record("example_tool", success=True)
+
+    status = runtime.snapshot()
+
+    assert status["degraded_tools"] == []
+    assert status["historical_failures"][0]["tool"] == "example_tool"
+
+
+def test_response_pipeline_does_not_speak_parenthetical_plural_markers():
+    from response_pipeline import clean_for_speech
+
+    cleaned = clean_for_speech(
+        "I found 4 model(s) and 3 tool(s)."
+    )
+
+    assert cleaned == "I found 4 model and 3 tool."
+    assert "comma s" not in cleaned.lower()
+
+
+def test_code_index_status_has_a_compact_speech_answer():
+    from types import SimpleNamespace
+    from answer_composer import compose_task_answer
+
+    task = SimpleNamespace(
+        request="code index status",
+        planner_result=None,
+        evidence=[
+            {
+                "tool": "code_index_status",
+                "success": True,
+                "verified": True,
+                "data": {
+                    "success": True,
+                    "verified": True,
+                    "indexed_files": 792,
+                    "path": r"C:\Users\Jordan\.jarvis_autonomy\code_index.sqlite3",
+                    "fts5": True,
+                },
+            }
+        ],
+    )
+
+    assert compose_task_answer(
+        task.request,
+        task,
+        active_context={},
+    ) == "The local code index contains 792 indexed files."
+
+
+def test_n8n_mcp_negotiates_modern_protocol_and_lists_tools(monkeypatch):
+    import n8n_mcp
+
+    class FakeResponse:
+        def __init__(self, payload, headers=None):
+            self.payload = payload
+            self.headers = headers or {}
+            self.status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, limit=None):
+            return json.dumps(self.payload).encode("utf-8")
+
+    calls = []
+
+    def fake_urlopen(request, timeout=None):
+        body = json.loads(request.data.decode("utf-8"))
+        calls.append((request, body))
+        if body["method"] == "server/discover":
+            return FakeResponse({
+                "jsonrpc": "2.0",
+                "id": body["id"],
+                "result": {
+                    "protocolVersion": "2026-07-28",
+                    "capabilities": {"tools": {"listChanged": False}},
+                },
+            })
+        return FakeResponse({
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {
+                "tools": [
+                    {"name": "execute_workflow", "description": "Run a workflow", "inputSchema": {}},
+                    {"name": "search_workflows", "description": "Find workflows", "inputSchema": {}},
+                ]
+            },
+        })
+
+    monkeypatch.setattr(n8n_mcp, "_PROTOCOL_MODE", "unknown")
+    monkeypatch.setattr(n8n_mcp, "_NEGOTIATED_PROTOCOL_VERSION", "")
+    monkeypatch.setattr(n8n_mcp, "_SESSION_ID", None)
+    monkeypatch.setattr(n8n_mcp, "_TOOL_CACHE", {"expires_at": 0.0, "tools": []})
+    monkeypatch.setattr(n8n_mcp, "N8N_MCP_ENABLED", True)
+    monkeypatch.setattr(n8n_mcp, "N8N_MCP_URL", "http://127.0.0.1:5678/mcp-server/http")
+    monkeypatch.setattr(n8n_mcp, "N8N_MCP_TOKEN", "test-token")
+    monkeypatch.setattr(n8n_mcp, "urlopen", fake_urlopen)
+
+    tools = n8n_mcp.list_tools(force=True)
+
+    assert [item["name"] for item in tools] == [
+        "execute_workflow",
+        "search_workflows",
+    ]
+    assert n8n_mcp._PROTOCOL_MODE == "modern"
+    assert calls[0][0].headers["Mcp-Method"] == "server/discover"
+    assert calls[0][0].headers["MCP-Protocol-Version"] == "2026-07-28"
+    assert calls[1][0].headers["Mcp-Method"] == "tools/list"
