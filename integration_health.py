@@ -256,16 +256,40 @@ def _n8n_component() -> Dict[str, Any]:
         result = n8n_status()
         enabled = bool(result.get("enabled"))
         reachable = bool(result.get("reachable"))
-        status = "DISABLED" if not enabled else ("READY" if reachable else "OFFLINE")
+        messages = [str(result.get("message") or "n8n status checked.")]
+
+        mcp_enabled = False
+        mcp_reachable = False
+        try:
+            from n8n_mcp import status as n8n_mcp_status
+            mcp = n8n_mcp_status()
+            mcp_enabled = bool(mcp.get("enabled"))
+            mcp_reachable = bool(mcp.get("reachable"))
+            if mcp_reachable:
+                messages.append("Direct n8n MCP is reachable.")
+            elif mcp_enabled:
+                messages.append("Direct n8n MCP is configured but unavailable.")
+        except Exception:
+            pass
+
+        if reachable or mcp_reachable:
+            component_status = "READY"
+        elif enabled or mcp_enabled:
+            component_status = "OFFLINE"
+        else:
+            component_status = "DISABLED"
+
         return _component(
             "n8n",
-            status,
-            str(result.get("message") or "n8n status checked."),
+            component_status,
+            " ".join(messages),
             tool_count=len(N8N_TOOLS),
             live=True,
         )
     except Exception as exc:
         return _component("n8n", "ERROR", f"n8n diagnostic failed: {exc}", tool_count=len(N8N_TOOLS), live=True)
+
+
 
 
 def _memory_component() -> Dict[str, Any]:
@@ -276,7 +300,7 @@ def _memory_component() -> Dict[str, Any]:
         backends = result.get("backends", {}) if isinstance(result, dict) else {}
         selected = str(result.get("selected_backend") or "").strip()
 
-        if selected in {"openviking", "agentmemory"}:
+        if selected in {"openviking", "agentmemory", "hindsight"}:
             status = "READY"
             message = f"External Memory is using the {selected} backend."
         elif selected == "local":
@@ -289,7 +313,7 @@ def _memory_component() -> Dict[str, Any]:
             status = "OFFLINE"
             message = "No usable context-memory backend is available."
 
-        for backend_name in ("openviking", "agentmemory"):
+        for backend_name in ("openviking", "agentmemory", "hindsight"):
             backend = backends.get(backend_name, {})
             if backend.get("reachable") and backend.get("healthy"):
                 message += f" {backend_name} is reachable."

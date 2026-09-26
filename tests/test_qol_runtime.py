@@ -412,3 +412,30 @@ def test_browser_title_speech_uses_task_goal():
         result,
         "What's the page title of example.com?",
     ) == 'The page title is "Example Domain".'
+
+
+
+def test_planner_exposes_platform_autonomy_tools():
+    import planner
+
+    for name in (
+        "jarvis_doctor",
+        "jarvis_quickcheck",
+        "healing_hints",
+        "tool_health",
+        "code_index_rebuild",
+        "autonomy_status",
+        "strategy_history",
+        "regression_status",
+    ):
+        assert name in planner.AVAILABLE_TOOLS
+
+
+
+def test_platform_diagnostics_routes_are_deterministic():
+    from commands import build_platform_diagnostics_plan
+
+    assert build_platform_diagnostics_plan("jarvis doctor")["steps"][0]["tool"] == "jarvis_doctor"
+    assert build_platform_diagnostics_plan("tool health")["steps"][0]["tool"] == "tool_health"
+    assert build_platform_diagnostics_plan("rebuild code index")["steps"][0]["tool"] == "code_index_rebuild"
+    assert build_platform_diagnostics_plan("strategy history for browser search")["steps"][0]["tool"] == "strategy_history"

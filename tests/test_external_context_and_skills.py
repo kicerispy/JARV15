@@ -91,3 +91,25 @@ def test_local_context_fallback_is_available(monkeypatch):
     result = agent_context.backend_status(force=True)
     assert result["backends"]["local"]["healthy"] is True
     assert result["backends"]["local"]["memory_count"] == 2
+
+
+
+def test_hindsight_context_backend_can_supply_context(monkeypatch):
+    monkeypatch.setattr(agent_context, "ADAPTIVE_MEMORY_ENABLED", True)
+    monkeypatch.setattr(
+        agent_context,
+        "_backend_order",
+        lambda: ["hindsight", "local"],
+    )
+
+    def fake_hindsight(path, payload, timeout=8.0):
+        assert "memories/recall" in path
+        assert payload["query"] == "Unreal MCP"
+        return {"results": ["remembered context"]}
+
+    monkeypatch.setattr(agent_context, "_hindsight_post", fake_hindsight)
+    result = agent_context.context("Unreal MCP", limit=3)
+
+    assert result["success"] is True
+    assert result["backend"] == "hindsight"
+    assert result["context"]["results"] == ["remembered context"]

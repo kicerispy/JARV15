@@ -291,6 +291,17 @@ class JarvisAgent:
                 error=task.error or "",
                 domain=domain,
             )
+
+            # Feed successful/failed task outcomes into the learned strategy
+            # layer. Selection remains bounded and only trusted strategies
+            # can be reused by future planning.
+            try:
+                from strategy_selector import record_task_outcome
+                record_task_outcome(task)
+            except Exception as strategy_exc:
+                logger.debug(
+                    f"JARVIS AGENT: strategy learning write skipped: {strategy_exc}"
+                )
         except Exception as exc:
             logger.debug(
                 f"JARVIS AGENT: experience-memory write skipped: {exc}"
@@ -1490,6 +1501,53 @@ class JarvisAgent:
                 )
                 return task
 
+        # Reuse only repeatedly successful, verified strategies. Explicit
+        # software-change/repair phases never skip their evidence-first flow.
+        if (
+            planning_request is None
+            and not require_repair_plan
+            and not require_change_plan
+            and not require_code_read
+            and not require_code_test
+            and not require_code_diagnose
+            and not is_software_repair_request(task.request)
+            and not is_software_change_request(task.request)
+            and not is_explicit_self_repair_request(task.request)
+            and bool(getattr(config, "AUTONOMY_LEARNED_STRATEGY_ENABLED", True))
+        ):
+            try:
+                from strategy_selector import select_learned_plan
+
+                learned_plan = select_learned_plan(
+                    task.request,
+                    context=task.active_context,
+                )
+                if isinstance(learned_plan, dict):
+                    learned_plan = validate_plan(learned_plan)
+                    learned_issues = assess_plan(
+                        task.request,
+                        learned_plan,
+                        require_modification=False,
+                        require_code_diagnose=False,
+                    )
+                    if not learned_issues:
+                        task = self._install_phase_plan(
+                            task,
+                            learned_plan,
+                        )
+                        task.observations.append(
+                            "Reused a previously successful verified strategy "
+                            "without invoking a fresh LLM planner call."
+                        )
+                        logger.info(
+                            "JARVIS AGENT: Reused trusted learned strategy."
+                        )
+                        return task
+            except Exception as exc:
+                logger.debug(
+                    f"JARVIS AGENT: learned strategy reuse skipped: {exc}"
+                )
+
         # Give an incomplete plan one corrective planning pass in general.
         # For a repair request that already names an existing target file,
         # deterministic discovery can take over immediately after the first
@@ -1528,6 +1586,38 @@ class JarvisAgent:
                 plan = validate_plan(
                     plan
                 )
+
+                # Run a read-only reuse/minimal-change review on mutation
+                # plans. This is advisory: it records scope/verification
+                # concerns without bypassing the existing safety workflow.
+                try:
+                    from adaptive_runtime import coding_style_review
+
+                    plan_review = coding_style_review(
+                        json.dumps(
+                            {
+                                "request": task.request,
+                                "steps": plan.get("steps", []) if isinstance(plan, dict) else [],
+                            }
+                        )
+                    )
+                    if isinstance(plan_review, dict):
+                        concerns = plan_review.get("concerns") or []
+                        suggestions = plan_review.get("suggestions") or []
+                        if concerns:
+                            task.observations.append(
+                                "Coding policy concerns: "
+                                + " | ".join(str(item) for item in concerns[:4])
+                            )
+                        if suggestions:
+                            task.observations.append(
+                                "Coding policy suggestions: "
+                                + " | ".join(str(item) for item in suggestions[:4])
+                            )
+                except Exception as review_exc:
+                    logger.debug(
+                        f"JARVIS AGENT: coding plan review skipped: {review_exc}"
+                    )
 
                 # Product research must always operate on the original user
                 # request. During replanning, request_for_planner contains

@@ -19,6 +19,7 @@ import psutil
 
 from tool_result import ToolResult
 from tool_registry import (
+    ADAPTIVE_RUNTIME_TOOLS,
     AGENT_SKILL_TOOLS,
     ANIPY_TOOLS,
     BROWSER_TOOLS,
@@ -3303,6 +3304,39 @@ def _run_tool_raw(
 
         return run_integration_health(argument)
 
+    if tool_name == "n8n_mcp_status":
+        from n8n_mcp import status
+        return status()
+
+    if tool_name == "n8n_mcp_list_tools":
+        from n8n_mcp import list_tools
+        return {
+            "success": True,
+            "verified": True,
+            "tools": list_tools(),
+        }
+
+    if tool_name == "n8n_workflow_architect":
+        from n8n_workflow_architect import run_architect
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {"success": False, "verified": False, "message": "n8n_workflow_architect expects JSON."}
+        return run_architect(payload if isinstance(payload, dict) else {})
+
+    if tool_name == "n8n_workflow_builder":
+        from n8n_workflow_builder import run_builder
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {"success": False, "verified": False, "message": "n8n_workflow_builder expects JSON."}
+        return run_builder(payload if isinstance(payload, dict) else {})
+
+    if tool_name in ADAPTIVE_RUNTIME_TOOLS:
+        from adaptive_runtime import run_adaptive_tool
+
+        return run_adaptive_tool(tool_name, argument)
+
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(
             tool_name,
@@ -3522,6 +3556,276 @@ def _run_tool_raw(
     elif tool_name == "code_diagnose":
 
         return code_diagnose(argument)
+
+    # --------------------------------------------------------
+    # JARVIS PLATFORM / SELF-OBSERVABILITY
+    # --------------------------------------------------------
+
+    elif tool_name == "jarvis_doctor":
+        import jarvis_doctor
+        raw = str(argument or "").strip()
+        deep = raw.lower() in {"deep", "true", "1", "yes", "doctor"}
+        run_tests = False
+        if raw:
+            try:
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    deep = bool(payload.get("deep", deep))
+                    run_tests = bool(payload.get("run_tests", False))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        result = jarvis_doctor.run_doctor(deep=deep, run_tests=run_tests)
+        result["report"] = jarvis_doctor.format_doctor_report(result)
+        return result
+
+    elif tool_name == "tool_health":
+        from resilience_kernel import tool_health_status
+        return {
+            "success": True,
+            "verified": True,
+            **tool_health_status(),
+        }
+
+    elif tool_name == "memory_remember":
+        import local_memory
+        raw = str(argument or "").strip()
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"text": raw}
+        return local_memory.remember(
+            str(payload.get("text", "") or ""),
+            kind=str(payload.get("kind", "fact") or "fact"),
+            tags=payload.get("tags") if isinstance(payload.get("tags"), list) else [],
+        )
+
+    elif tool_name == "memory_recall":
+        import local_memory
+        raw = str(argument or "").strip()
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"query": raw}
+        return {
+            "success": True,
+            "verified": True,
+            "query": str(payload.get("query", "") or ""),
+            "results": local_memory.recall(
+                str(payload.get("query", "") or ""),
+                limit=int(payload.get("limit", 5) or 5),
+                kind=str(payload.get("kind", "") or ""),
+            ),
+        }
+
+    elif tool_name == "memory_forget":
+        import local_memory
+        raw = str(argument or "").strip()
+        query = raw
+        if raw:
+            try:
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    query = str(payload.get("query", "") or "")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return local_memory.forget(query)
+
+    elif tool_name == "healing_history":
+        from healing_kernel import healing_history
+        raw = str(argument or "").strip()
+        try:
+            limit = int(raw) if raw else 10
+        except (TypeError, ValueError):
+            limit = 10
+        return {
+            "success": True,
+            "verified": True,
+            "events": healing_history(limit=limit),
+        }
+
+    elif tool_name == "healing_hints":
+        from healing_kernel import healing_hints
+        raw = str(argument or "").strip()
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+            except (json.JSONDecodeError, TypeError):
+                payload = {"error": raw}
+        return {
+            "success": True,
+            "verified": True,
+            "hints": healing_hints(
+                str(payload.get("tool", "") or ""),
+                category=str(payload.get("category", "") or ""),
+                error=str(payload.get("error", "") or ""),
+                limit=int(payload.get("limit", 5) or 5),
+            ),
+        }
+
+    elif tool_name == "tool_reset":
+        from resilience_kernel import get_resilience
+        name = str(argument or "").strip()
+        if name:
+            try:
+                payload = json.loads(name)
+                if isinstance(payload, dict):
+                    name = str(payload.get("tool", "") or "").strip()
+            except (json.JSONDecodeError, TypeError):
+                pass
+        reset = get_resilience().reset_tool(name) if name else False
+        return {
+            "success": bool(name),
+            "verified": bool(name),
+            "tool": name,
+            "reset": reset,
+            "message": (
+                f"Reset resilience state for {name}."
+                if name
+                else "Tool name is required."
+            ),
+        }
+
+    elif tool_name == "memory_status":
+        import local_memory
+        return local_memory.memory_status()
+
+    elif tool_name in {"autonomy_status", "strategy_history", "regression_status"}:
+        from strategy_selector import (
+            autonomy_status,
+            strategy_history,
+            regression_status,
+        )
+        raw = str(argument or "").strip()
+        if tool_name == "autonomy_status":
+            return {
+                "success": True,
+                "verified": True,
+                **autonomy_status(),
+            }
+
+        payload = {}
+        if raw:
+            try:
+                candidate = json.loads(raw)
+                if isinstance(candidate, dict):
+                    payload = candidate
+                else:
+                    payload = {"request": raw}
+            except (json.JSONDecodeError, TypeError):
+                payload = {"request": raw}
+
+        request = str(payload.get("request", "") or "")
+        limit = int(payload.get("limit", 10) or 10)
+        if tool_name == "strategy_history":
+            return {
+                "success": True,
+                "verified": True,
+                "strategies": strategy_history(request, limit=limit),
+            }
+        return {
+            "success": True,
+            "verified": True,
+            **regression_status(request),
+        }
+
+    elif tool_name in {
+        "jarvis_quickcheck",
+        "resource_status",
+        "process_snapshot",
+        "project_snapshot",
+        "service_status",
+        "dependency_status",
+    }:
+        import qol_tools
+        handler = getattr(qol_tools, tool_name)
+        if tool_name in {"process_snapshot", "service_status"}:
+            return handler(argument)
+        return handler()
+
+    elif tool_name == "code_index_rebuild":
+        import code_index
+        return code_index.rebuild()
+
+    elif tool_name == "code_index_status":
+        import code_index
+        return code_index.status()
+
+    elif tool_name == "jarvis_capabilities":
+        from tool_registry import (
+            ADAPTIVE_RUNTIME_TOOLS,
+            AGENT_SKILL_TOOLS,
+            BROWSER_TOOLS,
+            CONTEXT_MEMORY_TOOLS,
+            GODS_EYE_TOOLS,
+            JARVIS_PLATFORM_TOOLS,
+            N8N_TOOLS,
+            SCREEN_MEMORY_TOOLS,
+        )
+        inventory = {
+            "browser": sorted(BROWSER_TOOLS),
+            "n8n": sorted(N8N_TOOLS),
+            "platform": sorted(JARVIS_PLATFORM_TOOLS),
+            "adaptive": sorted(ADAPTIVE_RUNTIME_TOOLS),
+            "context": sorted(CONTEXT_MEMORY_TOOLS),
+            "skills": sorted(AGENT_SKILL_TOOLS),
+            "gods_eye": sorted(GODS_EYE_TOOLS),
+            "screen_memory": sorted(SCREEN_MEMORY_TOOLS),
+        }
+        try:
+            from roblox_mcp import get_roblox_planner_tools
+            inventory["roblox"] = sorted(get_roblox_planner_tools().keys())
+        except Exception:
+            inventory["roblox"] = []
+        try:
+            from unreal_mcp import get_unreal_planner_tool_descriptions
+            inventory["unreal"] = sorted(get_unreal_planner_tool_descriptions().keys())
+        except Exception:
+            inventory["unreal"] = []
+        return {
+            "success": True,
+            "verified": True,
+            "categories": {key: len(value) for key, value in inventory.items()},
+            "tools": inventory,
+        }
+
+    elif tool_name == "ollama_models":
+        from model_manager import ModelManager
+        manager = ModelManager()
+        models = manager.list_local_models()
+        names = sorted({
+            str(item.get("name") or item.get("model") or "").strip()
+            for item in models
+            if str(item.get("name") or item.get("model") or "").strip()
+        })
+        configured = {
+            "chat": manager.chat_model,
+            "planner": manager.planner_model,
+            "change_planner": manager.change_planner_model,
+            "coding": manager.coding_model,
+            "coding_fallback": manager.coding_fallback_model,
+        }
+        return {
+            "success": True,
+            "verified": True,
+            "configured": configured,
+            "available": names,
+            "missing_configured": {
+                role: model
+                for role, model in configured.items()
+                if model and model not in names
+            },
+        }
 
     # --------------------------------------------------------
     # SYSTEM
@@ -3837,16 +4141,56 @@ def run_tool(
     """
     Public JARVIS tool dispatcher.
 
-    All tool results are normalized into the unified ToolResult
-    contract while preserving the original raw result in .data.
+    Every execution is observed by the runtime resilience layer. Circuit
+    breaking remains bounded and fail-closed while existing tool behavior is
+    preserved inside the normalized ToolResult contract.
     """
+    started = time.perf_counter()
 
-    result = _run_tool_raw(
-        tool_name,
-        argument,
-    )
+    try:
+        from resilience_kernel import get_resilience
+        resilience = get_resilience()
+        guard = resilience.before(tool_name)
+        if not guard.get("allowed", True):
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                error=str(guard.get("reason") or "Tool temporarily unavailable."),
+                retryable=True,
+                observation=guard,
+            )
+    except Exception:
+        resilience = None
 
-    return normalize_tool_result(
+    try:
+        result = _run_tool_raw(
+            tool_name,
+            argument,
+        )
+    except Exception as exc:
+        result = ToolResult(
+            success=False,
+            tool=tool_name,
+            error=f"{type(exc).__name__}: {exc}",
+            retryable=False,
+        )
+
+    normalized = normalize_tool_result(
         tool_name,
         result,
     )
+
+    if resilience is not None:
+        try:
+            resilience.record(
+                tool_name,
+                success=normalized.success,
+                retryable=normalized.retryable,
+                error=normalized.error,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                argument=argument,
+            )
+        except Exception:
+            pass
+
+    return normalized

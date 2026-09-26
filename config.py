@@ -162,6 +162,72 @@ UNREAL_MCP_EXTERNAL_DIR = os.environ.get(
 ).strip()
 
 # ============================================================
+# SELF-HEALING / RESILIENCE / LEARNED AUTONOMY
+# ============================================================
+
+SELF_HEALING_ENABLED = os.environ.get(
+    "JARVIS_SELF_HEALING_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SELF_HEALING_MAX_ATTEMPTS = int(
+    os.environ.get("JARVIS_SELF_HEALING_MAX_ATTEMPTS", "2")
+)
+
+TOOL_RESILIENCE_ENABLED = os.environ.get(
+    "JARVIS_TOOL_RESILIENCE_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+TOOL_CIRCUIT_BREAKER_ENABLED = os.environ.get(
+    "JARVIS_TOOL_CIRCUIT_BREAKER_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+TOOL_CIRCUIT_FAILURE_THRESHOLD = int(
+    os.environ.get("JARVIS_TOOL_CIRCUIT_FAILURE_THRESHOLD", "4")
+)
+
+TOOL_CIRCUIT_COOLDOWN_SECONDS = float(
+    os.environ.get("JARVIS_TOOL_CIRCUIT_COOLDOWN_SECONDS", "20")
+)
+
+AUTONOMY_LEARNED_STRATEGY_ENABLED = os.environ.get(
+    "JARVIS_AUTONOMY_LEARNED_STRATEGY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+AUTONOMY_AUTO_VERIFICATION_ENABLED = os.environ.get(
+    "JARVIS_AUTONOMY_AUTO_VERIFICATION_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+AUTONOMY_STRATEGY_QUARANTINE_SECONDS = float(
+    os.environ.get("JARVIS_AUTONOMY_STRATEGY_QUARANTINE_SECONDS", "3600")
+)
+
+AUTONOMY_STRATEGY_MIN_SUCCESSES = int(
+    os.environ.get("JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESSES", "3")
+)
+
+AUTONOMY_STRATEGY_MIN_SUCCESS_RATE = float(
+    os.environ.get("JARVIS_AUTONOMY_STRATEGY_MIN_SUCCESS_RATE", "0.75")
+)
+
+SELF_HEALING_FAILURE_MEMORY_ENABLED = os.environ.get(
+    "JARVIS_SELF_HEALING_FAILURE_MEMORY_ENABLED",
+    "1",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS = float(
+    os.environ.get("JARVIS_SELF_HEALING_RETRY_BACKOFF_BASE_SECONDS", "0.25")
+)
+
+SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS = float(
+    os.environ.get("JARVIS_SELF_HEALING_RETRY_BACKOFF_MAX_SECONDS", "4.0")
+)
+
+# ============================================================
 # EXTERNAL CONTEXT / MEMORY
 # ============================================================
 
@@ -199,6 +265,38 @@ OPENVIKING_USER = os.environ.get(
     "JARVIS_OPENVIKING_USER",
     "",
 ).strip()
+
+# Optional Hindsight long-term memory. Disabled by default so existing
+# local/OpenViking/agentmemory behavior is unchanged until explicitly enabled.
+HINDSIGHT_URL = os.environ.get(
+    "JARVIS_HINDSIGHT_URL",
+    "http://127.0.0.1:8888",
+).strip().rstrip("/")
+
+HINDSIGHT_BANK_ID = os.environ.get(
+    "JARVIS_HINDSIGHT_BANK_ID",
+    "jarvis",
+).strip() or "jarvis"
+
+HINDSIGHT_API_KEY = os.environ.get(
+    "JARVIS_HINDSIGHT_API_KEY",
+    "",
+).strip()
+
+HINDSIGHT_TIMEOUT = max(
+    0.5,
+    float(os.environ.get("JARVIS_HINDSIGHT_TIMEOUT", "8")),
+)
+
+ADAPTIVE_MEMORY_ENABLED = os.environ.get(
+    "JARVIS_ADAPTIVE_MEMORY_ENABLED",
+    "0",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+JARVIS_RESPONSE_STYLE = os.environ.get(
+    "JARVIS_RESPONSE_STYLE",
+    "action_first",
+).strip().lower()
 
 AGENT_SKILLS_DIR = os.environ.get(
     "JARVIS_AGENT_SKILLS_DIR",
@@ -620,6 +718,73 @@ DEBUG = os.environ.get(
     "on",
 }
 
+
+# ============================================================
+# N8N MCP CLIENT
+# ============================================================
+#
+# Optional direct n8n instance-level MCP. It remains fail-closed unless
+# explicitly enabled or a token is already configured.
+
+N8N_MCP_URL = os.environ.get(
+    "JARVIS_N8N_MCP_URL",
+    "http://127.0.0.1:5678/mcp-server/http",
+).strip().rstrip("/")
+
+N8N_MCP_TOKEN = os.environ.get(
+    "JARVIS_N8N_MCP_TOKEN",
+    "",
+).strip()
+
+N8N_MCP_TOKEN_FILE = os.environ.get(
+    "JARVIS_N8N_MCP_TOKEN_FILE",
+    str(BASE_DIR / ".jarvis_runtime" / "n8n_mcp_token"),
+).strip()
+
+_mcp_enabled_env = os.environ.get("JARVIS_N8N_MCP_ENABLED")
+if _mcp_enabled_env is None:
+    _mcp_token_file_exists = Path(
+        os.path.expandvars(os.path.expanduser(N8N_MCP_TOKEN_FILE))
+    ).is_file()
+    N8N_MCP_ENABLED = bool(
+        N8N_MCP_TOKEN
+        or _mcp_token_file_exists
+    )
+else:
+    N8N_MCP_ENABLED = _mcp_enabled_env.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+N8N_MCP_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_MCP_TIMEOUT_SECONDS",
+        "20",
+    )
+)
+
+N8N_MCP_DISCOVERY_TTL_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_MCP_DISCOVERY_TTL_SECONDS",
+        "30",
+    )
+)
+
+N8N_MCP_MAX_RESPONSE_BYTES = int(
+    os.environ.get(
+        "JARVIS_N8N_MCP_MAX_RESPONSE_BYTES",
+        str(2 * 1024 * 1024),
+    )
+)
+
+N8N_MCP_EXECUTION_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "JARVIS_N8N_MCP_EXECUTION_TIMEOUT_SECONDS",
+        "60",
+    )
+)
 
 # ============================================================
 # N8N WORKFLOW ORCHESTRATION

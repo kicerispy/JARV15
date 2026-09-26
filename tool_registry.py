@@ -19,8 +19,46 @@ N8N_TOOLS = frozenset(
     {
         "n8n_status",
         "n8n_run_workflow",
+        "n8n_mcp_status",
+        "n8n_mcp_list_tools",
+        "n8n_workflow_architect",
+        "n8n_workflow_builder",
     }
 )
+
+N8N_MCP_PREFIX = "n8n_mcp__"
+
+
+JARVIS_PLATFORM_TOOLS = frozenset(
+    {
+        "jarvis_doctor",
+        "jarvis_quickcheck",
+        "resource_status",
+        "process_snapshot",
+        "project_snapshot",
+        "service_status",
+        "dependency_status",
+        "code_index_rebuild",
+        "code_index_status",
+        "healing_hints",
+        "tool_health",
+        "memory_remember",
+        "memory_recall",
+        "memory_forget",
+        "ollama_models",
+        "healing_history",
+        "tool_reset",
+        "memory_status",
+        "jarvis_capabilities",
+        "autonomy_status",
+        "strategy_history",
+        "regression_status",
+    }
+)
+
+
+def is_n8n_mcp_tool_name(name) -> bool:
+    return str(name or "").startswith(N8N_MCP_PREFIX)
 
 
 ANIPY_TOOLS = frozenset(
@@ -79,6 +117,20 @@ SCREEN_MEMORY_TOOLS = frozenset(
 SYSTEM_HEALTH_TOOLS = frozenset(
     {
         "integration_health",
+    }
+)
+
+ADAPTIVE_RUNTIME_TOOLS = frozenset(
+    {
+        "hindsight_status",
+        "hindsight_remember",
+        "hindsight_recall",
+        "hindsight_reflect",
+        "coding_style_review",
+        "response_style",
+        "magnitude_status",
+        "agent_browser_status",
+        "agent_browser_action",
     }
 )
 
@@ -143,7 +195,18 @@ BROWSER_TOOLS = frozenset(
 
 JSON_ARGUMENT_TOOLS = frozenset(
     {
+        "healing_hints",
+        "jarvis_doctor",
+        "memory_remember",
+        "memory_recall",
+        "memory_forget",
+        "strategy_history",
+        "regression_status",
         "n8n_run_workflow",
+        "n8n_mcp_status",
+        "n8n_mcp_list_tools",
+        "n8n_workflow_architect",
+        "n8n_workflow_builder",
         "integration_health",
         "browser_click_result",
         "browser_click_first_result",
@@ -178,6 +241,12 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "skills_search",
         "skills_read",
         "harness_review",
+        "hindsight_remember",
+        "hindsight_recall",
+        "hindsight_reflect",
+        "coding_style_review",
+        "response_style",
+        "agent_browser_action",
     }
 )
 
@@ -200,5 +269,8 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in GODS_EYE_TOOLS
         and str(name) not in SCREEN_MEMORY_TOOLS
         and str(name) not in SYSTEM_HEALTH_TOOLS
+        and str(name) not in ADAPTIVE_RUNTIME_TOOLS
+        and str(name) not in JARVIS_PLATFORM_TOOLS
         and not is_roblox_tool_name(name)
+        and not is_n8n_mcp_tool_name(name)
     )

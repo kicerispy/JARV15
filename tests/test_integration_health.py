@@ -188,3 +188,45 @@ def test_unreal_health_uses_live_bridge_status(monkeypatch):
 
     assert result["status"] == "DEGRADED"
     assert "not ready" in result["message"].lower()
+
+
+
+def test_memory_health_accepts_hindsight_backend(monkeypatch):
+    import integration_health as health
+    import agent_context
+
+    monkeypatch.setattr(
+        agent_context,
+        "backend_status",
+        lambda timeout=0.6: {
+            "selected_backend": "hindsight",
+            "backends": {
+                "hindsight": {"reachable": True, "healthy": True}
+            },
+        },
+    )
+
+    result = health._memory_component()
+    assert result["status"] == "READY"
+    assert "hindsight" in result["message"].lower()
+
+
+def test_n8n_health_includes_direct_mcp(monkeypatch):
+    import integration_health as health
+    import n8n_bridge
+    import n8n_mcp
+
+    monkeypatch.setattr(
+        n8n_bridge,
+        "n8n_status",
+        lambda: {"enabled": False, "reachable": False, "message": "n8n base disabled"},
+    )
+    monkeypatch.setattr(
+        n8n_mcp,
+        "status",
+        lambda: {"enabled": True, "reachable": True, "message": "n8n MCP ready"},
+    )
+
+    result = health._n8n_component()
+    assert result["status"] == "READY"
+    assert "direct n8n mcp" in result["message"].lower()

@@ -2037,6 +2037,65 @@ def build_anipy_plan(user_request):
     return None
 
 
+def build_platform_diagnostics_plan(user_request):
+    """Build deterministic routes for JARVIS self-observability and autonomy."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact_map = {
+        "jarvis doctor": ("jarvis_doctor", ""),
+        "run jarvis doctor": ("jarvis_doctor", ""),
+        "deep jarvis health check": ("jarvis_doctor", '{"deep":true}'),
+        "jarvis quickcheck": ("jarvis_quickcheck", ""),
+        "quick jarvis health check": ("jarvis_quickcheck", ""),
+        "quickcheck": ("jarvis_quickcheck", ""),
+        "tool health": ("tool_health", ""),
+        "check tool health": ("tool_health", ""),
+        "which tools are failing": ("tool_health", ""),
+        "healing history": ("healing_history", ""),
+        "recovery history": ("healing_history", ""),
+        "healing hints": ("healing_hints", ""),
+        "autonomy status": ("autonomy_status", ""),
+        "strategy history": ("strategy_history", ""),
+        "regression status": ("regression_status", ""),
+        "check regressions": ("regression_status", ""),
+        "dependency status": ("dependency_status", ""),
+        "check dependencies": ("dependency_status", ""),
+        "code index status": ("code_index_status", ""),
+        "rebuild code index": ("code_index_rebuild", ""),
+        "jarvis capabilities": ("jarvis_capabilities", ""),
+        "list jarvis capabilities": ("jarvis_capabilities", ""),
+        "ollama models": ("ollama_models", ""),
+        "list ollama models": ("ollama_models", ""),
+    }
+
+    selected = exact_map.get(text)
+    if selected:
+        return {
+            "steps": [{
+                "tool": selected[0],
+                "argument": selected[1],
+            }]
+        }
+
+    if text.startswith(("show strategy history", "strategy history for ")):
+        request = original.split("history", 1)[1].strip()
+        request = re.sub(r"^for\s+", "", request, flags=re.IGNORECASE).strip()
+        return {
+            "steps": [{
+                "tool": "strategy_history",
+                "argument": json.dumps({"request": request, "limit": 10}),
+            }]
+        }
+
+    if text.startswith(("rebuild the code index", "reindex the codebase", "reindex the project")):
+        return {"steps": [{"tool": "code_index_rebuild", "argument": ""}]}
+
+    return None
+
+
 def deterministic_route(user_request, active_context=None):
 
 
@@ -2100,6 +2159,15 @@ def deterministic_route(user_request, active_context=None):
         print("JARVIS: Software/gameplay follow-up detected.")
         return None
 
+
+    # ==================================================
+    # JARVIS PLATFORM DIAGNOSTICS / AUTONOMY
+    # ==================================================
+
+    platform_plan = build_platform_diagnostics_plan(user_request)
+    if platform_plan:
+        print("JARVIS: Platform diagnostics/autonomy route selected.")
+        return platform_plan
 
     # ==================================================
     # JARVIS / INTEGRATION HEALTH + OPTIONAL OBSERVABILITY
