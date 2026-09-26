@@ -28,7 +28,9 @@ from config import (
     N8N_MCP_URL,
 )
 
-MCP_PROTOCOL_VERSION = "2025-03-26"
+MODERN_MCP_PROTOCOL_VERSION = "2026-07-28"
+LEGACY_MCP_PROTOCOL_VERSION = "2025-03-26"
+MCP_PROTOCOL_VERSION = MODERN_MCP_PROTOCOL_VERSION
 CLIENT_NAME = "JARVIS"
 CLIENT_VERSION = "1.0"
 
@@ -40,6 +42,8 @@ _TOOL_CACHE: Dict[str, Any] = {
     "tools": [],
 }
 _SESSION_ID: Optional[str] = None
+_PROTOCOL_MODE = "unknown"
+_NEGOTIATED_PROTOCOL_VERSION = ""
 _REQUEST_ID = 0
 
 
@@ -69,21 +73,29 @@ def _token() -> str:
     return value
 
 
-def _request_headers() -> Dict[str, str]:
+def _request_headers(
+    method: str = "",
+    *,
+    protocol_version: str = "",
+    modern: bool = False,
+    tool_name: str = "",
+) -> Dict[str, str]:
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
-        "Mcp-Method": "",
-        "Mcp-Name": CLIENT_NAME,
+        "Mcp-Method": method,
+        "Mcp-Name": tool_name,
         "User-Agent": f"{CLIENT_NAME}/{CLIENT_VERSION}",
     }
+
+    if protocol_version:
+        headers["MCP-Protocol-Version"] = protocol_version
 
     token = _token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    if _SESSION_ID:
+    if _SESSION_ID and not modern:
         headers["Mcp-Session-Id"] = _SESSION_ID
 
     return headers
@@ -141,6 +153,8 @@ def _rpc(
     params: Optional[Dict[str, Any]] = None,
     *,
     notification: bool = False,
+    protocol_version: str = "",
+    modern: bool = False,
 ) -> Any:
     if not N8N_MCP_ENABLED:
         raise RuntimeError("n8n MCP is disabled.")
@@ -157,11 +171,38 @@ def _rpc(
     if not notification:
         body["id"] = request_id
 
-    if params is not None:
-        body["params"] = params
+    effective_params = dict(params or {})
 
-    headers = _request_headers()
-    headers["Mcp-Method"] = method
+    if modern:
+        meta = effective_params.get("_meta")
+        if not isinstance(meta, dict):
+            meta = {}
+        meta.setdefault(
+            "io.modelcontextprotocol/protocolVersion",
+            protocol_version or MODERN_MCP_PROTOCOL_VERSION,
+        )
+        meta.setdefault(
+            "io.modelcontextprotocol/clientCapabilities",
+            {},
+        )
+        meta.setdefault(
+            "io.modelcontextprotocol/clientInfo",
+            {
+                "name": CLIENT_NAME,
+                "version": CLIENT_VERSION,
+            },
+        )
+        effective_params["_meta"] = meta
+
+    if effective_params:
+        body["params"] = effective_params
+
+    headers = _request_headers(
+        method,
+        protocol_version=protocol_version,
+        modern=modern,
+        tool_name=str(effective_params.get("name") or "") if method == "tools/call" else "",
+    )
 
     request = Request(
         N8N_MCP_URL,
@@ -192,9 +233,11 @@ def _rpc(
             if isinstance(error, dict):
                 message = error.get("message") or "n8n MCP request failed."
                 code = error.get("code")
-                raise RuntimeError(
-                    f"{message}" + (f" (code {code})" if code is not None else "")
-                )
+                detail = error.get("data")
+                suffix = f" (code {code})" if code is not None else ""
+                if detail and isinstance(detail, (dict, list, str)):
+                    suffix += f" {str(detail)[:1000]}"
+                raise RuntimeError(f"{message}{suffix}")
             raise RuntimeError(str(error))
 
         return result.get("result", result)
@@ -215,7 +258,7 @@ def _rpc(
         ) from exc
 
 
-def initialize() -> Dict[str, Any]:
+def _legacy_initialize() -> Dict[str, Any]:
     global _SESSION_ID, _TOOL_CACHE
 
     _SESSION_ID = None
@@ -224,25 +267,81 @@ def initialize() -> Dict[str, Any]:
     result = _rpc(
         "initialize",
         {
-            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "protocolVersion": LEGACY_MCP_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {
                 "name": CLIENT_NAME,
                 "version": CLIENT_VERSION,
             },
         },
+        protocol_version=LEGACY_MCP_PROTOCOL_VERSION,
+        modern=False,
     )
 
     try:
         _rpc(
             "notifications/initialized",
             notification=True,
+            protocol_version=LEGACY_MCP_PROTOCOL_VERSION,
+            modern=False,
         )
     except Exception:
-        # Some MCP servers accept initialization without a notification.
         pass
 
     return result if isinstance(result, dict) else {"result": result}
+
+
+def discover_protocol() -> Dict[str, Any]:
+    """Probe the modern MCP revision without creating a session."""
+    global _PROTOCOL_MODE, _NEGOTIATED_PROTOCOL_VERSION, _SESSION_ID
+
+    _SESSION_ID = None
+
+    result = _rpc(
+        "server/discover",
+        {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MODERN_MCP_PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {
+                    "name": CLIENT_NAME,
+                    "version": CLIENT_VERSION,
+                },
+            }
+        },
+        protocol_version=MODERN_MCP_PROTOCOL_VERSION,
+        modern=True,
+    )
+
+    _PROTOCOL_MODE = "modern"
+    _NEGOTIATED_PROTOCOL_VERSION = MODERN_MCP_PROTOCOL_VERSION
+    return result if isinstance(result, dict) else {"result": result}
+
+
+def initialize() -> Dict[str, Any]:
+    global _PROTOCOL_MODE, _NEGOTIATED_PROTOCOL_VERSION, _SESSION_ID, _TOOL_CACHE
+
+    if _PROTOCOL_MODE == "modern":
+        _SESSION_ID = None
+        _TOOL_CACHE = {"expires_at": 0.0, "tools": []}
+        return discover_protocol()
+
+    if _PROTOCOL_MODE == "legacy":
+        return _legacy_initialize()
+
+    try:
+        result = discover_protocol()
+        return result
+    except Exception as modern_exc:
+        _PROTOCOL_MODE = "legacy"
+        _NEGOTIATED_PROTOCOL_VERSION = LEGACY_MCP_PROTOCOL_VERSION
+        try:
+            return _legacy_initialize()
+        except Exception as legacy_exc:
+            raise RuntimeError(
+                "n8n MCP protocol negotiation failed. "
+                f"Modern: {modern_exc}; Legacy: {legacy_exc}"
+            ) from legacy_exc
 
 
 def list_tools(force: bool = False) -> List[Dict[str, Any]]:
@@ -257,9 +356,19 @@ def list_tools(force: bool = False) -> List[Dict[str, Any]]:
 
     initialize()
 
+    modern = _PROTOCOL_MODE == "modern"
+    protocol_version = (
+        _NEGOTIATED_PROTOCOL_VERSION
+        or (MODERN_MCP_PROTOCOL_VERSION if modern else LEGACY_MCP_PROTOCOL_VERSION)
+    )
+
     # MCP pagination params are optional. Do not send cursor: null on the
     # first page because some servers (including n8n) reject explicit null.
-    result = _rpc("tools/list")
+    result = _rpc(
+        "tools/list",
+        protocol_version=protocol_version,
+        modern=modern,
+    )
     sanitized: List[Dict[str, Any]] = []
 
     while True:
@@ -303,6 +412,8 @@ def list_tools(force: bool = False) -> List[Dict[str, Any]]:
         result = _rpc(
             "tools/list",
             {"cursor": next_cursor},
+            protocol_version=protocol_version,
+            modern=modern,
         )
 
     _TOOL_CACHE["tools"] = sanitized[:MAX_DYNAMIC_TOOLS]
