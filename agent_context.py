@@ -118,7 +118,7 @@ def _extract_result(payload: Any) -> Any:
 
 def _backend_order() -> List[str]:
     requested = str(CONTEXT_MEMORY_BACKEND or "auto").strip().lower()
-    if requested in {"openviking", "agentmemory", "local"}:
+    if requested in {"openviking", "agentmemory", "hindsight", "local"}:
         return [requested]
     try:
         selected = str(backend_status(timeout=0.6).get("selected_backend") or "")
