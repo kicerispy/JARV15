@@ -2304,6 +2304,84 @@ class JarvisAgent:
             self._build_evidence_packet(task),
         ]
 
+        autonomy_failure = task.active_context.get(
+            "_autonomy_failure",
+            {},
+        )
+        targeted_tests = task.active_context.get(
+            "_autonomy_targeted_tests",
+            [],
+        )
+        autonomy_gate = task.active_context.get(
+            "_autonomy_plan_gate",
+            {},
+        )
+
+        if isinstance(autonomy_failure, dict) and autonomy_failure:
+            lines.extend(
+                [
+                    "",
+                    "Autonomy Kernel v3 failure classification:",
+                    f"- category: {autonomy_failure.get('category', 'unknown')}",
+                    f"- signature: {autonomy_failure.get('signature', '')}",
+                    f"- confidence: {autonomy_failure.get('confidence', 0)}",
+                    f"- reason: {autonomy_failure.get('reason', '')}",
+                ]
+            )
+
+        if isinstance(targeted_tests, list) and targeted_tests:
+            lines.extend(
+                [
+                    "",
+                    "Autonomy-selected targeted verification:",
+                    *[f"- {path}" for path in targeted_tests[:12]],
+                    "Prefer this focused verification before broad regression execution.",
+                ]
+            )
+
+        if isinstance(autonomy_gate, dict) and autonomy_gate:
+            lines.extend(
+                [
+                    "",
+                    "Mutation plan gate:",
+                    f"- allowed: {autonomy_gate.get('allowed')}",
+                    f"- confidence: {autonomy_gate.get('confidence')}",
+                    f"- minimum: {autonomy_gate.get('minimum')}",
+                    f"- scope: {autonomy_gate.get('scope', {})}",
+                ]
+            )
+
+        try:
+            from healing_kernel import healing_hints
+
+            category = (
+                str(autonomy_failure.get("category", "") or "")
+                if isinstance(autonomy_failure, dict)
+                else ""
+            )
+            hints = healing_hints(
+                category=category,
+                error=str(task.error or ""),
+                limit=3,
+            )
+            if hints:
+                lines.extend(
+                    [
+                        "",
+                        "Prior sanitized healing hints:",
+                        *[
+                            (
+                                f"- {item.get('category', '')}: "
+                                f"{item.get('last_action', '')} — "
+                                f"{item.get('last_reason', '')}"
+                            )
+                            for item in hints[:3]
+                        ],
+                    ]
+                )
+        except Exception:
+            pass
+
         # Include current browser state when available.
         browser_state = task.active_context.get(
             "browser_state",
