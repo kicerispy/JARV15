@@ -200,6 +200,38 @@ OPENVIKING_USER = os.environ.get(
     "",
 ).strip()
 
+# Optional Hindsight long-term memory. Disabled by default so existing
+# local/OpenViking/agentmemory behavior is unchanged until explicitly enabled.
+HINDSIGHT_URL = os.environ.get(
+    "JARVIS_HINDSIGHT_URL",
+    "http://127.0.0.1:8888",
+).strip().rstrip("/")
+
+HINDSIGHT_BANK_ID = os.environ.get(
+    "JARVIS_HINDSIGHT_BANK_ID",
+    "jarvis",
+).strip() or "jarvis"
+
+HINDSIGHT_API_KEY = os.environ.get(
+    "JARVIS_HINDSIGHT_API_KEY",
+    "",
+).strip()
+
+HINDSIGHT_TIMEOUT = max(
+    0.5,
+    float(os.environ.get("JARVIS_HINDSIGHT_TIMEOUT", "8")),
+)
+
+ADAPTIVE_MEMORY_ENABLED = os.environ.get(
+    "JARVIS_ADAPTIVE_MEMORY_ENABLED",
+    "0",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+JARVIS_RESPONSE_STYLE = os.environ.get(
+    "JARVIS_RESPONSE_STYLE",
+    "action_first",
+).strip().lower()
+
 AGENT_SKILLS_DIR = os.environ.get(
     "JARVIS_AGENT_SKILLS_DIR",
     str(BASE_DIR / ".jarvis_external" / "agent_skill_sources"),
