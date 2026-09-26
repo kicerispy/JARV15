@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import time
 from typing import Any, Dict
+from urllib.parse import quote
 
 import requests
 
@@ -129,7 +130,7 @@ def hindsight_remember(
     try:
         data = _hindsight_request(
             "POST",
-            f"/v1/default/banks/{requests.utils.quote(HINDSIGHT_BANK_ID, safe='')}/memories",
+            f"/v1/default/banks/{quote(HINDSIGHT_BANK_ID, safe='')}/memories",
             {"items": [item], "async": True},
         )
         return {
@@ -164,7 +165,7 @@ def hindsight_recall(query: str, *, limit: int = 8, budget: str = "mid") -> Dict
     try:
         data = _hindsight_request(
             "POST",
-            f"/v1/default/banks/{requests.utils.quote(HINDSIGHT_BANK_ID, safe='')}/memories/recall",
+            f"/v1/default/banks/{quote(HINDSIGHT_BANK_ID, safe='')}/memories/recall",
             payload,
         )
         results = data.get("results", data) if isinstance(data, dict) else data
@@ -196,7 +197,7 @@ def hindsight_reflect(query: str, *, budget: str = "mid", max_tokens: int = 1200
     try:
         data = _hindsight_request(
             "POST",
-            f"/v1/default/banks/{requests.utils.quote(HINDSIGHT_BANK_ID, safe='')}/reflect",
+            f"/v1/default/banks/{quote(HINDSIGHT_BANK_ID, safe='')}/reflect",
             {
                 "query": text[:4000],
                 "budget": str(budget or "mid"),
