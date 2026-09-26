@@ -4252,8 +4252,18 @@ class JarvisAgent:
                         "Maximum replans reached."
                     )
 
+                    failure_summary = "I wasn't able to complete the task."
+                    if autonomy_failure is not None:
+                        failure_summary = (
+                            "I couldn't complete the task safely. "
+                            f"Self-healing classified the failure as "
+                            f"{autonomy_failure.category.replace('_', ' ')}. "
+                            "The repair budget is exhausted and no further "
+                            "automatic mutation will be attempted."
+                        )
+
                     self._announce(
-                        "I wasn't able to complete the task.",
+                        failure_summary,
                         speak_callback,
                     )
 
