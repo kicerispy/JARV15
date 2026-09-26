@@ -1727,18 +1727,23 @@ def build_browser_agent_setup_plan(user_request):
 
     exact = {
         "setup browser use",
+        "set up browser use",
         "setup browser agent",
+        "set up browser agent",
         "setup autonomous browser",
+        "set up autonomous browser",
         "install browser use",
         "install browser agent",
         "install autonomous browser",
         "upgrade browser use",
         "upgrade browser agent",
         "upgrade autonomous browser",
+        "configure browser agent",
+        "configure browser use",
     }
     if text in exact or (
         ("browser use" in text or "browser agent" in text or "autonomous browser" in text)
-        and any(token in text for token in ("install", "setup", "upgrade"))
+        and any(token in text for token in ("install", "setup", "set up", "upgrade", "configure"))
     ):
         action = "upgrade" if "upgrade" in text else "install"
         return {
@@ -2144,6 +2149,12 @@ def build_platform_diagnostics_plan(user_request):
     exact_map = {
         "jarvis doctor": ("jarvis_doctor", ""),
         "run jarvis doctor": ("jarvis_doctor", ""),
+        "project health": ("jarvis_quickcheck", ""),
+        "show project health": ("jarvis_quickcheck", ""),
+        "show me project health": ("jarvis_quickcheck", ""),
+        "check project health": ("jarvis_quickcheck", ""),
+        "system health": ("jarvis_quickcheck", ""),
+        "show system health": ("jarvis_quickcheck", ""),
         "deep jarvis health check": ("jarvis_doctor", '{"deep":true}'),
         "jarvis quickcheck": ("jarvis_quickcheck", ""),
         "quick jarvis health check": ("jarvis_quickcheck", ""),
