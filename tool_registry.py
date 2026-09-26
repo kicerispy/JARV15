@@ -53,6 +53,7 @@ JARVIS_PLATFORM_TOOLS = frozenset(
         "autonomy_status",
         "strategy_history",
         "regression_status",
+        "tool_contract_audit",
     }
 )
 
@@ -251,6 +252,217 @@ JSON_ARGUMENT_TOOLS = frozenset(
 )
 
 
+# Core JARVIS tools that are part of the planner contract but are not
+# integration-specific. Keeping these in the canonical registry lets the
+# doctor detect planner/dispatcher drift instead of silently accepting unknown
+# tools.
+CORE_RUNTIME_TOOLS = frozenset(
+    {
+        "weather",
+        "current_time",
+        "current_date",
+        "wait",
+        "open_website",
+        "search_website",
+        "open_program",
+        "system_status",
+        "startup_status",
+        "enable_startup",
+        "disable_startup",
+        "task_history",
+        "create_folder",
+        "list_files",
+        "find_file",
+        "open_folder",
+        "write_file",
+        "read_file",
+        "edit_file",
+        "code_search",
+        "code_test",
+        "git_task_branch",
+        "code_checkpoint",
+        "code_restore_checkpoint",
+        "delete_file",
+        "dev_command",
+        "web_search",
+        "jarvis_status",
+        "capture_screen",
+        "screen_size",
+        "get_active_window",
+        "analyze_screen",
+        "move_mouse",
+        "click_screen",
+        "double_click_screen",
+        "scroll_screen",
+        "verify_screen",
+        "type_text",
+        "press_key",
+        "barehands_state",
+        "barehands_present",
+        "barehands_add_card",
+        "barehands_add_image",
+        "barehands_clear",
+        "barehands_board_state",
+    }
+)
+
+
+PUBLIC_API_TOOLS = frozenset(
+    {
+        "holiday_lookup",
+        "knowledge_lookup",
+        "book_search",
+        "define_word",
+        "research_arxiv",
+        "research_crossref",
+        "vehicle_lookup",
+        "earthquake_search",
+        "api_discover",
+        "currency_convert",
+        "location_lookup",
+        "air_quality",
+        "weather_alerts",
+        "elevation_lookup",
+        "country_info",
+        "crypto_price",
+        "trivia_question",
+        "joke",
+        "meal_search",
+        "tv_search",
+        "music_search",
+        "musicbrainz_search",
+        "anime_search",
+        "anime_episodes",
+        "ghibli_search",
+        "openalex_search",
+        "pubchem_lookup",
+        "art_search",
+        "nasa_eonet",
+        "spacex_lookup",
+        "sunrise_sunset",
+        "topo_elevation",
+        "public_ip",
+        "reverse_geocode",
+        "news_search",
+        "cat_fact",
+        "dog_image",
+        "osm_search",
+        "pokemon_lookup",
+        "food_product",
+        "cocktail_search",
+        "openverse_search",
+        "iss_location",
+    }
+)
+
+
+SYSTEM_ROUTE_TOOLS = frozenset(
+    {
+        "integration_health",
+        "roblox_mcp_setup",
+        "screen_memory_setup",
+        "tool_contract_audit",
+    }
+)
+
+
+KNOWN_DYNAMIC_TOOL_PREFIXES = (
+    ROBLOX_TOOL_PREFIX,
+    N8N_MCP_PREFIX,
+)
+
+
+def all_static_tools() -> frozenset[str]:
+    """Return every exact tool name owned by the static JARVIS registry."""
+    groups = (
+        N8N_TOOLS,
+        JARVIS_PLATFORM_TOOLS,
+        ANIPY_TOOLS,
+        ROBLOX_MCP_TOOLS,
+        UNREAL_MCP_TOOLS,
+        GODS_EYE_TOOLS,
+        SCREEN_MEMORY_TOOLS,
+        SYSTEM_HEALTH_TOOLS,
+        ADAPTIVE_RUNTIME_TOOLS,
+        CONTEXT_MEMORY_TOOLS,
+        AGENT_SKILL_TOOLS,
+        BROWSER_TOOLS,
+        JSON_ARGUMENT_TOOLS,
+        CORE_RUNTIME_TOOLS,
+        PUBLIC_API_TOOLS,
+        SYSTEM_ROUTE_TOOLS,
+    )
+    combined: set[str] = set()
+    for group in groups:
+        combined.update(group)
+    return frozenset(combined)
+
+
+def registry_contract_report(
+    planner_tools=None,
+) -> dict:
+    """Audit planner-visible tools against the canonical static registry."""
+    registry = all_static_tools()
+    planner_names = (
+        {str(name) for name in (planner_tools or []) if str(name).strip()}
+        if planner_tools is not None
+        else None
+    )
+
+    report = {
+        "registry_tool_count": len(registry),
+        "planner_tool_count": len(planner_names) if planner_names is not None else None,
+        "dynamic_prefixes": list(KNOWN_DYNAMIC_TOOL_PREFIXES),
+        "planner_missing_from_registry": [],
+        "registry_only_tools": [],
+        "healthy": True,
+    }
+
+    if planner_names is None:
+        return report
+
+    planner_missing = sorted(
+        name
+        for name in planner_names
+        if name not in registry
+        and not any(name.startswith(prefix) for prefix in KNOWN_DYNAMIC_TOOL_PREFIXES)
+    )
+    registry_only = sorted(
+        name
+        for name in registry
+        if name not in planner_names
+        and not any(name.startswith(prefix) for prefix in KNOWN_DYNAMIC_TOOL_PREFIXES)
+    )
+
+    report["planner_missing_from_registry"] = planner_missing
+    report["registry_only_tools"] = registry_only
+    report["healthy"] = not planner_missing
+    return report
+
+
+def tool_contract_audit() -> dict:
+    """Run a live planner/registry contract audit."""
+    try:
+        from planner import AVAILABLE_TOOLS
+
+        report = registry_contract_report(AVAILABLE_TOOLS.keys())
+        return {
+            "success": True,
+            "verified": True,
+            "tool": "tool_contract_audit",
+            **report,
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": True,
+            "tool": "tool_contract_audit",
+            "healthy": False,
+            "error": str(exc),
+        }
+
+
+
 def validate_known_tools(tool_names) -> list[str]:
     """Return invalid names from a registry consumer."""
     if tool_names is None:
@@ -271,6 +483,9 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in SYSTEM_HEALTH_TOOLS
         and str(name) not in ADAPTIVE_RUNTIME_TOOLS
         and str(name) not in JARVIS_PLATFORM_TOOLS
+        and str(name) not in CORE_RUNTIME_TOOLS
+        and str(name) not in PUBLIC_API_TOOLS
+        and str(name) not in SYSTEM_ROUTE_TOOLS
         and not is_roblox_tool_name(name)
         and not is_n8n_mcp_tool_name(name)
     )
