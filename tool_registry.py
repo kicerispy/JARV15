@@ -133,6 +133,7 @@ ADAPTIVE_RUNTIME_TOOLS = frozenset(
         "agent_browser_status",
         "agent_browser_setup",
         "agent_browser_action",
+        "browser_agent_setup",
     }
 )
 
@@ -182,6 +183,7 @@ BROWSER_TOOLS = frozenset(
         "browser_find_text",
         "browser_agent_run",
         "browser_agent_status",
+        "browser_agent_setup",
         "browser_refresh",
         "browser_forward",
         "browser_new_tab",
