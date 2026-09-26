@@ -316,6 +316,22 @@ def jarvis_quickcheck() -> dict[str, Any]:
         else "DEGRADED"
     )
 
+    display_names = {
+        "agentbrowsersetup": "Browser Agent Setup",
+        "browser_agent_setup": "Browser Agent Setup",
+        "integrationhealth": "Integration Health",
+        "integration_health": "Integration Health",
+        "n8nstatus": "n8n",
+        "n8n_status": "n8n",
+    }
+
+    degraded_names = []
+    for item in degraded[:8]:
+        raw_name = str(item.get("tool") or "?").strip()
+        degraded_names.append(
+            display_names.get(raw_name.lower(), raw_name)
+        )
+
     return {
         # A quickcheck is a diagnostic operation. A DEGRADED finding is
         # still a successful check; callers should inspect "overall".
@@ -327,7 +343,7 @@ def jarvis_quickcheck() -> dict[str, Any]:
         "resources": resources,
         "tool_health": {
             "tracked": tools.get("tool_count", 0),
-            "degraded": [item.get("tool", "?") for item in degraded[:8]],
+            "degraded": degraded_names,
         },
         "memory_records": memory.get("records", 0),
         "healing_events": healing.get("events", 0),
