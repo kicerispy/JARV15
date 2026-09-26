@@ -317,7 +317,10 @@ def jarvis_quickcheck() -> dict[str, Any]:
     )
 
     return {
-        "success": overall == "READY",
+        # A quickcheck is a diagnostic operation. A DEGRADED finding is
+        # still a successful check; callers should inspect "overall".
+        "success": True,
+        "healthy": overall == "READY",
         "verified": True,
         "overall": overall,
         "health": health,
