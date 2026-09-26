@@ -342,7 +342,7 @@ class BrowserAgentTests(unittest.TestCase):
         self.assertIn("pip self-upgrade was skipped", result["warning"])
         self.assertEqual(len(run_mock.call_args_list), 3)
         self.assertEqual(
-            run_mock.call_args_list[0].args[0][3:5],
+            run_mock.call_args_list[0].args[0][2:4],
             ["pip", "--version"],
         )
         install_args = run_mock.call_args_list[-1].args[0]
