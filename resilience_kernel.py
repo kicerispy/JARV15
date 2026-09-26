@@ -231,10 +231,13 @@ class RuntimeResilience:
         )
 
         degraded = []
+        historical = []
         for state in states[: max(1, int(limit))]:
-            if state.failures <= 0 and state.consecutive_failures <= 0:
-                continue
-            degraded.append({
+            currently_degraded = (
+                state.consecutive_failures > 0
+                or state.circuit_open_until > now
+            )
+            record = {
                 "tool": state.tool,
                 "calls": state.calls,
                 "successes": state.successes,
@@ -251,7 +254,14 @@ class RuntimeResilience:
                     if state.circuit_open_until > now
                     else 0.0
                 ),
-            })
+            }
+
+            if state.failures > 0:
+                historical.append(record)
+
+            if not currently_degraded:
+                continue
+            degraded.append(record)
 
         return {
             "enabled": self.enabled,
@@ -260,6 +270,7 @@ class RuntimeResilience:
             "cooldown_seconds": self.cooldown_seconds,
             "tool_count": len(states),
             "degraded_tools": degraded,
+            "historical_failures": historical,
         }
 
     def reset_tool(self, tool: str) -> bool:
