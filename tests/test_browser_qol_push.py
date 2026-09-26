@@ -61,7 +61,8 @@ def test_browser_agent_has_deterministic_title_fast_path():
 
 def test_browser_agent_worker_uses_valid_history_floor():
     source = Path("browser_agent_worker.py").read_text(encoding="utf-8")
-    assert "max_history_items=8" in source
+    assert 'settings["max_history_items"]' in source
+    assert '"max_history_items": _coerce_int' in source
     assert "max_history_items=3" not in source
 
 
