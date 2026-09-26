@@ -617,6 +617,22 @@ def integration_health(argument: str = "") -> Dict[str, Any]:
         status = str(item["status"])
         counts[status] = counts.get(status, 0) + 1
 
+    tool_runtime = {}
+    autonomy = {}
+    try:
+        from resilience_kernel import tool_health_status
+        from autonomy_kernel import autonomy_status, stale_tool_report
+
+        tool_runtime = tool_health_status(limit=32)
+        autonomy = autonomy_status(tool_runtime)
+        autonomy["stale_tools"] = stale_tool_report(tool_runtime)
+    except Exception as exc:
+        autonomy = {
+            "version": 3,
+            "error": str(exc)[:300],
+            "stale_tools": {"suspect_tools": [], "count": 0},
+        }
+
     ready = counts.get("READY", 0) + counts.get("RUNNING", 0)
     degraded = counts.get("DEGRADED", 0)
     unavailable = sum(
@@ -641,6 +657,8 @@ def integration_health(argument: str = "") -> Dict[str, Any]:
         "message": f"Integration health is {overall.lower()}. " + ", ".join(parts) + ".",
         "counts": counts,
         "registry_counts": _registry_counts(),
+        "runtime_tool_health": tool_runtime,
+        "autonomy": autonomy,
         "components": components,
     }
 
