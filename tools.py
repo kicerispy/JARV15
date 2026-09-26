@@ -3764,10 +3764,6 @@ def _run_tool_raw(
 
     elif tool_name == "jarvis_capabilities":
         from tool_registry import (
-            ADAPTIVE_RUNTIME_TOOLS,
-            AGENT_SKILL_TOOLS,
-            BROWSER_TOOLS,
-            CONTEXT_MEMORY_TOOLS,
             GODS_EYE_TOOLS,
             JARVIS_PLATFORM_TOOLS,
             SCREEN_MEMORY_TOOLS,
