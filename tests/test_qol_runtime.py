@@ -441,6 +441,80 @@ def test_platform_diagnostics_routes_are_deterministic():
     assert build_platform_diagnostics_plan("rebuild code index")["steps"][0]["tool"] == "code_index_rebuild"
     assert build_platform_diagnostics_plan("strategy history for browser search")["steps"][0]["tool"] == "strategy_history"
 
+def test_planner_exposes_live_n8n_mutation_tools(monkeypatch):
+    import planner
+
+    monkeypatch.setattr(
+        planner,
+        "get_n8n_planner_tools",
+        lambda: {
+            "n8n_mcp__search_workflows": "Search workflows",
+            "n8n_mcp__get_workflow_details": "Get workflow",
+            "n8n_mcp__search_nodes": "Search nodes",
+            "n8n_mcp__get_node_types": "Get node types",
+            "n8n_mcp__update_workflow": "Update workflow",
+        },
+    )
+
+    assert planner.is_n8n_workflow_mutation_request(
+        "add a node to my n8n workflow"
+    )
+
+    scope = planner._planner_tool_scope(
+        "add a node to my n8n workflow"
+    )
+
+    assert "n8n_mcp__update_workflow" in scope
+    assert "n8n_mcp__search_nodes" in scope
+    assert "n8n_run_workflow" not in scope
+
+
+def test_validate_plan_accepts_known_dynamic_n8n_tool(monkeypatch):
+    import planner
+
+    monkeypatch.setattr(
+        "n8n_mcp.is_known_tool",
+        lambda name: name == "update_workflow",
+    )
+
+    plan = planner.validate_plan(
+        {
+            "goal": "update an existing n8n workflow",
+            "steps": [
+                {
+                    "tool": "n8n_mcp__update_workflow",
+                    "argument": '{"workflowId":"123","operations":[]}',
+                }
+            ],
+        }
+    )
+
+    assert plan["steps"][0]["tool"] == "n8n_mcp__update_workflow"
+
+
+def test_dynamic_n8n_tool_dispatch(monkeypatch):
+    import tools
+
+    monkeypatch.setattr(
+        "n8n_mcp.call_tool",
+        lambda name, arguments: {
+            "success": True,
+            "verified": True,
+            "mcp_tool": name,
+            "data": arguments,
+        },
+    )
+
+    result = tools.run_tool(
+        "n8n_mcp__search_workflows",
+        '{"query":"daily report","limit":5}',
+    )
+
+    assert result.success is True
+    assert result.data["mcp_tool"] == "search_workflows"
+    assert result.data["data"]["query"] == "daily report"
+
+
 def test_tool_dispatch_does_not_shadow_n8n_registry(monkeypatch):
     import n8n_bridge
     import tools
