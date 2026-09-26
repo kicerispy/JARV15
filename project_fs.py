@@ -33,6 +33,7 @@ DEFAULT_PRUNED_DIRS = frozenset(
         ".coverage",
         ".jarvis_checkpoints",
         "jarvis_cuda",
+        ".browser_agent_venv",
         "venv",
         ".venv",
         "env",
