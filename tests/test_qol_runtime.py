@@ -429,3 +429,13 @@ def test_planner_exposes_platform_autonomy_tools():
         "regression_status",
     ):
         assert name in planner.AVAILABLE_TOOLS
+
+
+
+def test_platform_diagnostics_routes_are_deterministic():
+    from commands import build_platform_diagnostics_plan
+
+    assert build_platform_diagnostics_plan("jarvis doctor")["steps"][0]["tool"] == "jarvis_doctor"
+    assert build_platform_diagnostics_plan("tool health")["steps"][0]["tool"] == "tool_health"
+    assert build_platform_diagnostics_plan("rebuild code index")["steps"][0]["tool"] == "code_index_rebuild"
+    assert build_platform_diagnostics_plan("strategy history for browser search")["steps"][0]["tool"] == "strategy_history"
