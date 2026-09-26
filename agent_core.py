@@ -505,18 +505,24 @@ class JarvisAgent:
         ):
             rows = data.get("tools") or []
             compact_tools = []
+
             for row in rows:
                 if not isinstance(row, dict):
                     continue
+
                 name = str(row.get("name") or "").strip()
                 if not name:
                     continue
+
                 compact_tools.append(
                     {
                         "name": name,
-                        "description": str(row.get("description") or "")[:500],
+                        "description": str(
+                            row.get("description") or ""
+                        )[:500],
                     }
                 )
+
             return {
                 "success": bool(data.get("success", True)),
                 "verified": bool(data.get("verified", True)),
@@ -525,6 +531,77 @@ class JarvisAgent:
             }
 
         return data
+
+    @staticmethod
+    def _bounded_structured_evidence(
+        tool: str,
+        data: Any,
+        max_chars: int = 9000,
+    ) -> Any:
+        """Keep structured evidence valid JSON while respecting size limits."""
+        evidence_data = JarvisAgent._compact_structured_evidence(
+            tool,
+            data,
+        )
+
+        try:
+            serialized = json.dumps(
+                evidence_data,
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception:
+            serialized = str(evidence_data)
+
+        if len(serialized) <= max_chars:
+            return evidence_data
+
+        # n8n tool catalogs can legitimately contain dozens of tools with
+        # verbose schemas/descriptions. Never slice their JSON text because
+        # that produces invalid structured evidence. Names are sufficient for
+        # the answer composer and remain useful for follow-up planning.
+        if (
+            str(tool or "").strip() == "n8n_mcp_list_tools"
+            and isinstance(evidence_data, dict)
+            and isinstance(evidence_data.get("tools"), list)
+        ):
+            rows = evidence_data.get("tools") or []
+
+            names_only = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+
+                name = str(row.get("name") or "").strip()
+                if name:
+                    names_only.append({"name": name})
+
+            compact_catalog = {
+                "success": bool(evidence_data.get("success", True)),
+                "verified": bool(evidence_data.get("verified", True)),
+                "tool_count": int(
+                    evidence_data.get("tool_count", len(rows))
+                    or len(rows)
+                ),
+                "tools": names_only,
+            }
+
+            try:
+                catalog_json = json.dumps(
+                    compact_catalog,
+                    ensure_ascii=False,
+                )
+            except Exception:
+                catalog_json = ""
+
+            if len(catalog_json) <= max_chars:
+                return compact_catalog
+
+        # Preserve the legacy bounded behavior for other oversized payloads.
+        return (
+            serialized[:max_chars]
+            + "\n... [structured evidence truncated by JARVIS] ..."
+        )
 
     @staticmethod
     def _extract_tool_data(result: Any) -> Any:
@@ -2555,26 +2632,12 @@ class JarvisAgent:
             # Concise messages are useful for logs, but information-seeking
             # answers need the actual tool payload as evidence.
             if data is not None:
-                evidence_data = self._compact_structured_evidence(
+                evidence["data"] = self._bounded_structured_evidence(
                     tool,
                     data,
+                    max_chars=9000,
                 )
-                try:
-                    serialized = json.dumps(
-                        evidence_data,
-                        ensure_ascii=False,
-                        default=str,
-                    )
-                except Exception:
-                    serialized = str(evidence_data)
 
-                if len(serialized) <= 9000:
-                    evidence["data"] = evidence_data
-                else:
-                    evidence["data"] = (
-                        serialized[:9000]
-                        + "\n... [structured evidence truncated by JARVIS] ..."
-                    )
             task.evidence.append(evidence)
 
         # Capture actual browser state.
