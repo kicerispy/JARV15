@@ -343,64 +343,186 @@ def coding_style_review(argument: str = "") -> Dict[str, Any]:
     }
 
 
+AGENT_BROWSER_EXECUTABLE = os.environ.get(
+    "JARVIS_AGENT_BROWSER_EXECUTABLE",
+    "",
+).strip()
+AGENT_BROWSER_MAX_OUTPUT = max(
+    1000,
+    int(os.environ.get("JARVIS_AGENT_BROWSER_MAX_OUTPUT", "12000")),
+)
+AGENT_BROWSER_TIMEOUT_SECONDS = max(
+    5,
+    min(int(os.environ.get("JARVIS_AGENT_BROWSER_TIMEOUT", "20")), 180),
+)
+AGENT_BROWSER_ALLOW_WEBMCP = _bool(
+    os.environ.get("JARVIS_AGENT_BROWSER_ALLOW_WEBMCP", "0"),
+)
+
+
+def _agent_browser_executable() -> str:
+    explicit = AGENT_BROWSER_EXECUTABLE
+    if explicit and shutil.which(explicit):
+        return explicit
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    return shutil.which("agent-browser") or shutil.which("agent-browser.cmd") or ""
+
+
+def _agent_browser_json(value: str) -> Any:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _run_agent_browser_command(
+    args: list[str],
+    *,
+    timeout: int | None = None,
+) -> Dict[str, Any]:
+    executable = _agent_browser_executable()
+    if not executable:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": "agent-browser is not installed or could not be located.",
+        }
+
+    env = os.environ.copy()
+    env["AGENT_BROWSER_MAX_OUTPUT"] = str(AGENT_BROWSER_MAX_OUTPUT)
+
+    try:
+        result = subprocess.run(
+            [executable, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout or AGENT_BROWSER_TIMEOUT_SECONDS,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": "agent-browser command timed out.",
+            "backend": "agent-browser",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": f"agent-browser failed to start: {exc}",
+            "backend": "agent-browser",
+        }
+
+    output = (result.stdout or "").strip()
+    error = (result.stderr or "").strip()
+    success = result.returncode == 0
+    return {
+        "success": success,
+        "verified": success,
+        "retryable": not success,
+        "returncode": result.returncode,
+        "output": output[:AGENT_BROWSER_MAX_OUTPUT],
+        "json": _agent_browser_json(output),
+        "error": error[:3000] if error else "",
+        "backend": "agent-browser",
+        "command": [*args],
+    }
+
+
 def agent_browser_status() -> Dict[str, Any]:
-    """Detect optional Vercel agent-browser without making it a dependency."""
-    executable = shutil.which("agent-browser") or shutil.which("agent-browser.cmd")
+    """Probe the current Vercel agent-browser CLI and its browser runtime."""
+    executable = _agent_browser_executable()
     if not executable:
         return {
             "success": True,
             "verified": True,
             "installed": False,
+            "ready": False,
             "message": "agent-browser is not installed; JARVIS browser routing is unchanged.",
         }
+
     try:
-        result = subprocess.run(
+        version_result = subprocess.run(
             [executable, "--version"],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
-        return {
-            "success": True,
-            "verified": True,
-            "installed": True,
-            "executable": executable,
-            "version": (result.stdout or result.stderr or "").strip()[:500],
-        }
+        version = (version_result.stdout or version_result.stderr or "").strip()[:500]
     except Exception as exc:
         return {
             "success": False,
             "verified": True,
             "installed": True,
+            "ready": False,
             "executable": executable,
             "message": str(exc)[:500],
         }
 
+    doctor = _run_agent_browser_command(
+        ["doctor", "--offline", "--quick", "--json"],
+        timeout=15,
+    )
+    return {
+        "success": True,
+        "verified": True,
+        "installed": True,
+        "ready": bool(doctor.get("success")),
+        "executable": executable,
+        "version": version,
+        "doctor": doctor.get("json") or doctor.get("output") or "",
+        "doctor_error": doctor.get("error", ""),
+        "webmcp_enabled": AGENT_BROWSER_ALLOW_WEBMCP,
+        "max_output": AGENT_BROWSER_MAX_OUTPUT,
+    }
 
-_AGENT_BROWSER_ACTIONS = {
-    "open": ("open", 2),
-    "read": ("read", 3),
-    "snapshot": ("snapshot", 1),
-    "click": ("click", 2),
-    "fill": ("fill", 3),
-    "press": ("press", 2),
-    "scroll": ("scroll", 2),
-    "screenshot": ("screenshot", 2),
-}
+
+_AGENT_BROWSER_ACTIONS = frozenset(
+    {
+        "open",
+        "read",
+        "snapshot",
+        "click",
+        "dblclick",
+        "fill",
+        "type",
+        "focus",
+        "hover",
+        "press",
+        "scroll",
+        "screenshot",
+        "get_text",
+        "get_title",
+        "get_url",
+        "get_value",
+        "get_html",
+        "find",
+        "connect",
+        "back",
+        "forward",
+        "refresh",
+        "close",
+        "doctor",
+        "webmcp_list",
+        "webmcp_invoke",
+        "webmcp_result",
+        "webmcp_cancel",
+    }
+)
 
 
 def agent_browser_action(argument: str = "") -> Dict[str, Any]:
-    """Run one allowlisted agent-browser command as a bounded fallback."""
-    status = agent_browser_status()
-    if not status.get("installed"):
-        return {
-            "success": False,
-            "verified": False,
-            "retryable": False,
-            "message": status.get("message", "agent-browser is not installed."),
-        }
-
+    """Run a bounded, allowlisted agent-browser command as a browser fallback."""
     raw = str(argument or "").strip()
     try:
         payload = json.loads(raw)
@@ -419,8 +541,7 @@ def agent_browser_action(argument: str = "") -> Dict[str, Any]:
         }
 
     action = str(payload.get("action") or "").strip().lower()
-    spec = _AGENT_BROWSER_ACTIONS.get(action)
-    if spec is None:
+    if action not in _AGENT_BROWSER_ACTIONS:
         return {
             "success": False,
             "verified": False,
@@ -428,58 +549,144 @@ def agent_browser_action(argument: str = "") -> Dict[str, Any]:
             "allowed_actions": sorted(_AGENT_BROWSER_ACTIONS),
         }
 
-    executable = str(status.get("executable") or "")
-    args = [executable, spec[0]]
-
-    target = str(payload.get("target") or payload.get("selector") or "").strip()
+    target = str(
+        payload.get("target")
+        or payload.get("selector")
+        or ""
+    ).strip()
     text_value = str(payload.get("text") or "").strip()
+    args: list[str] = []
 
     if action == "open":
         if not target:
-            return {"success": False, "verified": False, "message": "open requires target URL."}
-        args.append(target)
-    elif action in {"read", "click", "fill", "press", "scroll", "screenshot"}:
+            return {"success": False, "verified": False, "message": "open requires a URL."}
+        args = ["open", target]
+
+    elif action == "read":
+        args = ["read", target] if target else ["read"]
+
+    elif action == "snapshot":
+        args = ["snapshot"]
+        if bool(payload.get("interactive")):
+            args.append("-i")
+
+    elif action in {"click", "dblclick", "focus", "hover"}:
+        if not target:
+            return {"success": False, "verified": False, "message": f"{action} requires a selector or @ref."}
+        args = [action, target]
+
+    elif action in {"fill", "type"}:
+        if not target or not text_value:
+            return {
+                "success": False,
+                "verified": False,
+                "message": f"{action} requires target and text.",
+            }
+        args = [action, target, text_value]
+
+    elif action == "press":
+        key = str(payload.get("key") or target or "").strip()
+        if not key:
+            return {"success": False, "verified": False, "message": "press requires a key."}
+        args = ["press", key]
+
+    elif action == "scroll":
+        direction = str(payload.get("direction") or target or "down").strip().lower()
+        if direction not in {"up", "down", "left", "right"}:
+            return {"success": False, "verified": False, "message": "scroll direction must be up, down, left, or right."}
+        amount = payload.get("amount", payload.get("pixels", 300))
+        try:
+            amount = max(1, min(int(amount), 5000))
+        except (TypeError, ValueError):
+            amount = 300
+        args = ["scroll", direction, str(amount)]
+
+    elif action == "screenshot":
+        args = ["screenshot"]
         if target:
             args.append(target)
-        if action == "fill":
-            args.append(text_value)
-        elif action == "press" and target:
-            pass
-    elif action == "snapshot":
-        pass
 
-    try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except Exception as exc:
-        return {
-            "success": False,
-            "verified": False,
-            "retryable": True,
-            "message": f"agent-browser failed to start: {exc}",
-        }
+    elif action == "get_text":
+        if not target:
+            return {"success": False, "verified": False, "message": "get_text requires a selector or @ref."}
+        args = ["get", "text", target]
 
-    output = (result.stdout or "").strip()
-    error = (result.stderr or "").strip()
-    success = result.returncode == 0
+    elif action in {"get_title", "get_url"}:
+        args = ["get", "title" if action == "get_title" else "url"]
 
-    return {
-        "success": success,
-        "verified": success,
-        "retryable": not success,
-        "action": action,
-        "returncode": result.returncode,
-        "output": output[:12000],
-        "error": error[:2000] if error else "",
-        "backend": "agent-browser",
-    }
+    elif action in {"get_value", "get_html"}:
+        if not target:
+            return {"success": False, "verified": False, "message": f"{action} requires a selector or @ref."}
+        args = ["get", "value" if action == "get_value" else "html", target]
 
+    elif action == "find":
+        strategy = str(payload.get("strategy") or "text").strip().lower()
+        query = str(payload.get("query") or target).strip()
+        find_action = str(payload.get("find_action") or payload.get("action_name") or "click").strip().lower()
+        if strategy not in {"role", "text", "label", "placeholder", "alt", "title", "testid", "first", "last"}:
+            return {"success": False, "verified": False, "message": "Unsupported find strategy."}
+        if not query:
+            return {"success": False, "verified": False, "message": "find requires a query."}
+        if find_action not in {"click", "dblclick", "fill", "type", "focus", "hover", "text", "press"}:
+            return {"success": False, "verified": False, "message": "Unsupported find action."}
 
+        args = ["find", strategy, query, find_action]
+        name = str(payload.get("name") or "").strip()
+        if strategy == "role" and name:
+            args.extend(["--name", name])
+        if find_action in {"fill", "type", "press"}:
+            value = str(payload.get("value") or text_value or payload.get("key") or "").strip()
+            if not value:
+                return {"success": False, "verified": False, "message": f"find {find_action} requires a value."}
+            args.append(value)
+
+    elif action == "connect":
+        port = str(payload.get("port") or target or "9222").strip()
+        args = ["connect", port]
+
+    elif action in {"back", "forward", "refresh", "close"}:
+        args = [action]
+
+    elif action == "doctor":
+        args = ["doctor", "--offline", "--quick"]
+
+    elif action == "webmcp_list":
+        args = ["webmcp", "list"]
+        if target:
+            args.append(target)
+
+    elif action == "webmcp_invoke":
+        if not AGENT_BROWSER_ALLOW_WEBMCP:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "message": "WebMCP invocation is disabled. Set JARVIS_AGENT_BROWSER_ALLOW_WEBMCP=1 explicitly.",
+            }
+        if payload.get("confirmed") is not True:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "message": "WebMCP invocation requires confirmed=true because page-provided tools are untrusted.",
+            }
+        tool_name = str(payload.get("tool") or target).strip()
+        if not tool_name:
+            return {"success": False, "verified": False, "message": "webmcp_invoke requires a page tool name."}
+        params = payload.get("params", {})
+        if not isinstance(params, dict):
+            return {"success": False, "verified": False, "message": "webmcp_invoke params must be a JSON object."}
+        args = ["webmcp", "invoke", tool_name, "--params", json.dumps(params, ensure_ascii=False)]
+
+    elif action in {"webmcp_result", "webmcp_cancel"}:
+        invocation_id = str(payload.get("id") or target).strip()
+        if not invocation_id:
+            return {"success": False, "verified": False, "message": f"{action} requires an invocation id."}
+        args = ["webmcp", "result" if action == "webmcp_result" else "cancel", invocation_id]
+
+    result = _run_agent_browser_command(args)
+    result["action"] = action
+    return result
 def magnitude_status() -> Dict[str, Any]:
     """Report optional Magnitude availability without making it a dependency."""
     executable = shutil.which("magnitude") or shutil.which("magnitude.exe")
