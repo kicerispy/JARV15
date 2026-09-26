@@ -212,12 +212,62 @@ def browser_agent_setup(argument: str = "") -> dict:
                     "stderr": (create.stderr or "")[-3000:],
                 }
 
+        worker_already_ready = _worker_import_ok(python_exe)
+        if action == "install" and worker_already_ready:
+            status = browser_agent_status()
+            return {
+                "success": True,
+                "verified": True,
+                "action": action,
+                "worker_path": str(python_exe),
+                "install_returncode": 0,
+                "status": status,
+                "message": "Browser Use worker environment is already ready.",
+            }
+
+        pip_probe = subprocess.run(
+            [
+                str(python_exe),
+                "-m",
+                "pip",
+                "--version",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        if pip_probe.returncode != 0:
+            ensurepip = subprocess.run(
+                [
+                    str(python_exe),
+                    "-m",
+                    "ensurepip",
+                    "--upgrade",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+            if ensurepip.returncode != 0:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "retryable": True,
+                    "message": "Failed to bootstrap pip in the Browser Use worker environment.",
+                    "stdout": (ensurepip.stdout or "")[-3000:],
+                    "stderr": (ensurepip.stderr or "")[-3000:],
+                }
+
         pip_upgrade = subprocess.run(
             [
                 str(python_exe),
                 "-m",
                 "pip",
                 "install",
+                "--disable-pip-version-check",
                 "--upgrade",
                 "pip",
             ],
@@ -226,14 +276,12 @@ def browser_agent_setup(argument: str = "") -> dict:
             timeout=180,
             check=False,
         )
+        pip_warning = ""
         if pip_upgrade.returncode != 0:
-            return {
-                "success": False,
-                "verified": False,
-                "retryable": True,
-                "message": "Failed to prepare the Browser Use worker pip environment.",
-                "stderr": (pip_upgrade.stderr or "")[-3000:],
-            }
+            pip_warning = (
+                "pip self-upgrade was skipped: "
+                + (pip_upgrade.stderr or pip_upgrade.stdout or "unknown pip error")[-1600:]
+            )
 
         install = subprocess.run(
             [
@@ -241,7 +289,8 @@ def browser_agent_setup(argument: str = "") -> dict:
                 "-m",
                 "pip",
                 "install",
-                "--upgrade" if action == "upgrade" else "--disable-pip-version-check",
+                "--disable-pip-version-check",
+                *(["--upgrade"] if action == "upgrade" else []),
                 "-r",
                 str(requirements),
             ],
@@ -269,7 +318,7 @@ def browser_agent_setup(argument: str = "") -> dict:
     status = browser_agent_status()
     success = install.returncode == 0 and status.get("browser_use_installed", False)
 
-    return {
+    result_payload = {
         "success": success,
         "verified": bool(success),
         "action": action,
@@ -283,6 +332,14 @@ def browser_agent_setup(argument: str = "") -> dict:
             else "Browser Use worker environment setup failed or remains unavailable."
         ),
     }
+    if pip_warning:
+        result_payload["warning"] = pip_warning
+    if not success and pip_upgrade.returncode != 0:
+        result_payload["pip_upgrade_returncode"] = pip_upgrade.returncode
+        result_payload["pip_upgrade_stderr"] = (
+            pip_upgrade.stderr or pip_upgrade.stdout or ""
+        )[-2500:]
+    return result_payload
 
 def browser_agent_run(argument: str = "") -> dict:
     """Run one autonomous browser task in JARVIS's existing Chromium session."""
