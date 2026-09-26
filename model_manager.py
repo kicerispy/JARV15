@@ -93,6 +93,51 @@ class ModelManager:
     generation_max_attempts: int = config.OLLAMA_GENERATION_MAX_ATTEMPTS
     generation_retry_delay: float = config.OLLAMA_GENERATION_RETRY_DELAY
 
+    def list_local_models(self) -> list[dict]:
+        """Return locally installed Ollama models in a stable mapping shape."""
+        from ollama import list as ollama_list
+
+        response = ollama_list()
+
+        if isinstance(response, dict):
+            raw_models = response.get("models") or []
+        else:
+            raw_models = getattr(response, "models", []) or []
+
+        models: list[dict] = []
+        for model in raw_models:
+            if isinstance(model, dict):
+                name = str(
+                    model.get("name")
+                    or model.get("model")
+                    or ""
+                ).strip()
+                item = dict(model)
+            else:
+                name = str(
+                    getattr(model, "model", None)
+                    or getattr(model, "name", None)
+                    or ""
+                ).strip()
+                item = {
+                    "model": name,
+                    "name": name,
+                    "size": getattr(model, "size", None),
+                    "modified_at": getattr(model, "modified_at", None),
+                }
+                details = getattr(model, "details", None)
+                if details is not None:
+                    item["details"] = details
+
+            if not name:
+                continue
+
+            item.setdefault("model", name)
+            item.setdefault("name", name)
+            models.append(item)
+
+        return models
+
     def generate(
         self,
         *,
