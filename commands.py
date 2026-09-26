@@ -1684,6 +1684,40 @@ def build_integration_health_plan(user_request):
     return None
 
 
+def build_agent_browser_setup_plan(user_request):
+    """Build an explicit route for installing/upgrading agent-browser."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact = {
+        "setup agent browser",
+        "setup agent-browser",
+        "install agent browser",
+        "install agent-browser",
+        "upgrade agent browser",
+        "upgrade agent-browser",
+        "update agent browser",
+        "update agent-browser",
+    }
+    if text in exact or (
+        ("agent browser" in text or "agent-browser" in text)
+        and any(token in text for token in ("install", "setup", "upgrade", "update"))
+    ):
+        action = "upgrade" if any(token in text for token in ("upgrade", "update")) else "install"
+        return {
+            "steps": [
+                {
+                    "tool": "agent_browser_setup",
+                    "argument": json.dumps({"action": action}),
+                }
+            ]
+        }
+
+    return None
+
+
 def build_tool_contract_audit_plan(user_request):
     """Build a deterministic read-only route for planner/registry drift."""
     original = str(user_request or "").strip()
@@ -2223,6 +2257,11 @@ def deterministic_route(user_request, active_context=None):
     if health_plan:
         print("JARVIS: Integration health route selected.")
         return health_plan
+
+    agent_browser_setup_plan = build_agent_browser_setup_plan(user_request)
+    if agent_browser_setup_plan:
+        print("JARVIS: agent-browser setup route selected.")
+        return agent_browser_setup_plan
 
     tool_contract_plan = build_tool_contract_audit_plan(user_request)
     if tool_contract_plan:
