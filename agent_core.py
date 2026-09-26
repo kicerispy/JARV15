@@ -1587,6 +1587,38 @@ class JarvisAgent:
                     plan
                 )
 
+                # Run a read-only reuse/minimal-change review on mutation
+                # plans. This is advisory: it records scope/verification
+                # concerns without bypassing the existing safety workflow.
+                try:
+                    from adaptive_runtime import coding_style_review
+
+                    plan_review = coding_style_review(
+                        json.dumps(
+                            {
+                                "request": task.request,
+                                "steps": plan.get("steps", []) if isinstance(plan, dict) else [],
+                            }
+                        )
+                    )
+                    if isinstance(plan_review, dict):
+                        concerns = plan_review.get("concerns") or []
+                        suggestions = plan_review.get("suggestions") or []
+                        if concerns:
+                            task.observations.append(
+                                "Coding policy concerns: "
+                                + " | ".join(str(item) for item in concerns[:4])
+                            )
+                        if suggestions:
+                            task.observations.append(
+                                "Coding policy suggestions: "
+                                + " | ".join(str(item) for item in suggestions[:4])
+                            )
+                except Exception as review_exc:
+                    logger.debug(
+                        f"JARVIS AGENT: coding plan review skipped: {review_exc}"
+                    )
+
                 # Product research must always operate on the original user
                 # request. During replanning, request_for_planner contains
                 # recovery/evidence instructions intended only for the LLM.
