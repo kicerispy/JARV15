@@ -439,3 +439,22 @@ def test_platform_diagnostics_routes_are_deterministic():
     assert build_platform_diagnostics_plan("tool health")["steps"][0]["tool"] == "tool_health"
     assert build_platform_diagnostics_plan("rebuild code index")["steps"][0]["tool"] == "code_index_rebuild"
     assert build_platform_diagnostics_plan("strategy history for browser search")["steps"][0]["tool"] == "strategy_history"
+
+def test_tool_dispatch_does_not_shadow_n8n_registry(monkeypatch):
+    import n8n_bridge
+    import tools
+
+    monkeypatch.setattr(
+        n8n_bridge,
+        "n8n_status",
+        lambda: {"success": True, "verified": True, "message": "n8n ready"},
+    )
+
+    result = tools.run_tool("n8n_status")
+
+    assert result.success is True
+    assert result.data["message"] == "n8n ready"
+
+    capabilities = tools.run_tool("jarvis_capabilities")
+
+    assert capabilities.success is True
