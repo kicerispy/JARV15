@@ -154,6 +154,15 @@ The upstream packages are installed as published; JARVIS does not fork, strip, o
 
 JARVIS adds a thin orchestration layer around that upstream stack. The native CLI remains available through the anipy_cli tool, while structured JARVIS tools expose provider discovery, search, metadata, episode lookup, stream resolution, and episode downloads.
 
+## Adaptive runtime
+
+JARVIS can optionally enable Hindsight as an additional long-term context backend with \`JARVIS_ADAPTIVE_MEMORY_ENABLED=1\`. The default memory order remains OpenViking -> agentmemory -> optional Hindsight -> the local fallback.
+
+The runtime also includes bounded self-healing state, persistent failure patterns, tool circuit breaking, learned verified strategy reuse, a local FTS5 code index, and deterministic doctor/QoL diagnostics.
+
+Optional integrations include direct n8n MCP workflow discovery/architecture/building, the Vercel agent-browser CLI fallback, and Magnitude capability detection. These are advisory or opt-in and do not replace the existing Ollama/Playwright/Anipy/Roblox/Unreal paths automatically.
+
+
 Examples:
 
 ```text
