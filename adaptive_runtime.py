@@ -434,7 +434,114 @@ def _run_agent_browser_command(
         "json": _agent_browser_json(output),
         "error": error[:3000] if error else "",
         "backend": "agent-browser",
-        "command": [*args],
+    }
+
+
+def agent_browser_setup(argument: str = "") -> Dict[str, Any]:
+    """Install or upgrade the optional agent-browser CLI explicitly."""
+    raw = str(argument or "").strip()
+    try:
+        payload = json.loads(raw) if raw else {}
+    except (json.JSONDecodeError, TypeError):
+        payload = {"action": raw}
+
+    if not isinstance(payload, dict):
+        payload = {}
+
+    action = str(payload.get("action") or "install").strip().lower()
+    if action not in {"install", "upgrade", "status"}:
+        return {
+            "success": False,
+            "verified": False,
+            "message": "agent_browser_setup supports install, upgrade, or status.",
+        }
+
+    if action == "status":
+        return agent_browser_status()
+
+    executable = _agent_browser_executable()
+    if action == "upgrade" and executable:
+        command = [executable, "upgrade"]
+    else:
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        if not npm:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "message": "npm was not found. Install Node.js/npm first, then retry agent-browser setup.",
+            }
+        command = [npm, "install", "-g", "agent-browser"]
+
+    env = os.environ.copy()
+    try:
+        install = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": "agent-browser package setup timed out.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": f"agent-browser setup failed to start: {exc}",
+        }
+
+    install_output = (install.stdout or install.stderr or "").strip()
+    if install.returncode != 0:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "returncode": install.returncode,
+            "output": install_output[:AGENT_BROWSER_MAX_OUTPUT],
+            "message": "agent-browser package installation/upgrade failed.",
+        }
+
+    executable = _agent_browser_executable()
+    if not executable:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "output": install_output[:AGENT_BROWSER_MAX_OUTPUT],
+            "message": "agent-browser was installed, but the executable is not discoverable on PATH yet.",
+        }
+
+    chrome_setup = _run_agent_browser_command(
+        ["install"],
+        timeout=300,
+    )
+    status = agent_browser_status()
+    return {
+        "success": bool(status.get("installed") and status.get("ready")),
+        "verified": bool(status.get("ready")),
+        "action": action,
+        "install_returncode": install.returncode,
+        "install_output": install_output[:AGENT_BROWSER_MAX_OUTPUT],
+        "chrome_setup": {
+            "success": chrome_setup.get("success"),
+            "returncode": chrome_setup.get("returncode"),
+            "output": chrome_setup.get("output", ""),
+            "error": chrome_setup.get("error", ""),
+        },
+        "status": status,
+        "message": (
+            "agent-browser setup completed and the runtime doctor is healthy."
+            if status.get("ready")
+            else "agent-browser package setup completed, but the browser runtime still needs attention."
+        ),
     }
 
 
@@ -732,6 +839,8 @@ def run_adaptive_tool(tool_name: str, argument: str = "") -> Dict[str, Any]:
         return magnitude_status()
     if tool_name == "agent_browser_status":
         return agent_browser_status()
+    if tool_name == "agent_browser_setup":
+        return agent_browser_setup(argument)
     if tool_name == "agent_browser_action":
         return agent_browser_action(argument)
     if tool_name == "response_style":
