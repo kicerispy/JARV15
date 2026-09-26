@@ -1041,6 +1041,7 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
             if degraded:
                 display_names = {
                     "agentbrowsersetup": "Browser Agent Setup",
+                    "agent_browser_setup": "Browser Agent Setup",
                     "browser_agent_setup": "Browser Agent Setup",
                     "integrationhealth": "Integration Health",
                     "integration_health": "Integration Health",
