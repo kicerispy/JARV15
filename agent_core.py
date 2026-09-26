@@ -291,6 +291,17 @@ class JarvisAgent:
                 error=task.error or "",
                 domain=domain,
             )
+
+            # Feed successful/failed task outcomes into the learned strategy
+            # layer. Selection remains bounded and only trusted strategies
+            # can be reused by future planning.
+            try:
+                from strategy_selector import record_task_outcome
+                record_task_outcome(task)
+            except Exception as strategy_exc:
+                logger.debug(
+                    f"JARVIS AGENT: strategy learning write skipped: {strategy_exc}"
+                )
         except Exception as exc:
             logger.debug(
                 f"JARVIS AGENT: experience-memory write skipped: {exc}"
