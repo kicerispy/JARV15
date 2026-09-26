@@ -464,9 +464,43 @@ def agent_browser_setup(argument: str = "") -> Dict[str, Any]:
         command = [executable, "upgrade"]
     else:
         npm = shutil.which("npm") or shutil.which("npm.cmd")
-        if not npm:
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not npm or not node:
             return {
                 "success": False,
+                "verified": False,
+                "retryable": False,
+                "message": "Node.js/npm was not found. agent-browser 0.38.x requires Node.js 24+.",
+            }
+
+        try:
+            node_result = subprocess.run(
+                [node, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            node_version = (node_result.stdout or node_result.stderr or "").strip()
+            match = re.search(r"(\d+)(?:\.\d+)?", node_version)
+            major = int(match.group(1)) if match else 0
+        except Exception:
+            major = 0
+            node_version = ""
+
+        if major < 24:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "message": (
+                    "agent-browser 0.38.x requires Node.js 24+. "
+                    f"Detected {node_version or 'an unknown Node.js version'}."
+                ),
+            }
+
+        npm = npm
+                        "success": False,
                 "verified": False,
                 "retryable": False,
                 "message": "npm was not found. Install Node.js/npm first, then retry agent-browser setup.",
@@ -761,6 +795,11 @@ def agent_browser_action(argument: str = "") -> Dict[str, Any]:
         args = ["webmcp", "list"]
         if target:
             args.append(target)
+        frame_id = str(payload.get("frame") or payload.get("frame_id") or "").strip()
+        if frame_id:
+            args.extend(["--frame", frame_id])
+        if bool(payload.get("json", True)):
+            args.append("--json")
 
     elif action == "webmcp_invoke":
         if not AGENT_BROWSER_ALLOW_WEBMCP:
@@ -783,7 +822,11 @@ def agent_browser_action(argument: str = "") -> Dict[str, Any]:
         params = payload.get("params", {})
         if not isinstance(params, dict):
             return {"success": False, "verified": False, "message": "webmcp_invoke params must be a JSON object."}
-        args = ["webmcp", "invoke", tool_name, "--params", json.dumps(params, ensure_ascii=False)]
+        args = ["webmcp", "invoke", tool_name]
+        frame_id = str(payload.get("frame") or payload.get("frame_id") or "").strip()
+        if frame_id:
+            args.extend(["--frame", frame_id])
+        args.extend(["--params", json.dumps(params, ensure_ascii=False)])
 
     elif action in {"webmcp_result", "webmcp_cancel"}:
         invocation_id = str(payload.get("id") or target).strip()
