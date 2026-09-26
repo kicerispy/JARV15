@@ -102,6 +102,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "browser_scroll": "Scroll the controlled browser. Argument is JSON with direction and optional distance.",
     "browser_agent_run": "Run an autonomous browser task in the controlled Chrome session. Argument = task text or JSON with task and optional max_steps.",
     "browser_agent_status": "Check whether the optional autonomous browser-agent stack is installed and connected.",
+    "browser_agent_setup": "Create or upgrade the isolated Browser Use worker environment. Argument is JSON with action install, upgrade, or status.",
     "roblox_mcp_status": "Report whether the local Roblox Studio MCP server and Studio plugin are connected.",
     "holiday_lookup": "Look up public holidays. Argument = ISO country code and optional year, e.g. US 2026.",
     "knowledge_lookup": "Look up a concise Wikipedia knowledge summary. Argument = topic.",
