@@ -61,3 +61,103 @@ def test_agent_browser_status_is_nonfatal_when_missing(monkeypatch):
     result = adaptive_runtime.agent_browser_status()
     assert result["success"] is True
     assert result["installed"] is False
+
+
+def test_agent_browser_action_uses_current_cli_syntax(monkeypatch):
+    import adaptive_runtime
+
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"success":true}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        adaptive_runtime,
+        "_agent_browser_executable",
+        lambda: "agent-browser",
+    )
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return Result()
+
+    monkeypatch.setattr(adaptive_runtime.subprocess, "run", fake_run)
+
+    result = adaptive_runtime.agent_browser_action(
+        '{"action":"press","key":"Enter"}'
+    )
+    assert result["success"] is True
+    assert calls[-1][:2] == ["agent-browser", "press"]
+    assert calls[-1][2] == "Enter"
+
+    result = adaptive_runtime.agent_browser_action(
+        '{"action":"scroll","direction":"down","amount":500}'
+    )
+    assert result["success"] is True
+    assert calls[-1][:4] == ["agent-browser", "scroll", "down", "500"]
+
+    result = adaptive_runtime.agent_browser_action(
+        '{"action":"get_text","target":"@e1"}'
+    )
+    assert result["success"] is True
+    assert calls[-1][:4] == ["agent-browser", "get", "text", "@e1"]
+
+
+def test_agent_browser_webmcp_requires_explicit_opt_in(monkeypatch):
+    import adaptive_runtime
+
+    monkeypatch.setattr(adaptive_runtime, "_agent_browser_executable", lambda: "agent-browser")
+    monkeypatch.setattr(adaptive_runtime, "AGENT_BROWSER_ALLOW_WEBMCP", False)
+
+    result = adaptive_runtime.agent_browser_action(
+        '{"action":"webmcp_invoke","tool":"send_email","params":{}}'
+    )
+
+    assert result["success"] is False
+    assert "disabled" in result["message"].lower()
+
+
+def test_agent_browser_webmcp_requires_confirmation(monkeypatch):
+    import adaptive_runtime
+
+    monkeypatch.setattr(adaptive_runtime, "_agent_browser_executable", lambda: "agent-browser")
+    monkeypatch.setattr(adaptive_runtime, "AGENT_BROWSER_ALLOW_WEBMCP", True)
+
+    result = adaptive_runtime.agent_browser_action(
+        '{"action":"webmcp_invoke","tool":"send_email","params":{}}'
+    )
+
+    assert result["success"] is False
+    assert "confirmed=true" in result["message"]
+
+
+def test_agent_browser_webmcp_discovery_is_read_only(monkeypatch):
+    import adaptive_runtime
+
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"tools":[]}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        adaptive_runtime,
+        "_agent_browser_executable",
+        lambda: "agent-browser",
+    )
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return Result()
+
+    monkeypatch.setattr(adaptive_runtime.subprocess, "run", fake_run)
+
+    result = adaptive_runtime.agent_browser_action(
+        '{"action":"webmcp_list","target":"search"}'
+    )
+
+    assert result["success"] is True
+    assert calls[-1][:4] == ["agent-browser", "webmcp", "list", "search"]

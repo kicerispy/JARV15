@@ -3374,10 +3374,18 @@ def _run_tool_raw(
             return {"success": False, "verified": False, "message": "n8n_workflow_builder expects JSON."}
         return run_builder(payload if isinstance(payload, dict) else {})
 
+    if tool_name == "tool_contract_audit":
+        from tool_registry import tool_contract_audit
+        return tool_contract_audit()
+
     if tool_name in ADAPTIVE_RUNTIME_TOOLS:
         from adaptive_runtime import run_adaptive_tool
 
         return run_adaptive_tool(tool_name, argument)
+
+    if tool_name == "browser_agent_setup":
+        from browser_agent import browser_agent_setup
+        return browser_agent_setup(argument)
 
     if tool_name in BROWSER_TOOLS:
         return run_browser_tool(

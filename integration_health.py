@@ -510,6 +510,41 @@ def _parse_argument(argument: str) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _tool_contract_component() -> Dict[str, Any]:
+    """Check that every planner-visible static tool has registry metadata."""
+    try:
+        from planner import AVAILABLE_TOOLS
+        from tool_registry import registry_contract_report
+
+        report = registry_contract_report(AVAILABLE_TOOLS.keys())
+        missing = report.get("planner_missing_from_registry") or []
+        status = "READY" if report.get("healthy") else "DEGRADED"
+        if missing:
+            message = (
+                "Planner/registry drift detected: "
+                + ", ".join(missing[:8])
+            )
+        else:
+            message = (
+                f"{report.get('planner_tool_count', 0)} planner tools are covered "
+                f"by {report.get('registry_tool_count', 0)} canonical registry entries."
+            )
+        return _component(
+            "Tool Contract",
+            status,
+            message,
+            tool_count=int(report.get("planner_tool_count") or 0),
+            optional=False,
+        )
+    except Exception as exc:
+        return _component(
+            "Tool Contract",
+            "ERROR",
+            f"Tool contract audit failed: {exc}",
+            optional=False,
+        )
+
+
 def _static_components() -> list[Dict[str, Any]]:
     return [
         _component(
@@ -540,6 +575,7 @@ def _static_components() -> list[Dict[str, Any]]:
         ),
         _component("External Memory", "READY", "JARVIS context-memory integration is installed.", tool_count=len(CONTEXT_MEMORY_TOOLS)),
         _component("Agent Skills", "READY" if _module_available("skill_catalog") else "NOT_INSTALLED", "Agent Skills catalog is installed." if _module_available("skill_catalog") else "Agent Skills catalog is unavailable.", tool_count=len(AGENT_SKILL_TOOLS)),
+        _tool_contract_component(),
         _component("Unreal MCP", "READY" if getattr(config, "UNREAL_MCP_URL", "") else "NOT_CONFIGURED", "Unreal MCP endpoint is configured." if getattr(config, "UNREAL_MCP_URL", "") else "Unreal MCP endpoint is not configured.", tool_count=len(UNREAL_MCP_TOOLS)),
         _component(
             "Roblox MCP",
@@ -567,6 +603,7 @@ def integration_health(argument: str = "") -> Dict[str, Any]:
         _anipy_component(),
         _memory_component(),
         _skills_component(),
+        _tool_contract_component(),
         _unreal_component(),
         _roblox_component(),
         _n8n_component(),
