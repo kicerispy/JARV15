@@ -3871,16 +3871,56 @@ def run_tool(
     """
     Public JARVIS tool dispatcher.
 
-    All tool results are normalized into the unified ToolResult
-    contract while preserving the original raw result in .data.
+    Every execution is observed by the runtime resilience layer. Circuit
+    breaking remains bounded and fail-closed while existing tool behavior is
+    preserved inside the normalized ToolResult contract.
     """
+    started = time.perf_counter()
 
-    result = _run_tool_raw(
-        tool_name,
-        argument,
-    )
+    try:
+        from resilience_kernel import get_resilience
+        resilience = get_resilience()
+        guard = resilience.before(tool_name)
+        if not guard.get("allowed", True):
+            return ToolResult(
+                success=False,
+                tool=tool_name,
+                error=str(guard.get("reason") or "Tool temporarily unavailable."),
+                retryable=True,
+                observation=guard,
+            )
+    except Exception:
+        resilience = None
 
-    return normalize_tool_result(
+    try:
+        result = _run_tool_raw(
+            tool_name,
+            argument,
+        )
+    except Exception as exc:
+        result = ToolResult(
+            success=False,
+            tool=tool_name,
+            error=f"{type(exc).__name__}: {exc}",
+            retryable=False,
+        )
+
+    normalized = normalize_tool_result(
         tool_name,
         result,
     )
+
+    if resilience is not None:
+        try:
+            resilience.record(
+                tool_name,
+                success=normalized.success,
+                retryable=normalized.retryable,
+                error=normalized.error,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                argument=argument,
+            )
+        except Exception:
+            pass
+
+    return normalized
