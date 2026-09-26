@@ -4013,6 +4013,106 @@ class JarvisAgent:
                     else ""
                 )
 
+                # Autonomy Kernel v3 turns the raw failed step into durable,
+                # structured recovery evidence before any replanning occurs.
+                autonomy_failure = None
+                autonomy_recovery = None
+                if latest_failure:
+                    try:
+                        from autonomy_kernel import (
+                            classify_failure,
+                            record_repair_event,
+                            select_recovery,
+                            targeted_test_paths,
+                        )
+
+                        failure_error = (
+                            latest_failure.get("error")
+                            or latest_failure.get("message")
+                            or latest_failure.get("detail")
+                            or task.error
+                            or ""
+                        )
+                        autonomy_failure = classify_failure(
+                            latest_failure_tool,
+                            failure_error,
+                            argument=latest_failure.get("argument", ""),
+                            result=latest_failure.get("result"),
+                        )
+
+                        changed_paths = []
+                        for evidence in reversed(task.evidence):
+                            if not isinstance(evidence, dict):
+                                continue
+                            if evidence.get("tool") in {
+                                "edit_file",
+                                "write_file",
+                                "delete_file",
+                            }:
+                                changed_paths.extend(
+                                    str(evidence.get("target", "") or "").split()
+                                )
+
+                        selected_tests = tuple(
+                            targeted_test_paths(
+                                changed_paths,
+                                task.request,
+                            )
+                        )
+                        autonomy_recovery = select_recovery(
+                            autonomy_failure,
+                            attempt=max(1, task.replan_count + 1),
+                            max_attempts=max(1, task.max_replans + 1),
+                            changed_paths=changed_paths,
+                            request=task.request,
+                        )
+
+                        task.active_context["_autonomy_failure"] = {
+                            "category": autonomy_failure.category,
+                            "signature": autonomy_failure.signature,
+                            "confidence": autonomy_failure.confidence,
+                            "reason": autonomy_failure.reason,
+                        }
+                        if selected_tests:
+                            task.active_context["_autonomy_targeted_tests"] = list(
+                                selected_tests
+                            )
+
+                        task.evidence.append(
+                            {
+                                "tool": "autonomy_kernel",
+                                "target": latest_failure_tool,
+                                "success": True,
+                                "verified": True,
+                                "detail": (
+                                    f"Failure classified as {autonomy_failure.category}; "
+                                    f"recovery={autonomy_recovery.action}; "
+                                    f"targeted_tests={list(selected_tests)[:8]}"
+                                ),
+                                "category": autonomy_failure.category,
+                                "signature": autonomy_failure.signature,
+                                "confidence": autonomy_failure.confidence,
+                            }
+                        )
+
+                        record_repair_event(
+                            {
+                                "tool": latest_failure_tool,
+                                "category": autonomy_failure.category,
+                                "signature": autonomy_failure.signature,
+                                "error": failure_error,
+                                "action": autonomy_recovery.action,
+                                "reason": autonomy_recovery.reason,
+                                "request": task.request[:500],
+                                "targeted_tests": list(selected_tests)[:8],
+                            },
+                            kind="failure",
+                        )
+                    except Exception as autonomy_exc:
+                        logger.debug(
+                            f"JARVIS AGENT: Autonomy Kernel v3 evidence capture skipped: {autonomy_exc}"
+                        )
+
                 if (
                     is_software_change_request(task.request)
                     and latest_failure_tool in {
