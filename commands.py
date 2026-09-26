@@ -2114,6 +2114,16 @@ def deterministic_route(user_request, active_context=None):
         user_request
     )
 
+    # Explicit n8n workflow mutations must reach the MCP-aware planner.
+    # Never let generic browser "find" or DOM shortcuts hijack them.
+    try:
+        from planner import is_n8n_workflow_mutation_request
+        if is_n8n_workflow_mutation_request(text):
+            print("JARVIS: n8n workflow mutation routed to MCP planner.")
+            return None
+    except Exception:
+        pass
+
     # ==================================================
     # Roblox MCP lifecycle commands must be routed before the generic
     # Roblox-domain guard below.
