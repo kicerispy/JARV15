@@ -82,6 +82,18 @@ SYSTEM_HEALTH_TOOLS = frozenset(
     }
 )
 
+ADAPTIVE_RUNTIME_TOOLS = frozenset(
+    {
+        "hindsight_status",
+        "hindsight_remember",
+        "hindsight_recall",
+        "hindsight_reflect",
+        "coding_style_review",
+        "response_style",
+        "magnitude_status",
+    }
+)
+
 CONTEXT_MEMORY_TOOLS = frozenset(
     {
         "context_backend_status",
@@ -178,6 +190,11 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "skills_search",
         "skills_read",
         "harness_review",
+        "hindsight_remember",
+        "hindsight_recall",
+        "hindsight_reflect",
+        "coding_style_review",
+        "response_style",
     }
 )
 
@@ -200,5 +217,6 @@ def validate_known_tools(tool_names) -> list[str]:
         and str(name) not in GODS_EYE_TOOLS
         and str(name) not in SCREEN_MEMORY_TOOLS
         and str(name) not in SYSTEM_HEALTH_TOOLS
+        and str(name) not in ADAPTIVE_RUNTIME_TOOLS
         and not is_roblox_tool_name(name)
     )
