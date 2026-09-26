@@ -260,6 +260,44 @@ _CODE_PLANNER_TOOLS = {
 
 
 ROBLOX_TOOL_PREFIX = "roblox__"
+N8N_MCP_TOOL_PREFIX = "n8n_mcp__"
+
+_N8N_MUTATION_SIGNALS = (
+    "add node", "add a node", "remove node", "remove a node",
+    "delete node", "delete a node", "update node", "update a node",
+    "change node", "change a node", "rename node", "move node",
+    "disable node", "enable node", "connect node", "connect the nodes",
+    "disconnect node", "edit workflow", "edit the workflow",
+    "modify workflow", "modify the workflow", "change workflow",
+    "change the workflow", "update workflow", "update the workflow",
+    "add to the workflow", "remove from the workflow",
+    "publish workflow", "unpublish workflow",
+)
+
+def is_n8n_workflow_mutation_request(text: str) -> bool:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    return bool(normalized) and any(
+        signal in normalized for signal in _N8N_MUTATION_SIGNALS
+    ) and ("n8n" in normalized or "workflow" in normalized)
+
+def get_n8n_planner_tools() -> Dict[str, str]:
+    try:
+        from n8n_mcp import tool_descriptions
+        live = tool_descriptions()
+        preferred = {
+            "n8n_mcp__search_workflows",
+            "n8n_mcp__get_workflow_details",
+            "n8n_mcp__search_nodes",
+            "n8n_mcp__get_node_types",
+            "n8n_mcp__update_workflow",
+            "n8n_mcp__publish_workflow",
+            "n8n_mcp__unpublish_workflow",
+        }
+        return {name: description for name, description in live.items() if name in preferred}
+    except Exception as exc:
+        logger.debug(f"JARVIS planner: n8n MCP discovery unavailable: {exc}")
+        return {}
+
 
 ROBLOX_FALLBACK_TOOL_DESCRIPTIONS = {
     "roblox__get_place_info": "Get the active Roblox place and Studio instance information.",
@@ -411,6 +449,10 @@ def _deterministic_n8n_plan(
     if not normalized:
         return None
 
+    # Existing-workflow mutations must use live MCP tools.
+    if is_n8n_workflow_mutation_request(normalized):
+        return None
+
     # Explicit n8n status requests are observational and never delegated as a
     # workflow execution.
     if (
@@ -439,6 +481,11 @@ def _deterministic_n8n_plan(
             ],
             "resolved_command": user_command,
         }
+
+    if is_n8n_workflow_mutation_request(text):
+        live_tools = set(get_n8n_planner_tools().keys())
+        if live_tools:
+            return {"n8n_mcp_status", *live_tools}
 
     try:
         from n8n_bridge import classify_n8n_request
@@ -1064,6 +1111,19 @@ def _planner_prompt(
                 }
             )
 
+        n8n_tool_names = {
+            str(name) for name in tool_names
+            if str(name).startswith(N8N_MCP_TOOL_PREFIX)
+        }
+        if n8n_tool_names:
+            selected_tools.update(
+                {
+                    name: description
+                    for name, description in get_n8n_planner_tools().items()
+                    if name in n8n_tool_names
+                }
+            )
+
     tool_list = "\n".join(
         f"{name}: {desc}"
         for name, desc in selected_tools.items()
@@ -1131,6 +1191,10 @@ n8n-first even when they are a single action (for example, sending an email,
 creating a GitHub issue, updating a calendar, or controlling a supported media
 service). JARVIS should not recreate an integration locally when n8n can own it.
 - Use n8n_run_workflow with JSON containing request, workflow_class, and context.
+- For existing-workflow mutations, use only the live n8n_mcp tools provided here.
+- First discover the exact workflow, then discover node schemas, then call update_workflow.
+- Never invent workflow IDs, node names, node types, parameters, or connection shapes.
+- Only publish a changed workflow when the user explicitly asks to publish or activate it.
 - Do not replace an n8n workflow with local wait loops or ad-hoc JARVIS code.
 - n8n owns workflow retries, waiting, branching, and external-service state.
 - JARVIS owns the real-time voice, browser, Roblox, computer-control, and code-repair loops.
@@ -2287,8 +2351,13 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
         argument = step.get("argument", "")
 
         is_dynamic_roblox_tool = is_roblox_tool_name(tool)
+        is_dynamic_n8n_tool = str(tool or "").strip().startswith(N8N_MCP_TOOL_PREFIX)
 
-        if tool not in AVAILABLE_TOOLS and not is_dynamic_roblox_tool:
+        if (
+            tool not in AVAILABLE_TOOLS
+            and not is_dynamic_roblox_tool
+            and not is_dynamic_n8n_tool
+        ):
             logger.warning(f"Rejected unknown tool: {tool}")
             continue
 
@@ -2309,6 +2378,21 @@ def validate_plan(plan: Any) -> Dict[str, Any]:
             except Exception as exc:
                 logger.warning(
                     f"Roblox MCP tool validation unavailable: {exc}"
+                )
+                continue
+
+        if is_dynamic_n8n_tool:
+            try:
+                from n8n_mcp import is_known_tool
+                remote_tool = tool[len(N8N_MCP_TOOL_PREFIX):]
+                if not is_known_tool(remote_tool):
+                    logger.warning(
+                        f"Rejected unknown n8n MCP tool: {remote_tool}"
+                    )
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    f"n8n MCP tool validation unavailable: {exc}"
                 )
                 continue
 
