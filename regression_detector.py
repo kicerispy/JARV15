@@ -53,17 +53,21 @@ def detect_strategy_regression(
 
 def detect_tool_regressions(limit: int = 8) -> list[dict[str, Any]]:
     health = tool_health_status(limit=max(1, int(limit)))
-    return [
-        {
+    regressions = []
+    for item in health.get("degraded_tools", []):
+        if not isinstance(item, dict):
+            continue
+        regressed = (
+            float(item.get("failures", 0) or 0) >= 3
+            and float(item.get("success_rate", 1.0) or 1.0) < 0.75
+        )
+        if not regressed:
+            continue
+        regressions.append({
             **item,
-            "regressed": (
-                float(item.get("failures", 0) or 0) >= 3
-                and float(item.get("success_rate", 1.0) or 1.0) < 0.75
-            ),
-        }
-        for item in health.get("degraded_tools", [])
-        if isinstance(item, dict)
-    ]
+            "regressed": True,
+        })
+    return regressions
 
 
 def evaluate_request(
