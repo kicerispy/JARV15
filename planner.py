@@ -773,6 +773,11 @@ def _planner_tool_scope(
     if not text:
         return None
 
+    if is_n8n_workflow_mutation_request(text):
+        live_tools = set(get_n8n_planner_tools().keys())
+        if live_tools:
+            return {"n8n_mcp_status", *live_tools}
+
     try:
         from n8n_bridge import classify_n8n_request
         if classify_n8n_request(text) is not None or (
