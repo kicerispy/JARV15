@@ -196,6 +196,12 @@ BROWSER_TOOLS = frozenset(
 JSON_ARGUMENT_TOOLS = frozenset(
     {
         "healing_hints",
+        "jarvis_doctor",
+        "memory_remember",
+        "memory_recall",
+        "memory_forget",
+        "strategy_history",
+        "regression_status",
         "n8n_run_workflow",
         "n8n_mcp_status",
         "n8n_mcp_list_tools",
