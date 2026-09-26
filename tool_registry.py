@@ -131,6 +131,7 @@ ADAPTIVE_RUNTIME_TOOLS = frozenset(
         "response_style",
         "magnitude_status",
         "agent_browser_status",
+        "agent_browser_setup",
         "agent_browser_action",
     }
 )
@@ -247,6 +248,7 @@ JSON_ARGUMENT_TOOLS = frozenset(
         "hindsight_reflect",
         "coding_style_review",
         "response_style",
+        "agent_browser_setup",
         "agent_browser_action",
     }
 )
