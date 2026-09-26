@@ -449,6 +449,16 @@ def test_deterministic_n8n_router_skips_existing_workflow_mutations():
     ) is None
 
 
+def test_deterministic_route_does_not_hijack_n8n_workflow_mutation():
+    from commands import deterministic_route
+
+    route = deterministic_route(
+        "Find my Daily Report workflow and add a Discord notification node after the HTTP Request node"
+    )
+
+    assert route is None
+
+
 def test_planner_exposes_live_n8n_mutation_tools(monkeypatch):
     import planner
 
