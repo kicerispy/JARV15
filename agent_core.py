@@ -1855,6 +1855,49 @@ class JarvisAgent:
                 ),
             )
 
+            if candidate_has_mutation and (
+                is_software_change_request(task.request)
+                or is_software_repair_request(task.request)
+            ):
+                try:
+                    from autonomy_kernel import assess_scope, plan_confidence
+
+                    autonomy_gate = plan_confidence(
+                        task.request,
+                        plan,
+                        evidence=task.evidence,
+                    )
+                    task.active_context["_autonomy_plan_gate"] = {
+                        "allowed": autonomy_gate["allowed"],
+                        "confidence": autonomy_gate["confidence"],
+                        "minimum": autonomy_gate["minimum"],
+                        "scope": autonomy_gate["scope"],
+                    }
+
+                    if not autonomy_gate["allowed"]:
+                        scope_reason = str(
+                            autonomy_gate["scope"].get("reason")
+                            or "mutation scope is not sufficiently verified"
+                        )
+                        plan_issues.append(
+                            "Autonomy Kernel v3 rejected the mutation plan: "
+                            f"{scope_reason} "
+                            f"(confidence={autonomy_gate['confidence']:.2f}, "
+                            f"minimum={autonomy_gate['minimum']:.2f})."
+                        )
+                    elif not autonomy_gate["scope"]["allowed"]:
+                        plan_issues.append(
+                            "Autonomy Kernel v3 detected a mutation scope mismatch: "
+                            + ", ".join(
+                                autonomy_gate["scope"].get("unexpected_targets", [])
+                            )
+                        )
+                except Exception as autonomy_gate_exc:
+                    logger.debug(
+                        "JARVIS AGENT: autonomy mutation gate unavailable: "
+                        f"{autonomy_gate_exc}"
+                    )
+
             if plan_issues:
 
                 logger.warning(
@@ -2260,6 +2303,84 @@ class JarvisAgent:
             "",
             self._build_evidence_packet(task),
         ]
+
+        autonomy_failure = task.active_context.get(
+            "_autonomy_failure",
+            {},
+        )
+        targeted_tests = task.active_context.get(
+            "_autonomy_targeted_tests",
+            [],
+        )
+        autonomy_gate = task.active_context.get(
+            "_autonomy_plan_gate",
+            {},
+        )
+
+        if isinstance(autonomy_failure, dict) and autonomy_failure:
+            lines.extend(
+                [
+                    "",
+                    "Autonomy Kernel v3 failure classification:",
+                    f"- category: {autonomy_failure.get('category', 'unknown')}",
+                    f"- signature: {autonomy_failure.get('signature', '')}",
+                    f"- confidence: {autonomy_failure.get('confidence', 0)}",
+                    f"- reason: {autonomy_failure.get('reason', '')}",
+                ]
+            )
+
+        if isinstance(targeted_tests, list) and targeted_tests:
+            lines.extend(
+                [
+                    "",
+                    "Autonomy-selected targeted verification:",
+                    *[f"- {path}" for path in targeted_tests[:12]],
+                    "Prefer this focused verification before broad regression execution.",
+                ]
+            )
+
+        if isinstance(autonomy_gate, dict) and autonomy_gate:
+            lines.extend(
+                [
+                    "",
+                    "Mutation plan gate:",
+                    f"- allowed: {autonomy_gate.get('allowed')}",
+                    f"- confidence: {autonomy_gate.get('confidence')}",
+                    f"- minimum: {autonomy_gate.get('minimum')}",
+                    f"- scope: {autonomy_gate.get('scope', {})}",
+                ]
+            )
+
+        try:
+            from healing_kernel import healing_hints
+
+            category = (
+                str(autonomy_failure.get("category", "") or "")
+                if isinstance(autonomy_failure, dict)
+                else ""
+            )
+            hints = healing_hints(
+                category=category,
+                error=str(task.error or ""),
+                limit=3,
+            )
+            if hints:
+                lines.extend(
+                    [
+                        "",
+                        "Prior sanitized healing hints:",
+                        *[
+                            (
+                                f"- {item.get('category', '')}: "
+                                f"{item.get('last_action', '')} — "
+                                f"{item.get('last_reason', '')}"
+                            )
+                            for item in hints[:3]
+                        ],
+                    ]
+                )
+        except Exception:
+            pass
 
         # Include current browser state when available.
         browser_state = task.active_context.get(
@@ -3721,6 +3842,34 @@ class JarvisAgent:
 
                 task.status = "completed"
 
+                try:
+                    autonomy_failure = task.active_context.get(
+                        "_autonomy_failure",
+                        {},
+                    )
+                    if isinstance(autonomy_failure, dict) and autonomy_failure:
+                        from autonomy_kernel import record_repair_event
+
+                        record_repair_event(
+                            {
+                                "tool": str(
+                                    autonomy_failure.get("tool")
+                                    or "agent_core"
+                                ),
+                                "category": autonomy_failure.get("category", "unknown"),
+                                "signature": autonomy_failure.get("signature", ""),
+                                "action": "resolved",
+                                "reason": "Task completed after bounded recovery.",
+                                "replans": task.replan_count,
+                            },
+                            kind="resolution",
+                        )
+                except Exception as autonomy_resolution_exc:
+                    logger.debug(
+                        "JARVIS AGENT: autonomy resolution ledger skipped: "
+                        f"{autonomy_resolution_exc}"
+                    )
+
                 task.completed_at = (
                     time.time()
                 )
@@ -4013,6 +4162,106 @@ class JarvisAgent:
                     else ""
                 )
 
+                # Autonomy Kernel v3 turns the raw failed step into durable,
+                # structured recovery evidence before any replanning occurs.
+                autonomy_failure = None
+                autonomy_recovery = None
+                if latest_failure:
+                    try:
+                        from autonomy_kernel import (
+                            classify_failure,
+                            record_repair_event,
+                            select_recovery,
+                            targeted_test_paths,
+                        )
+
+                        failure_error = (
+                            latest_failure.get("error")
+                            or latest_failure.get("message")
+                            or latest_failure.get("detail")
+                            or task.error
+                            or ""
+                        )
+                        autonomy_failure = classify_failure(
+                            latest_failure_tool,
+                            failure_error,
+                            argument=latest_failure.get("argument", ""),
+                            result=latest_failure.get("result"),
+                        )
+
+                        changed_paths = []
+                        for evidence in reversed(task.evidence):
+                            if not isinstance(evidence, dict):
+                                continue
+                            if evidence.get("tool") in {
+                                "edit_file",
+                                "write_file",
+                                "delete_file",
+                            }:
+                                changed_paths.extend(
+                                    str(evidence.get("target", "") or "").split()
+                                )
+
+                        selected_tests = tuple(
+                            targeted_test_paths(
+                                changed_paths,
+                                task.request,
+                            )
+                        )
+                        autonomy_recovery = select_recovery(
+                            autonomy_failure,
+                            attempt=max(1, task.replan_count + 1),
+                            max_attempts=max(1, task.max_replans + 1),
+                            changed_paths=changed_paths,
+                            request=task.request,
+                        )
+
+                        task.active_context["_autonomy_failure"] = {
+                            "category": autonomy_failure.category,
+                            "signature": autonomy_failure.signature,
+                            "confidence": autonomy_failure.confidence,
+                            "reason": autonomy_failure.reason,
+                        }
+                        if selected_tests:
+                            task.active_context["_autonomy_targeted_tests"] = list(
+                                selected_tests
+                            )
+
+                        task.evidence.append(
+                            {
+                                "tool": "autonomy_kernel",
+                                "target": latest_failure_tool,
+                                "success": True,
+                                "verified": True,
+                                "detail": (
+                                    f"Failure classified as {autonomy_failure.category}; "
+                                    f"recovery={autonomy_recovery.action}; "
+                                    f"targeted_tests={list(selected_tests)[:8]}"
+                                ),
+                                "category": autonomy_failure.category,
+                                "signature": autonomy_failure.signature,
+                                "confidence": autonomy_failure.confidence,
+                            }
+                        )
+
+                        record_repair_event(
+                            {
+                                "tool": latest_failure_tool,
+                                "category": autonomy_failure.category,
+                                "signature": autonomy_failure.signature,
+                                "error": failure_error,
+                                "action": autonomy_recovery.action,
+                                "reason": autonomy_recovery.reason,
+                                "request": task.request[:500],
+                                "targeted_tests": list(selected_tests)[:8],
+                            },
+                            kind="failure",
+                        )
+                    except Exception as autonomy_exc:
+                        logger.debug(
+                            f"JARVIS AGENT: Autonomy Kernel v3 evidence capture skipped: {autonomy_exc}"
+                        )
+
                 if (
                     is_software_change_request(task.request)
                     and latest_failure_tool in {
@@ -4152,8 +4401,18 @@ class JarvisAgent:
                         "Maximum replans reached."
                     )
 
+                    failure_summary = "I wasn't able to complete the task."
+                    if autonomy_failure is not None:
+                        failure_summary = (
+                            "I couldn't complete the task safely. "
+                            f"Self-healing classified the failure as "
+                            f"{autonomy_failure.category.replace('_', ' ')}. "
+                            "The repair budget is exhausted and no further "
+                            "automatic mutation will be attempted."
+                        )
+
                     self._announce(
-                        "I wasn't able to complete the task.",
+                        failure_summary,
                         speak_callback,
                     )
 

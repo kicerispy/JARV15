@@ -3758,10 +3758,25 @@ def _run_tool_raw(
         )
         raw = str(argument or "").strip()
         if tool_name == "autonomy_status":
+            result = autonomy_status()
+            try:
+                from autonomy_kernel import autonomy_status as autonomy_v3_status
+                from resilience_kernel import tool_health_status
+                result = {
+                    **result,
+                    "autonomy_kernel_v3": autonomy_v3_status(
+                        tool_health_status(limit=32)
+                    ),
+                }
+            except Exception as exc:
+                result["autonomy_kernel_v3"] = {
+                    "version": 3,
+                    "error": str(exc)[:300],
+                }
             return {
                 "success": True,
                 "verified": True,
-                **autonomy_status(),
+                **result,
             }
 
         payload = {}

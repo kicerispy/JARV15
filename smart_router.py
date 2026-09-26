@@ -290,6 +290,31 @@ def route_command(command: str) -> RouteDecision:
             0.99,
         )
 
+    # Specialized JARVIS platform actions must bypass generic conversation routing.
+    # Natural spoken phrasing such as "set up browser agent" is actionable even
+    # though "set up" is not one of the generic action verbs.
+    specialized_action_phrases = (
+        "setup browser agent",
+        "set up browser agent",
+        "install browser agent",
+        "setup browser use",
+        "set up browser use",
+        "install browser use",
+        "upgrade browser agent",
+        "configure browser agent",
+        "project health",
+        "show project health",
+        "show me project health",
+        "check project health",
+        "system health",
+    )
+    if any(phrase in text for phrase in specialized_action_phrases):
+        return RouteDecision(
+            "agent",
+            "JARVIS specialized diagnostic/setup request",
+            0.99,
+        )
+
     research_hints = (
         "reviews",
         "review",
