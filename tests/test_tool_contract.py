@@ -73,3 +73,10 @@ def test_project_discovery_ignores_browser_agent_worker_venv(tmp_path):
 
     assert "browser_controller.py" in discovered
     assert ".browser_agent_venv/bin/browser" not in discovered
+
+
+def test_browser_agent_setup_reaches_dedicated_dispatcher():
+    from tool_registry import ADAPTIVE_RUNTIME_TOOLS, BROWSER_TOOLS
+
+    assert "browser_agent_setup" not in ADAPTIVE_RUNTIME_TOOLS
+    assert "browser_agent_setup" not in BROWSER_TOOLS
