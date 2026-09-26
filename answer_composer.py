@@ -1046,13 +1046,16 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         degraded = data.get("degraded_tools") or []
         count = int(data.get("tool_count") or 0)
         if not degraded:
-            return f"Tool health is clean. {count} tracked tool(s) have no recorded failures."
+            noun = "tool" if count == 1 else "tools"
+        return f"Tool health is clean. {count} tracked {noun} have no current failures."
         names = [
             str(row.get("tool") or "").strip()
             for row in degraded[:8]
             if isinstance(row, dict) and str(row.get("tool") or "").strip()
         ]
-        return f"Tool health has {len(degraded)} degraded tool(s) out of {count} tracked: " + ", ".join(names) + "."
+        degraded_noun = "tool" if len(degraded) == 1 else "tools"
+        tracked_noun = "tool" if count == 1 else "tools"
+        return f"Tool health has {len(degraded)} degraded {degraded_noun} out of {count} tracked {tracked_noun}: " + ", ".join(names) + "."
 
     if tool == "autonomy_status":
         enabled = bool(data.get("enabled"))
@@ -1060,7 +1063,7 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         strategy = data.get("strategy") if isinstance(data.get("strategy"), dict) else {}
         return _clip(
             f"Learned autonomy is {status}. "
-            f"Strategy memory contains {strategy.get('count', 0)} stored strategy record(s).",
+            f"Strategy memory contains {strategy.get('count', 0)} stored strategy {'record' if strategy.get('count', 0) == 1 else 'records'}.",
             700,
         )
 
@@ -1078,7 +1081,7 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
                 if name and name not in names:
                     names.append(name)
             return (
-                f"I found {len(strategies)} learned strategy record(s). "
+                f"I found {len(strategies)} learned strategy {'record' if len(strategies) == 1 else 'records'}. "
                 + ("Recent entries: " + "; ".join(names) + "." if names else "")
             ).strip()
         return "Learned strategy history is available, but no structured records were returned."
@@ -1094,17 +1097,23 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
             if isinstance(row, dict)
         ]
         names = [name for name in names if name]
-        return f"Regression status detected {count} tool regression(s): " + ", ".join(names) + "."
+        noun = "regression" if count == 1 else "regressions"
+        return f"Regression status detected {count} tool {noun}: " + ", ".join(names) + "."
 
     if tool in {"code_index_status", "code_index_rebuild"}:
         message = str(data.get("message") or "").strip()
         if message:
             return message
-        if data:
-            return _clip(
-                f"Code index status: {json.dumps(data, ensure_ascii=False, default=str)}",
-                700,
-            )
+        indexed = data.get("indexed_files")
+        if indexed is None:
+            indexed = data.get("indexed")
+        skipped = data.get("skipped")
+        if indexed is not None:
+            noun = "file" if int(indexed) == 1 else "files"
+            answer = f"The local code index contains {int(indexed)} indexed {noun}."
+            if skipped:
+                answer += f" {int(skipped)} file(s) were skipped."
+            return answer
         return "The code index operation completed."
 
     if tool == "jarvis_capabilities":
@@ -1122,8 +1131,9 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         names = data.get("available")
         if isinstance(names, list):
             missing = data.get("missing_configured") or {}
+            noun = "model" if len(names) == 1 else "models"
             answer = (
-                f"Ollama has {len(names)} local model(s): "
+                f"Ollama has {len(names)} local {noun}: "
                 + ", ".join(str(name) for name in names[:12])
                 + "."
             )
@@ -1170,8 +1180,9 @@ def _n8n_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         ]
         if not names:
             return "n8n MCP is reachable, but it did not advertise any tools."
+        noun = "tool" if len(tools) == 1 else "tools"
         return (
-            f"n8n MCP exposes {len(tools)} tool(s). "
+            f"n8n MCP exposes {len(tools)} {noun}. "
             "Available tools include: " + ", ".join(names) + "."
         )
 
