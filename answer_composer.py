@@ -1039,7 +1039,21 @@ def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
         if isinstance(tool_health, dict):
             degraded = tool_health.get("degraded") or []
             if degraded:
-                parts.append("Degraded tools: " + ", ".join(map(str, degraded[:6])) + ".")
+                display_names = {
+                    "agentbrowsersetup": "Browser Agent Setup",
+                    "browser_agent_setup": "Browser Agent Setup",
+                    "integrationhealth": "Integration Health",
+                    "integration_health": "Integration Health",
+                    "n8nstatus": "n8n",
+                    "n8n_status": "n8n",
+                }
+                rendered = []
+                for value in degraded[:6]:
+                    raw_name = str(value or "").strip()
+                    rendered.append(
+                        display_names.get(raw_name.lower(), raw_name)
+                    )
+                parts.append("Degraded tools: " + ", ".join(rendered) + ".")
         return " ".join(parts)
 
     if tool == "tool_health":
