@@ -17,6 +17,7 @@ import os
 import re
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import requests
 
@@ -352,7 +353,7 @@ def remember(
 
             if backend == "hindsight":
                 result = _hindsight_post(
-                    f"/v1/default/banks/{HINDSIGHT_BANK_ID}/memories",
+                    f"/v1/default/banks/{quote(HINDSIGHT_BANK_ID, safe='')}/memories",
                     {
                         "items": [
                             {
@@ -421,7 +422,7 @@ def recall(query: str, limit: int = 8) -> Dict[str, Any]:
 
             if backend == "hindsight":
                 result = _hindsight_post(
-                    f"/v1/default/banks/{HINDSIGHT_BANK_ID}/memories/recall",
+                    f"/v1/default/banks/{quote(HINDSIGHT_BANK_ID, safe='')}/memories/recall",
                     {
                         "query": query,
                         "max_tokens": min(4096, max(256, limit * 256)),
@@ -481,6 +482,17 @@ def context(query: str, limit: int = 8) -> Dict[str, Any]:
                     {"query": query, "limit": limit},
                 )
                 return {"success": True, "backend": "agentmemory", "context": result}
+
+            if backend == "hindsight":
+                result = _hindsight_post(
+                    f"/v1/default/banks/{quote(HINDSIGHT_BANK_ID, safe='')}/memories/recall",
+                    {
+                        "query": query,
+                        "max_tokens": min(4096, max(256, limit * 256)),
+                        "budget": "mid",
+                    },
+                )
+                return {"success": True, "backend": "hindsight", "context": result}
 
             return recall(query, limit)
         except Exception as exc:
