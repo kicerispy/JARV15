@@ -496,6 +496,37 @@ class JarvisAgent:
         )
 
     @staticmethod
+    def _compact_structured_evidence(tool: str, data: Any) -> Any:
+        """Preserve useful structured payloads without truncating JSON."""
+        if (
+            str(tool or "").strip() == "n8n_mcp_list_tools"
+            and isinstance(data, dict)
+            and isinstance(data.get("tools"), list)
+        ):
+            rows = data.get("tools") or []
+            compact_tools = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "").strip()
+                if not name:
+                    continue
+                compact_tools.append(
+                    {
+                        "name": name,
+                        "description": str(row.get("description") or "")[:500],
+                    }
+                )
+            return {
+                "success": bool(data.get("success", True)),
+                "verified": bool(data.get("verified", True)),
+                "tool_count": len(rows),
+                "tools": compact_tools,
+            }
+
+        return data
+
+    @staticmethod
     def _extract_tool_data(result: Any) -> Any:
         """Return the raw data carried by a normalized ToolResult."""
         data = getattr(result, "data", None)
@@ -2524,17 +2555,21 @@ class JarvisAgent:
             # Concise messages are useful for logs, but information-seeking
             # answers need the actual tool payload as evidence.
             if data is not None:
+                evidence_data = self._compact_structured_evidence(
+                    tool,
+                    data,
+                )
                 try:
                     serialized = json.dumps(
-                        data,
+                        evidence_data,
                         ensure_ascii=False,
                         default=str,
                     )
                 except Exception:
-                    serialized = str(data)
+                    serialized = str(evidence_data)
 
                 if len(serialized) <= 9000:
-                    evidence["data"] = data
+                    evidence["data"] = evidence_data
                 else:
                     evidence["data"] = (
                         serialized[:9000]
