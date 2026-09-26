@@ -635,7 +635,7 @@ def test_response_pipeline_does_not_speak_parenthetical_plural_markers():
         "I found 4 model(s) and 3 tool(s)."
     )
 
-    assert cleaned == "I found 4 model and 3 tool."
+    assert cleaned == "I found 4 models and 3 tools."
     assert "comma s" not in cleaned.lower()
 
 
