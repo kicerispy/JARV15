@@ -510,6 +510,8 @@ def _roblox_mcp_lifecycle_answer(
 
     if "setup" in request:
         answer = "Roblox MCP setup completed. " + answer[0].lower() + answer[1:]
+        if server_url:
+            answer += f" Server endpoint: {server_url}."
 
     return _clip(answer, 800)
 
