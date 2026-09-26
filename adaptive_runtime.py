@@ -342,6 +342,143 @@ def coding_style_review(argument: str = "") -> Dict[str, Any]:
     }
 
 
+def agent_browser_status() -> Dict[str, Any]:
+    """Detect optional Vercel agent-browser without making it a dependency."""
+    executable = shutil.which("agent-browser") or shutil.which("agent-browser.cmd")
+    if not executable:
+        return {
+            "success": True,
+            "verified": True,
+            "installed": False,
+            "message": "agent-browser is not installed; JARVIS browser routing is unchanged.",
+        }
+    try:
+        result = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return {
+            "success": True,
+            "verified": True,
+            "installed": True,
+            "executable": executable,
+            "version": (result.stdout or result.stderr or "").strip()[:500],
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": True,
+            "installed": True,
+            "executable": executable,
+            "message": str(exc)[:500],
+        }
+
+
+_AGENT_BROWSER_ACTIONS = {
+    "open": ("open", 2),
+    "read": ("read", 3),
+    "snapshot": ("snapshot", 1),
+    "click": ("click", 2),
+    "fill": ("fill", 3),
+    "press": ("press", 2),
+    "scroll": ("scroll", 2),
+    "screenshot": ("screenshot", 2),
+}
+
+
+def agent_browser_action(argument: str = "") -> Dict[str, Any]:
+    """Run one allowlisted agent-browser command as a bounded fallback."""
+    status = agent_browser_status()
+    if not status.get("installed"):
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": False,
+            "message": status.get("message", "agent-browser is not installed."),
+        }
+
+    raw = str(argument or "").strip()
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {
+            "success": False,
+            "verified": False,
+            "message": "agent_browser_action expects JSON with action and optional target/text.",
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "success": False,
+            "verified": False,
+            "message": "agent_browser_action expects a JSON object.",
+        }
+
+    action = str(payload.get("action") or "").strip().lower()
+    spec = _AGENT_BROWSER_ACTIONS.get(action)
+    if spec is None:
+        return {
+            "success": False,
+            "verified": False,
+            "message": "Unsupported agent-browser action.",
+            "allowed_actions": sorted(_AGENT_BROWSER_ACTIONS),
+        }
+
+    executable = str(status.get("executable") or "")
+    args = [executable, spec[0]]
+
+    target = str(payload.get("target") or payload.get("selector") or "").strip()
+    text_value = str(payload.get("text") or "").strip()
+
+    if action == "open":
+        if not target:
+            return {"success": False, "verified": False, "message": "open requires target URL."}
+        args.append(target)
+    elif action in {"read", "click", "fill", "press", "scroll", "screenshot"}:
+        if target:
+            args.append(target)
+        if action == "fill":
+            args.append(text_value)
+        elif action == "press" and target:
+            pass
+    elif action == "snapshot":
+        pass
+
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": f"agent-browser failed to start: {exc}",
+        }
+
+    output = (result.stdout or "").strip()
+    error = (result.stderr or "").strip()
+    success = result.returncode == 0
+
+    return {
+        "success": success,
+        "verified": success,
+        "retryable": not success,
+        "action": action,
+        "returncode": result.returncode,
+        "output": output[:12000],
+        "error": error[:2000] if error else "",
+        "backend": "agent-browser",
+    }
+
+
 def magnitude_status() -> Dict[str, Any]:
     """Report optional Magnitude availability without making it a dependency."""
     executable = shutil.which("magnitude") or shutil.which("magnitude.exe")
@@ -385,6 +522,10 @@ def run_adaptive_tool(tool_name: str, argument: str = "") -> Dict[str, Any]:
         return coding_style_review(argument)
     if tool_name == "magnitude_status":
         return magnitude_status()
+    if tool_name == "agent_browser_status":
+        return agent_browser_status()
+    if tool_name == "agent_browser_action":
+        return agent_browser_action(argument)
     if tool_name == "response_style":
         return {"success": True, "verified": True, "text": response_style(argument)}
     return {"success": False, "verified": False, "message": f"Unknown adaptive runtime tool: {tool_name}"}
