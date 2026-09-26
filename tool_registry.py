@@ -133,7 +133,6 @@ ADAPTIVE_RUNTIME_TOOLS = frozenset(
         "agent_browser_status",
         "agent_browser_setup",
         "agent_browser_action",
-        "browser_agent_setup",
     }
 )
 
