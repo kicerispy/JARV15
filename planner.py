@@ -267,18 +267,34 @@ _N8N_MUTATION_SIGNALS = (
     "delete node", "delete a node", "update node", "update a node",
     "change node", "change a node", "rename node", "move node",
     "disable node", "enable node", "connect node", "connect the nodes",
-    "disconnect node", "edit workflow", "edit the workflow",
+    "disconnect node", "disconnect the nodes",
+    "edit workflow", "edit the workflow",
     "modify workflow", "modify the workflow", "change workflow",
     "change the workflow", "update workflow", "update the workflow",
     "add to the workflow", "remove from the workflow",
     "publish workflow", "unpublish workflow",
 )
 
+_N8N_NODE_MUTATION_RE = re.compile(
+    r"\b(?:add|remove|delete|update|change|rename|move|disable|enable)\b"
+    r"(?:\s+(?:a|an|the))?"
+    r"(?:\s+[a-z0-9][a-z0-9_-]*){0,5}"
+    r"\s+nodes?\b",
+    re.IGNORECASE,
+)
+
 def is_n8n_workflow_mutation_request(text: str) -> bool:
     normalized = " ".join(str(text or "").strip().lower().split())
-    return bool(normalized) and any(
-        signal in normalized for signal in _N8N_MUTATION_SIGNALS
-    ) and ("n8n" in normalized or "workflow" in normalized)
+    if not normalized:
+        return False
+
+    if "n8n" not in normalized and "workflow" not in normalized:
+        return False
+
+    if any(signal in normalized for signal in _N8N_MUTATION_SIGNALS):
+        return True
+
+    return bool(_N8N_NODE_MUTATION_RE.search(normalized))
 
 N8N_MCP_MUTATION_TOOLS = {
     "n8n_mcp__search_workflows",
