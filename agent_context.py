@@ -28,6 +28,11 @@ from config import (
     OPENVIKING_USER,
     OPENVIKING_ACCOUNT,
     CONTEXT_MEMORY_BACKEND,
+    HINDSIGHT_URL,
+    HINDSIGHT_BANK_ID,
+    HINDSIGHT_API_KEY,
+    HINDSIGHT_TIMEOUT,
+    ADAPTIVE_MEMORY_ENABLED,
 )
 
 _SESSION_RE = re.compile(r"[^a-zA-Z0-9_-]+")
@@ -73,6 +78,13 @@ def _openviking_headers() -> Dict[str, str]:
     return headers
 
 
+def _hindsight_headers() -> Dict[str, str]:
+    headers = _headers_json()
+    if HINDSIGHT_API_KEY:
+        headers["Authorization"] = f"Bearer {HINDSIGHT_API_KEY}"
+    return headers
+
+
 def _join_url(base: str, path: str) -> str:
     return f"{str(base or '').rstrip('/')}/{path.lstrip('/')}"
 
@@ -112,7 +124,7 @@ def _backend_order() -> List[str]:
         selected = str(backend_status(timeout=0.6).get("selected_backend") or "")
     except Exception:
         selected = ""
-    ordered = ["openviking", "agentmemory", "local"]
+    ordered = ["openviking", "agentmemory", "hindsight", "local"]
     if selected in ordered:
         return [selected] + [item for item in ordered if item != selected]
     return ordered
@@ -178,6 +190,38 @@ def backend_status(timeout: float = 0.6, force: bool = False) -> Dict[str, Any]:
             "error": str(exc),
         }
 
+    if ADAPTIVE_MEMORY_ENABLED:
+        try:
+            payload = _request_json(
+                "GET",
+                _join_url(HINDSIGHT_URL, "/health"),
+                headers=_hindsight_headers(),
+                timeout=timeout,
+            )
+            status["backends"]["hindsight"] = {
+                "reachable": True,
+                "healthy": True,
+                "url": HINDSIGHT_URL,
+                "bank_id": HINDSIGHT_BANK_ID,
+                "health": payload,
+            }
+        except Exception as exc:
+            status["backends"]["hindsight"] = {
+                "reachable": False,
+                "healthy": False,
+                "url": HINDSIGHT_URL,
+                "bank_id": HINDSIGHT_BANK_ID,
+                "error": str(exc),
+            }
+    else:
+        status["backends"]["hindsight"] = {
+            "reachable": False,
+            "healthy": False,
+            "enabled": False,
+            "url": HINDSIGHT_URL,
+            "bank_id": HINDSIGHT_BANK_ID,
+        }
+
     try:
         local_count = int(_local_memory().count())
         status["backends"]["local"] = {
@@ -194,7 +238,7 @@ def backend_status(timeout: float = 0.6, force: bool = False) -> Dict[str, Any]:
         }
 
     selected = None
-    for backend in ("openviking", "agentmemory", "local"):
+    for backend in ("openviking", "agentmemory", "hindsight", "local"):
         entry = status["backends"].get(backend, {})
         if entry.get("reachable") and entry.get("healthy"):
             selected = backend
@@ -249,6 +293,18 @@ def _openviking_post(path: str, payload: Dict[str, Any], timeout: float = 8.0) -
     )
 
 
+def _hindsight_post(path: str, payload: Dict[str, Any], timeout: float = HINDSIGHT_TIMEOUT) -> Any:
+    return _extract_result(
+        _request_json(
+            "POST",
+            _join_url(HINDSIGHT_URL, path),
+            headers=_hindsight_headers(),
+            timeout=timeout,
+            json=payload,
+        )
+    )
+
+
 def remember(
     content: str,
     *,
@@ -293,6 +349,27 @@ def remember(
                     "session_id": session_id,
                     "result": committed,
                 }
+
+            if backend == "hindsight":
+                result = _hindsight_post(
+                    f"/v1/default/banks/{HINDSIGHT_BANK_ID}/memories",
+                    {
+                        "items": [
+                            {
+                                "content": text,
+                                "document_id": project or "jarvis",
+                                "metadata": {
+                                    "memory_type": memory_type,
+                                    "source": "jarvis",
+                                    "project": project or "",
+                                },
+                                "tags": concepts[:16],
+                            }
+                        ],
+                        "async": True,
+                    },
+                )
+                return {"success": True, "backend": "hindsight", "result": result}
 
             if backend == "agentmemory":
                 result = _agentmemory_post(
@@ -341,6 +418,17 @@ def recall(query: str, limit: int = 8) -> Dict[str, Any]:
                     {"query": query, "limit": limit},
                 )
                 return {"success": True, "backend": "openviking", "results": result}
+
+            if backend == "hindsight":
+                result = _hindsight_post(
+                    f"/v1/default/banks/{HINDSIGHT_BANK_ID}/memories/recall",
+                    {
+                        "query": query,
+                        "max_tokens": min(4096, max(256, limit * 256)),
+                        "budget": "mid",
+                    },
+                )
+                return {"success": True, "backend": "hindsight", "results": result}
 
             if backend == "agentmemory":
                 result = _agentmemory_post(
