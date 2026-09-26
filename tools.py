@@ -3308,6 +3308,44 @@ def _run_tool_raw(
 
         return run_integration_health(argument)
 
+    if tool_name.startswith("n8n_mcp__"):
+        from n8n_mcp import call_tool
+
+        remote_tool = tool_name[len("n8n_mcp__"):].strip()
+        if not remote_tool:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n MCP tool name is empty.",
+            }
+
+        try:
+            payload = json.loads(str(argument or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n MCP tool arguments must be valid JSON.",
+            }
+
+        if not isinstance(payload, dict):
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": False,
+                "terminal": True,
+                "execution_owner": "n8n",
+                "message": "n8n MCP tool arguments must be a JSON object.",
+            }
+
+        return call_tool(remote_tool, payload)
+
     if tool_name == "n8n_mcp_status":
         from n8n_mcp import status
         return status()
