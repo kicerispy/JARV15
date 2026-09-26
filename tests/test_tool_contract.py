@@ -50,3 +50,33 @@ def test_tool_contract_audit_dispatcher_path():
 
     assert isinstance(data, dict)
     assert data["healthy"] is True
+
+
+def test_browser_agent_setup_is_not_a_browser_action():
+    from tool_registry import BROWSER_TOOLS
+
+    assert "browser_agent_setup" not in BROWSER_TOOLS
+
+
+def test_project_discovery_ignores_browser_agent_worker_venv(tmp_path):
+    import project_fs
+
+    root = tmp_path
+    (root / ".browser_agent_venv" / "bin").mkdir(parents=True)
+    (root / ".browser_agent_venv" / "bin" / "browser").write_text("", encoding="utf-8")
+    (root / "browser_controller.py").write_text("", encoding="utf-8")
+
+    discovered = {
+        path.relative_to(root).as_posix()
+        for path in project_fs.iter_project_files(root)
+    }
+
+    assert "browser_controller.py" in discovered
+    assert ".browser_agent_venv/bin/browser" not in discovered
+
+
+def test_browser_agent_setup_reaches_dedicated_dispatcher():
+    from tool_registry import ADAPTIVE_RUNTIME_TOOLS, BROWSER_TOOLS
+
+    assert "browser_agent_setup" not in ADAPTIVE_RUNTIME_TOOLS
+    assert "browser_agent_setup" not in BROWSER_TOOLS
