@@ -280,23 +280,37 @@ def is_n8n_workflow_mutation_request(text: str) -> bool:
         signal in normalized for signal in _N8N_MUTATION_SIGNALS
     ) and ("n8n" in normalized or "workflow" in normalized)
 
+N8N_MCP_MUTATION_TOOLS = {
+    "n8n_mcp__search_workflows",
+    "n8n_mcp__get_workflow_details",
+    "n8n_mcp__search_nodes",
+    "n8n_mcp__get_node_types",
+    "n8n_mcp__update_workflow",
+    "n8n_mcp__publish_workflow",
+    "n8n_mcp__unpublish_workflow",
+}
+
+N8N_MCP_MUTATION_TOOL_FALLBACKS = {
+    "n8n_mcp__search_workflows": "Find the exact existing n8n workflow before mutating it.",
+    "n8n_mcp__get_workflow_details": "Inspect an existing n8n workflow graph and trigger details.",
+    "n8n_mcp__search_nodes": "Find the real n8n node type needed for the requested change.",
+    "n8n_mcp__get_node_types": "Retrieve the verified schema for an n8n node type.",
+    "n8n_mcp__update_workflow": "Atomically update an existing n8n workflow, including addNode, removeNode, updateNodeParameters, and connections.",
+    "n8n_mcp__publish_workflow": "Publish an n8n workflow only after the user explicitly requests activation.",
+    "n8n_mcp__unpublish_workflow": "Unpublish an n8n workflow only after the user explicitly requests deactivation.",
+}
+
 def get_n8n_planner_tools() -> Dict[str, str]:
+    selected = dict(N8N_MCP_MUTATION_TOOL_FALLBACKS)
     try:
         from n8n_mcp import tool_descriptions
         live = tool_descriptions()
-        preferred = {
-            "n8n_mcp__search_workflows",
-            "n8n_mcp__get_workflow_details",
-            "n8n_mcp__search_nodes",
-            "n8n_mcp__get_node_types",
-            "n8n_mcp__update_workflow",
-            "n8n_mcp__publish_workflow",
-            "n8n_mcp__unpublish_workflow",
-        }
-        return {name: description for name, description in live.items() if name in preferred}
+        for name in N8N_MCP_MUTATION_TOOLS:
+            if name in live:
+                selected[name] = live[name]
     except Exception as exc:
         logger.debug(f"JARVIS planner: n8n MCP discovery unavailable: {exc}")
-        return {}
+    return selected
 
 
 ROBLOX_FALLBACK_TOOL_DESCRIPTIONS = {
@@ -481,11 +495,6 @@ def _deterministic_n8n_plan(
             ],
             "resolved_command": user_command,
         }
-
-    if is_n8n_workflow_mutation_request(text):
-        live_tools = set(get_n8n_planner_tools().keys())
-        if live_tools:
-            return {"n8n_mcp_status", *live_tools}
 
     try:
         from n8n_bridge import classify_n8n_request
@@ -774,9 +783,7 @@ def _planner_tool_scope(
         return None
 
     if is_n8n_workflow_mutation_request(text):
-        live_tools = set(get_n8n_planner_tools().keys())
-        if live_tools:
-            return {"n8n_mcp_status", *live_tools}
+        return {"n8n_mcp_status", *get_n8n_planner_tools().keys()}
 
     try:
         from n8n_bridge import classify_n8n_request
