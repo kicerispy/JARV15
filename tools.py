@@ -2711,7 +2711,7 @@ PRODUCT_RESEARCH_TOOLS = {
 }
 
 
-N8N_TOOLS = {
+N8N_BRIDGE_TOOLS = {
     "n8n_status",
     "n8n_run_workflow",
 }
@@ -3269,7 +3269,7 @@ def _run_tool_raw(
         from product_research import research_product
         return research_product(argument)
 
-    if tool_name in N8N_TOOLS:
+    if tool_name in N8N_BRIDGE_TOOLS:
         from n8n_bridge import n8n_status, run_n8n_workflow
 
         if tool_name == "n8n_status":
@@ -3796,7 +3796,24 @@ def _run_tool_raw(
     elif tool_name == "ollama_models":
         from model_manager import ModelManager
         manager = ModelManager()
-        models = manager.list_local_models()
+        try:
+            models = manager.list_local_models()
+        except Exception as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "message": f"Could not query local Ollama models: {exc}",
+                "configured": {
+                    "chat": manager.chat_model,
+                    "planner": manager.planner_model,
+                    "change_planner": manager.change_planner_model,
+                    "coding": manager.coding_model,
+                    "coding_fallback": manager.coding_fallback_model,
+                },
+                "available": [],
+                "missing_configured": {},
+            }
         names = sorted({
             str(item.get("name") or item.get("model") or "").strip()
             for item in models
