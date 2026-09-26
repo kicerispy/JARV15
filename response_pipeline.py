@@ -30,6 +30,10 @@ def clean_for_speech(text: str) -> str:
     text = re.sub(r"(?<!\*)\*(?!\s)(.*?)(?<!\s)\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"(?<!_)_(?!\s)(.*?)(?<!\s)_", r"\1", text, flags=re.DOTALL)
 
+    # Do not spell the shorthand plural marker "(s)" aloud as
+    # "comma s"; normalize it before the general parenthesis handling.
+    text = re.sub(r"\((?:s|es)\)", "", text, flags=re.IGNORECASE)
+
     previous = None
     while previous != text:
         previous = text
