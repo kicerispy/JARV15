@@ -458,3 +458,147 @@ def test_tool_dispatch_does_not_shadow_n8n_registry(monkeypatch):
     capabilities = tools.run_tool("jarvis_capabilities")
 
     assert capabilities.success is True
+
+
+def test_model_manager_lists_local_ollama_models(monkeypatch):
+    from types import SimpleNamespace
+
+    import model_manager
+    import ollama
+
+    monkeypatch.setattr(
+        ollama,
+        "list",
+        lambda: SimpleNamespace(
+            models=[
+                SimpleNamespace(model="qwen3.5:9b", size=123, details=None),
+                SimpleNamespace(model="qwen3-coder:14b", size=456, details=None),
+            ]
+        ),
+    )
+
+    models = model_manager.ModelManager().list_local_models()
+
+    assert [item["name"] for item in models] == [
+        "qwen3.5:9b",
+        "qwen3-coder:14b",
+    ]
+
+
+def test_doctor_reports_health_state_without_becoming_a_failed_tool(monkeypatch):
+    import jarvis_doctor
+
+    monkeypatch.setattr(
+        jarvis_doctor.runtime_health,
+        "collect_health",
+        lambda: {"overall": "DEGRADED", "ollama": True},
+    )
+    monkeypatch.setattr(
+        jarvis_doctor,
+        "_check_models",
+        lambda: {
+            "reachable": True,
+            "available_count": 1,
+            "available_models": ["qwen3.5:9b"],
+            "missing_configured_models": {},
+        },
+    )
+    monkeypatch.setattr(jarvis_doctor, "healing_status", lambda: {"events": 0})
+    monkeypatch.setattr(
+        jarvis_doctor,
+        "autonomy_memory_status",
+        lambda: {"episodes": 0},
+    )
+    monkeypatch.setattr(jarvis_doctor, "memory_status", lambda: {"records": 0})
+    monkeypatch.setattr(jarvis_doctor, "tool_health_status", lambda limit=12: {"tool_count": 1})
+    monkeypatch.setattr(
+        jarvis_doctor,
+        "_git_snapshot",
+        lambda base: {"available": True, "tracked_worktree_clean": True},
+    )
+
+    result = jarvis_doctor.run_doctor()
+
+    assert result["success"] is True
+    assert result["healthy"] is False
+    assert result["failures"]
+
+
+def test_quickcheck_reports_degraded_state_without_becoming_a_failed_tool(monkeypatch):
+    import qol_tools
+
+    monkeypatch.setattr(
+        qol_tools.runtime_health,
+        "collect_health",
+        lambda: {
+            "overall": "DEGRADED",
+            "ollama": True,
+            "whisper": True,
+            "piper": True,
+        },
+    )
+    monkeypatch.setattr(qol_tools, "memory_status", lambda: {"records": 2})
+    monkeypatch.setattr(qol_tools, "healing_status", lambda: {"events": 1})
+    monkeypatch.setattr(
+        qol_tools,
+        "tool_health_status",
+        lambda limit=8: {
+            "tool_count": 3,
+            "degraded_tools": [{"tool": "example_tool"}],
+        },
+    )
+    monkeypatch.setattr(
+        qol_tools,
+        "resource_status",
+        lambda: {"success": True, "verified": True},
+    )
+
+    result = qol_tools.jarvis_quickcheck()
+
+    assert result["success"] is True
+    assert result["healthy"] is False
+    assert result["overall"] == "DEGRADED"
+    assert result["tool_health"]["degraded"] == ["example_tool"]
+
+
+def test_n8n_mcp_diagnostic_routes_are_deterministic():
+    from commands import build_platform_diagnostics_plan
+
+    assert build_platform_diagnostics_plan("check n8n MCP status") == {
+        "steps": [{"tool": "n8n_mcp_status", "argument": ""}]
+    }
+    assert build_platform_diagnostics_plan("list n8n MCP tools") == {
+        "steps": [{"tool": "n8n_mcp_list_tools", "argument": ""}]
+    }
+
+
+def test_diagnostic_answer_composer_is_concise():
+    from types import SimpleNamespace
+
+    from answer_composer import compose_task_answer
+
+    task = SimpleNamespace(
+        request="check memory status",
+        planner_result=None,
+        evidence=[
+            {
+                "tool": "context_backend_status",
+                "success": True,
+                "verified": True,
+                "data": {
+                    "success": True,
+                    "verified": True,
+                    "selected_backend": "local",
+                    "message": "Context memory backend 'local' is available.",
+                },
+            }
+        ],
+    )
+
+    answer = compose_task_answer(
+        task.request,
+        task,
+        active_context={},
+    )
+
+    assert answer == "Context memory backend 'local' is available."
