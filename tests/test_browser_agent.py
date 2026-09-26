@@ -260,5 +260,64 @@ class BrowserAgentTests(unittest.TestCase):
         )
 
 
+    def test_setup_rejects_unknown_action(self):
+        module = importlib.import_module("browser_agent")
+        result = module.browser_agent_setup('{"action":"destroy"}')
+        self.assertFalse(result["success"])
+        self.assertIn("install", result["message"].lower())
+        self.assertIn("upgrade", result["message"].lower())
+
+    def test_setup_status_delegates_to_status_probe(self):
+        module = importlib.import_module("browser_agent")
+        expected = {
+            "success": True,
+            "verified": True,
+            "available": True,
+        }
+        with patch.object(module, "browser_agent_status", return_value=expected):
+            result = module.browser_agent_setup('{"action":"status"}')
+        self.assertEqual(result, expected)
+
+    def test_setup_uses_isolated_worker_python_and_requirements(self):
+        module = importlib.import_module("browser_agent")
+        fake_root = Path(module.BASE_DIR) / ".browser_agent_venv"
+        fake_python = fake_root / ("Scripts/python.exe" if module.os.name == "nt" else "bin/python")
+        requirements = module.BASE_DIR / "requirements-browser-agent.txt"
+
+        completed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 0,
+                "stdout": "ok",
+                "stderr": "",
+            },
+        )()
+
+        def fake_is_file(path):
+            if path == requirements:
+                return True
+            return False
+
+        with (
+            patch.object(module, "_browser_agent_python", return_value=fake_python),
+            patch.object(Path, "is_file", autospec=True, side_effect=lambda self: fake_is_file(self)),
+            patch.object(module, "browser_agent_status", return_value={"browser_use_installed": True, "success": True}),
+            patch("subprocess.run", return_value=completed) as run_mock,
+        ):
+            result = module.browser_agent_setup('{"action":"install"}')
+
+        self.assertTrue(result["success"])
+        calls = [call.args[0] for call in run_mock.call_args_list]
+        self.assertEqual(
+            calls[0][:4],
+            [module.sys.executable, "-m", "venv", str(fake_root)],
+        )
+        self.assertEqual(
+            calls[2][-3:],
+            ["--disable-pip-version-check", "-r", str(requirements)],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
