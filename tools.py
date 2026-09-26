@@ -24,8 +24,11 @@ from tool_registry import (
     ANIPY_TOOLS,
     BROWSER_TOOLS,
     CONTEXT_MEMORY_TOOLS,
+    GODS_EYE_TOOLS,
+    JARVIS_PLATFORM_TOOLS,
     N8N_TOOLS,
     ROBLOX_MCP_TOOLS,
+    SCREEN_MEMORY_TOOLS,
     SYSTEM_HEALTH_TOOLS,
     UNREAL_MCP_TOOLS,
 )
@@ -3763,11 +3766,6 @@ def _run_tool_raw(
         return code_index.status()
 
     elif tool_name == "jarvis_capabilities":
-        from tool_registry import (
-            GODS_EYE_TOOLS,
-            JARVIS_PLATFORM_TOOLS,
-            SCREEN_MEMORY_TOOLS,
-        )
         inventory = {
             "browser": sorted(BROWSER_TOOLS),
             "n8n": sorted(N8N_TOOLS),
