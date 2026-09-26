@@ -487,12 +487,19 @@ def call_tool(
                 "message": f"Unknown n8n MCP tool: {remote_name}",
             }
 
+        modern = _PROTOCOL_MODE == "modern"
+        protocol_version = (
+            _NEGOTIATED_PROTOCOL_VERSION
+            or (MODERN_MCP_PROTOCOL_VERSION if modern else LEGACY_MCP_PROTOCOL_VERSION)
+        )
         result = _rpc(
             "tools/call",
             {
                 "name": remote_name,
                 "arguments": arguments if isinstance(arguments, dict) else {},
             },
+            protocol_version=protocol_version,
+            modern=modern,
         )
 
         is_error = bool(
