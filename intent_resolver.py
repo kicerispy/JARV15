@@ -325,6 +325,48 @@ def resolve_intent(
         )
     )
 
+    platform_diagnostic_request = (
+        text in {
+            "jarvis doctor",
+            "run jarvis doctor",
+            "jarvis quickcheck",
+            "quick jarvis health check",
+            "quickcheck",
+            "tool health",
+            "check tool health",
+            "which tools are failing",
+            "healing history",
+            "recovery history",
+            "healing hints",
+            "autonomy status",
+            "strategy history",
+            "regression status",
+            "check regressions",
+            "dependency status",
+            "check dependencies",
+            "code index status",
+            "rebuild code index",
+            "jarvis capabilities",
+            "list jarvis capabilities",
+            "ollama models",
+            "list ollama models",
+            "n8n mcp status",
+            "check n8n mcp status",
+            "n8n mcp health",
+            "check n8n mcp health",
+            "list n8n mcp tools",
+            "show n8n mcp tools",
+            "list n8n tools",
+            "show n8n tools",
+            "check memory status",
+            "memory status",
+            "context status",
+            "check context memory",
+            "check context backend",
+            "check memory backend",
+        }
+    )
+
     answer_mode = (
         plan_mode == "answer"
         or explicit_answer
@@ -332,6 +374,7 @@ def resolve_intent(
         or report_request
         or unreal_search_request
         or roblox_mcp_lifecycle_request
+        or platform_diagnostic_request
     )
 
     # Common browser actions are not informational by themselves.
