@@ -32,7 +32,7 @@ def clean_for_speech(text: str) -> str:
 
     # Do not spell the shorthand plural marker "(s)" aloud as
     # "comma s"; normalize it before the general parenthesis handling.
-    text = re.sub(r"\((?:s|es)\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\((s|es)\)", r"\1", text, flags=re.IGNORECASE)
 
     previous = None
     while previous != text:
