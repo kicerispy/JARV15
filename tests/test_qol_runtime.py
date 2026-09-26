@@ -729,6 +729,8 @@ def test_n8n_mcp_negotiates_modern_protocol_and_lists_tools(monkeypatch):
         "search_workflows",
     ]
     assert n8n_mcp._PROTOCOL_MODE == "modern"
-    assert calls[0][0].headers["Mcp-Method"] == "server/discover"
-    assert calls[0][0].headers["MCP-Protocol-Version"] == "2026-07-28"
-    assert calls[1][0].headers["Mcp-Method"] == "tools/list"
+    first_headers = {key.lower(): value for key, value in calls[0][0].header_items()}
+    second_headers = {key.lower(): value for key, value in calls[1][0].header_items()}
+    assert first_headers["mcp-method"] == "server/discover"
+    assert first_headers["mcp-protocol-version"] == "2026-07-28"
+    assert second_headers["mcp-method"] == "tools/list"
