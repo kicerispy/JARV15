@@ -459,6 +459,33 @@ def test_deterministic_route_does_not_hijack_n8n_workflow_mutation():
     assert route is None
 
 
+def test_deterministic_route_does_not_hijack_n8n_workflow_lookup():
+    from commands import deterministic_route
+
+    route = deterministic_route(
+        "Find my Daily Report workflow"
+    )
+
+    assert route is None
+
+
+def test_deterministic_n8n_workflow_lookup_uses_mcp_search():
+    import json
+    from planner import _deterministic_n8n_plan
+
+    plan = _deterministic_n8n_plan(
+        "Find my Daily Report workflow"
+    )
+
+    assert plan is not None
+    assert plan["steps"][0]["tool"] == "n8n_mcp__search_workflows"
+
+    payload = json.loads(plan["steps"][0]["argument"])
+
+    assert payload["query"] == "Daily Report"
+    assert payload["limit"] == 20
+
+
 def test_planner_exposes_live_n8n_mutation_tools(monkeypatch):
     import planner
 
@@ -858,3 +885,53 @@ def test_n8n_mcp_negotiates_modern_protocol_and_lists_tools(monkeypatch):
     assert first_headers["mcp-method"] == "server/discover"
     assert first_headers["mcp-protocol-version"] == "2026-07-28"
     assert second_headers["mcp-method"] == "tools/list"
+
+
+def test_n8n_tool_evidence_stays_structured_under_size_limit():
+    from agent_core import JarvisAgent
+    from answer_composer import _n8n_answer
+    from types import SimpleNamespace
+    import json
+
+    raw_tools = [
+        {
+            "name": f"tool_{index:02d}",
+            "description": "x" * 1000,
+        }
+        for index in range(39)
+    ]
+
+    bounded = JarvisAgent._bounded_structured_evidence(
+        "n8n_mcp_list_tools",
+        {
+            "success": True,
+            "verified": True,
+            "tools": raw_tools,
+        },
+    )
+
+    assert isinstance(bounded, dict)
+    assert bounded["tool_count"] == 39
+    assert len(bounded["tools"]) == 39
+    assert all("name" in row for row in bounded["tools"])
+
+    serialized = json.dumps(bounded, ensure_ascii=False)
+
+    # The stored evidence must remain valid JSON and fit under the
+    # Autonomy Kernel evidence limit.
+    assert len(serialized) < 9000
+
+    answer = _n8n_answer(
+        SimpleNamespace(request="List n8n MCP tools"),
+        [
+            {
+                "tool": "n8n_mcp_list_tools",
+                "success": True,
+                "verified": True,
+                "data": bounded,
+            }
+        ],
+    )
+
+    assert "39 tools" in answer
+    assert "tool_00" in answer

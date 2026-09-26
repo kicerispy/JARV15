@@ -296,6 +296,70 @@ def is_n8n_workflow_mutation_request(text: str) -> bool:
 
     return bool(_N8N_NODE_MUTATION_RE.search(normalized))
 
+
+_N8N_WORKFLOW_LOOKUP_RE = re.compile(
+    r"\b(?:find|search|look\s+for|locate|show|get|inspect|open|check)\b"
+    r".*\bworkflows?\b",
+    re.IGNORECASE,
+)
+
+
+def is_n8n_workflow_request(text: str) -> bool:
+    """Recognize n8n workflow discovery/lookups before generic browser routing."""
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return False
+
+    if is_n8n_workflow_mutation_request(normalized):
+        return True
+
+    if "n8n" in normalized and "workflow" in normalized:
+        return True
+
+    if "workflow" not in normalized and "workflows" not in normalized:
+        return False
+
+    if any(
+        normalized.startswith(prefix)
+        for prefix in (
+            "what is a workflow",
+            "what is workflow",
+            "what are workflows",
+            "explain workflow",
+            "explain workflows",
+            "how does a workflow",
+            "how do workflows",
+        )
+    ):
+        return False
+
+    return bool(_N8N_WORKFLOW_LOOKUP_RE.search(normalized))
+
+
+def _n8n_workflow_lookup_query(text: str) -> str:
+    normalized = " ".join(str(text or "").strip().split())
+
+    query = re.sub(
+        r"^(?:find|search(?:\s+for)?|look\s+for|locate|show|get|inspect|open|check)"
+        r"\s+(?:my|the|a|an)?\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    query = re.sub(
+        r"\s+workflows?\s*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if not query:
+        query = normalized
+
+    return query
+
+
 N8N_MCP_MUTATION_TOOLS = {
     "n8n_mcp__search_workflows",
     "n8n_mcp__get_workflow_details",
@@ -482,6 +546,29 @@ def _deterministic_n8n_plan(
     # Existing-workflow mutations must use live MCP tools.
     if is_n8n_workflow_mutation_request(normalized):
         return None
+
+    # Existing-workflow lookups should go directly to the n8n MCP search tool
+    # instead of falling through to generic browser "find" routing.
+    if is_n8n_workflow_request(normalized):
+        query = _n8n_workflow_lookup_query(user_command)
+        return {
+            "goal": "find existing n8n workflow",
+            "steps": [
+                {
+                    "tool": "n8n_mcp__search_workflows",
+                    "argument": json.dumps(
+                        {
+                            "query": query,
+                            "limit": 20,
+                            "sortBy": "updatedAt:desc",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "resolved_command": user_command,
+            "execution_owner": "n8n",
+        }
 
     # Explicit n8n status requests are observational and never delegated as a
     # workflow execution.
@@ -798,7 +885,7 @@ def _planner_tool_scope(
     if not text:
         return None
 
-    if is_n8n_workflow_mutation_request(text):
+    if is_n8n_workflow_request(text):
         return {"n8n_mcp_status", *get_n8n_planner_tools().keys()}
 
     try:
