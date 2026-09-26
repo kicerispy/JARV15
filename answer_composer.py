@@ -977,6 +977,223 @@ def _project_file_answer(evidence: Sequence[Dict[str, Any]]) -> str:
     return " ".join(lines)
 
 
+def _platform_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
+    """Compose concise answers for deterministic JARVIS platform diagnostics."""
+    item = next(
+        (
+            row
+            for row in reversed(evidence)
+            if str(row.get("tool", "") or "").strip()
+            in {
+                "jarvis_doctor",
+                "jarvis_quickcheck",
+                "tool_health",
+                "autonomy_status",
+                "strategy_history",
+                "regression_status",
+                "code_index_status",
+                "code_index_rebuild",
+                "jarvis_capabilities",
+                "ollama_models",
+            }
+        ),
+        None,
+    )
+    if not item:
+        return ""
+
+    tool = str(item.get("tool", "") or "").strip()
+    data = _mapping_payload(item.get("data"))
+
+    if tool == "jarvis_doctor":
+        report = str(data.get("report") or "").strip()
+        if report:
+            return report
+
+        summary = str(data.get("summary") or "JARVIS doctor completed.").strip()
+        failures = data.get("failures")
+        if isinstance(failures, list) and failures:
+            return _clip(
+                summary + " " + " ".join(str(value) for value in failures[:4]),
+                900,
+            )
+        return summary
+
+    if tool == "jarvis_quickcheck":
+        overall = str(data.get("overall") or "UNKNOWN").upper()
+        health = data.get("health") if isinstance(data.get("health"), dict) else {}
+        parts = [f"JARVIS quick check: {overall}."]
+        parts.append(
+            "Ollama "
+            + ("ready." if health.get("ollama") else "offline.")
+        )
+        parts.append(
+            "Whisper "
+            + ("ready." if health.get("whisper") else "not loaded.")
+        )
+        parts.append(
+            "Piper "
+            + ("ready." if health.get("piper") else "not loaded.")
+        )
+        tool_health = data.get("tool_health")
+        if isinstance(tool_health, dict):
+            degraded = tool_health.get("degraded") or []
+            if degraded:
+                parts.append("Degraded tools: " + ", ".join(map(str, degraded[:6])) + ".")
+        return " ".join(parts)
+
+    if tool == "tool_health":
+        degraded = data.get("degraded_tools") or []
+        count = int(data.get("tool_count") or 0)
+        if not degraded:
+            return f"Tool health is clean. {count} tracked tool(s) have no recorded failures."
+        names = [
+            str(row.get("tool") or "").strip()
+            for row in degraded[:8]
+            if isinstance(row, dict) and str(row.get("tool") or "").strip()
+        ]
+        return f"Tool health has {len(degraded)} degraded tool(s) out of {count} tracked: " + ", ".join(names) + "."
+
+    if tool == "autonomy_status":
+        enabled = bool(data.get("enabled"))
+        status = "enabled" if enabled else "disabled"
+        strategy = data.get("strategy") if isinstance(data.get("strategy"), dict) else {}
+        return _clip(
+            f"Learned autonomy is {status}. "
+            f"Strategy memory contains {strategy.get('count', 0)} stored strategy record(s).",
+            700,
+        )
+
+    if tool == "strategy_history":
+        strategies = data.get("strategies")
+        if isinstance(strategies, list):
+            if not strategies:
+                return "No learned strategy history is available yet."
+            names = []
+            for row in strategies[:6]:
+                if isinstance(row, dict):
+                    name = str(row.get("request") or row.get("signature") or row.get("id") or "").strip()
+                else:
+                    name = str(row).strip()
+                if name and name not in names:
+                    names.append(name)
+            return (
+                f"I found {len(strategies)} learned strategy record(s). "
+                + ("Recent entries: " + "; ".join(names) + "." if names else "")
+            ).strip()
+        return "Learned strategy history is available, but no structured records were returned."
+
+    if tool == "regression_status":
+        regressions = data.get("tool_regressions")
+        count = len(regressions) if isinstance(regressions, list) else 0
+        if count == 0:
+            return "Regression status is clean. No tool regressions are currently detected."
+        names = [
+            str(row.get("tool") or row.get("name") or "").strip()
+            for row in regressions[:8]
+            if isinstance(row, dict)
+        ]
+        names = [name for name in names if name]
+        return f"Regression status detected {count} tool regression(s): " + ", ".join(names) + "."
+
+    if tool in {"code_index_status", "code_index_rebuild"}:
+        message = str(data.get("message") or "").strip()
+        if message:
+            return message
+        if data:
+            return _clip(
+                f"Code index status: {json.dumps(data, ensure_ascii=False, default=str)}",
+                700,
+            )
+        return "The code index operation completed."
+
+    if tool == "jarvis_capabilities":
+        categories = data.get("categories")
+        if isinstance(categories, dict):
+            ordered = [
+                f"{name} {count}"
+                for name, count in categories.items()
+                if str(name).strip()
+            ]
+            return "JARVIS capabilities are loaded: " + ", ".join(ordered) + "."
+        return "JARVIS capability inventory is loaded."
+
+    if tool == "ollama_models":
+        names = data.get("available")
+        if isinstance(names, list):
+            missing = data.get("missing_configured") or {}
+            answer = (
+                f"Ollama has {len(names)} local model(s): "
+                + ", ".join(str(name) for name in names[:12])
+                + "."
+            )
+            if missing:
+                answer += " Missing configured models: " + ", ".join(str(value) for value in missing.values()) + "."
+            return _clip(answer, 900)
+        return "Ollama model inventory is unavailable."
+
+    return ""
+
+
+def _n8n_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
+    """Compose concise n8n bridge/MCP status and discovery answers."""
+    item = next(
+        (
+            row for row in reversed(evidence)
+            if str(row.get("tool", "") or "").strip()
+            in {"n8n_status", "n8n_mcp_status", "n8n_mcp_list_tools"}
+        ),
+        None,
+    )
+    if not item:
+        return ""
+
+    tool = str(item.get("tool") or "").strip()
+    data = _mapping_payload(item.get("data"))
+
+    if tool in {"n8n_status", "n8n_mcp_status"}:
+        message = str(data.get("message") or "").strip()
+        if message:
+            return message
+        if data.get("reachable") is True:
+            return "n8n is reachable."
+        if data.get("enabled") is False:
+            return "n8n MCP is disabled."
+        return "n8n status was checked successfully."
+
+    tools = data.get("tools")
+    if isinstance(tools, list):
+        names = [
+            str(row.get("name") or "").strip()
+            for row in tools[:12]
+            if isinstance(row, dict) and str(row.get("name") or "").strip()
+        ]
+        if not names:
+            return "n8n MCP is reachable, but it did not advertise any tools."
+        return (
+            f"n8n MCP exposes {len(tools)} tool(s). "
+            "Available tools include: " + ", ".join(names) + "."
+        )
+
+    return "n8n MCP tool enumeration completed, but no structured tools were returned."
+
+
+def _context_memory_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
+    """Compose a compact context-memory backend status answer."""
+    for item in reversed(evidence):
+        if str(item.get("tool", "") or "").strip() != "context_backend_status":
+            continue
+        data = _mapping_payload(item.get("data"))
+        message = str(data.get("message") or "").strip()
+        selected = str(data.get("selected_backend") or "").strip()
+        if message:
+            return message
+        if selected:
+            return f"Context memory backend: {selected}."
+        return "Context memory status was checked successfully."
+    return ""
+
+
 def _generic_answer(task: Any, evidence: Sequence[Dict[str, Any]]) -> str:
     lines: List[str] = []
     request = str(getattr(task, "request", "") or "").strip()
@@ -1066,6 +1283,18 @@ def compose_task_answer(
 
     if intent.get("domain") == "roblox":
         return _roblox_answer(task, evidence)
+
+    platform_answer = _platform_answer(task, evidence)
+    if platform_answer:
+        return platform_answer
+
+    n8n_answer = _n8n_answer(task, evidence)
+    if n8n_answer:
+        return n8n_answer
+
+    context_memory_answer = _context_memory_answer(task, evidence)
+    if context_memory_answer:
+        return context_memory_answer
 
     if intent.get("domain") == "browser":
         return _browser_answer(task, evidence)
