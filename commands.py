@@ -1684,6 +1684,103 @@ def build_integration_health_plan(user_request):
     return None
 
 
+def build_agent_browser_setup_plan(user_request):
+    """Build an explicit route for installing/upgrading agent-browser."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact = {
+        "setup agent browser",
+        "setup agent-browser",
+        "install agent browser",
+        "install agent-browser",
+        "upgrade agent browser",
+        "upgrade agent-browser",
+        "update agent browser",
+        "update agent-browser",
+    }
+    if text in exact or (
+        ("agent browser" in text or "agent-browser" in text)
+        and any(token in text for token in ("install", "setup", "upgrade", "update"))
+    ):
+        action = "upgrade" if any(token in text for token in ("upgrade", "update")) else "install"
+        return {
+            "steps": [
+                {
+                    "tool": "agent_browser_setup",
+                    "argument": json.dumps({"action": action}),
+                }
+            ]
+        }
+
+    return None
+
+
+def build_browser_agent_setup_plan(user_request):
+    """Build an explicit route for provisioning the isolated Browser Use worker."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact = {
+        "setup browser use",
+        "setup browser agent",
+        "setup autonomous browser",
+        "install browser use",
+        "install browser agent",
+        "install autonomous browser",
+        "upgrade browser use",
+        "upgrade browser agent",
+        "upgrade autonomous browser",
+    }
+    if text in exact or (
+        ("browser use" in text or "browser agent" in text or "autonomous browser" in text)
+        and any(token in text for token in ("install", "setup", "upgrade"))
+    ):
+        action = "upgrade" if "upgrade" in text else "install"
+        return {
+            "steps": [
+                {
+                    "tool": "browser_agent_setup",
+                    "argument": json.dumps({"action": action}),
+                }
+            ]
+        }
+
+    return None
+
+
+def build_tool_contract_audit_plan(user_request):
+    """Build a deterministic read-only route for planner/registry drift."""
+    original = str(user_request or "").strip()
+    text = clean_text(original)
+    if not text:
+        return None
+
+    exact = {
+        "audit tool registry",
+        "audit the tool registry",
+        "audit tool contracts",
+        "check tool contracts",
+        "check tool registry",
+        "check tool registry drift",
+        "check planner tool drift",
+        "audit planner tools",
+        "audit jarvis tools",
+    }
+    if text in exact or (
+        "tool" in text
+        and "registry" in text
+        and any(token in text for token in ("audit", "check", "drift", "contract"))
+    ):
+        return {"steps": [{"tool": "tool_contract_audit", "argument": ""}]}
+
+    return None
+
+
 def build_gods_eye_plan(user_request):
     """Build deterministic routes for Bilawal Sidhu's God's Eye View."""
     original = str(user_request or "").strip()
@@ -2195,6 +2292,21 @@ def deterministic_route(user_request, active_context=None):
     if health_plan:
         print("JARVIS: Integration health route selected.")
         return health_plan
+
+    browser_agent_setup_plan = build_browser_agent_setup_plan(user_request)
+    if browser_agent_setup_plan:
+        print("JARVIS: Browser Use worker setup route selected.")
+        return browser_agent_setup_plan
+
+    agent_browser_setup_plan = build_agent_browser_setup_plan(user_request)
+    if agent_browser_setup_plan:
+        print("JARVIS: agent-browser setup route selected.")
+        return agent_browser_setup_plan
+
+    tool_contract_plan = build_tool_contract_audit_plan(user_request)
+    if tool_contract_plan:
+        print("JARVIS: Tool contract audit route selected.")
+        return tool_contract_plan
 
     gods_eye_plan = build_gods_eye_plan(user_request)
     if gods_eye_plan:

@@ -152,6 +152,138 @@ def browser_agent_status() -> dict:
     }
 
 
+
+def browser_agent_setup(argument: str = "") -> dict:
+    """Create or upgrade the isolated Browser Use worker environment."""
+    raw = str(argument or "").strip()
+    action = "install"
+    if raw:
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                action = str(payload.get("action") or "install").strip().lower()
+            else:
+                action = str(raw).strip().lower()
+        except (json.JSONDecodeError, TypeError):
+            action = str(raw).strip().lower()
+
+    if action not in {"install", "upgrade", "status"}:
+        return {
+            "success": False,
+            "verified": False,
+            "message": "browser_agent_setup supports install, upgrade, or status.",
+        }
+
+    if action == "status":
+        return browser_agent_status()
+
+    python_exe = _browser_agent_python()
+    requirements = BASE_DIR / "requirements-browser-agent.txt"
+
+    if not requirements.is_file():
+        return {
+            "success": False,
+            "verified": True,
+            "retryable": False,
+            "message": f"Browser Use requirements file not found: {requirements}",
+        }
+
+    try:
+        if not python_exe.is_file():
+            create = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "venv",
+                    str(python_exe.parent.parent),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+            if create.returncode != 0:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "retryable": True,
+                    "message": "Failed to create the isolated Browser Use virtual environment.",
+                    "stdout": (create.stdout or "")[-3000:],
+                    "stderr": (create.stderr or "")[-3000:],
+                }
+
+        pip_upgrade = subprocess.run(
+            [
+                str(python_exe),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pip",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        if pip_upgrade.returncode != 0:
+            return {
+                "success": False,
+                "verified": False,
+                "retryable": True,
+                "message": "Failed to prepare the Browser Use worker pip environment.",
+                "stderr": (pip_upgrade.stderr or "")[-3000:],
+            }
+
+        install = subprocess.run(
+            [
+                str(python_exe),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade" if action == "upgrade" else "--disable-pip-version-check",
+                "-r",
+                str(requirements),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": "Browser Use worker setup timed out.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "verified": False,
+            "retryable": True,
+            "message": f"Browser Use worker setup failed: {exc}",
+        }
+
+    output = ((install.stdout or "") + "\n" + (install.stderr or "")).strip()
+    status = browser_agent_status()
+    success = install.returncode == 0 and status.get("browser_use_installed", False)
+
+    return {
+        "success": success,
+        "verified": bool(success),
+        "action": action,
+        "worker_path": str(python_exe),
+        "install_returncode": install.returncode,
+        "output": output[-6000:],
+        "status": status,
+        "message": (
+            "Browser Use worker environment is ready."
+            if success
+            else "Browser Use worker environment setup failed or remains unavailable."
+        ),
+    }
+
 def browser_agent_run(argument: str = "") -> dict:
     """Run one autonomous browser task in JARVIS's existing Chromium session."""
     task, payload = _parse_argument(argument)
@@ -342,4 +474,4 @@ def browser_agent_run(argument: str = "") -> dict:
         }
 
 
-__all__ = ["browser_agent_run", "browser_agent_status"]
+__all__ = ["browser_agent_run", "browser_agent_status", "browser_agent_setup"]
