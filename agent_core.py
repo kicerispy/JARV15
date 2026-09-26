@@ -1855,6 +1855,49 @@ class JarvisAgent:
                 ),
             )
 
+            if candidate_has_mutation and (
+                is_software_change_request(task.request)
+                or is_software_repair_request(task.request)
+            ):
+                try:
+                    from autonomy_kernel import assess_scope, plan_confidence
+
+                    autonomy_gate = plan_confidence(
+                        task.request,
+                        plan,
+                        evidence=task.evidence,
+                    )
+                    task.active_context["_autonomy_plan_gate"] = {
+                        "allowed": autonomy_gate["allowed"],
+                        "confidence": autonomy_gate["confidence"],
+                        "minimum": autonomy_gate["minimum"],
+                        "scope": autonomy_gate["scope"],
+                    }
+
+                    if not autonomy_gate["allowed"]:
+                        scope_reason = str(
+                            autonomy_gate["scope"].get("reason")
+                            or "mutation scope is not sufficiently verified"
+                        )
+                        plan_issues.append(
+                            "Autonomy Kernel v3 rejected the mutation plan: "
+                            f"{scope_reason} "
+                            f"(confidence={autonomy_gate['confidence']:.2f}, "
+                            f"minimum={autonomy_gate['minimum']:.2f})."
+                        )
+                    elif not autonomy_gate["scope"]["allowed"]:
+                        plan_issues.append(
+                            "Autonomy Kernel v3 detected a mutation scope mismatch: "
+                            + ", ".join(
+                                autonomy_gate["scope"].get("unexpected_targets", [])
+                            )
+                        )
+                except Exception as autonomy_gate_exc:
+                    logger.debug(
+                        "JARVIS AGENT: autonomy mutation gate unavailable: "
+                        f"{autonomy_gate_exc}"
+                    )
+
             if plan_issues:
 
                 logger.warning(
