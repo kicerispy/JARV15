@@ -229,4 +229,4 @@ def test_n8n_health_includes_direct_mcp(monkeypatch):
 
     result = health._n8n_component()
     assert result["status"] == "READY"
-    assert "direct n8n MCP" in result["message"].lower()
+    assert "direct n8n mcp" in result["message"].lower()
