@@ -78,6 +78,7 @@ AVAILABLE_TOOLS: Dict[str, str] = {
     "response_style": "Compact a response into an action-first, state-aware spoken answer.",
     "magnitude_status": "Detect optional Magnitude local inference runtime and report whether it is available; do not switch runtimes automatically.",
     "agent_browser_status": "Check whether the optional Vercel agent-browser CLI is installed and usable.",
+    "agent_browser_setup": "Explicitly install or upgrade the optional Vercel agent-browser CLI. Argument is JSON with action install, upgrade, or status.",
     "agent_browser_action": "Execute one allowlisted agent-browser action as a browser fallback. Argument is JSON with action and target/text.",
     "unreal_mcp": "Call the upstream Unreal_mcp native MCP gateway. Argument is JSON using the upstream unreal gateway operations: search, describe, execute, or configure. Preserve upstream capability names and parameter contracts.",
     "unreal_mcp_status": "Check whether the local Unreal_mcp native MCP endpoint is reachable, authenticated, and exposing the upstream unreal gateway.",
