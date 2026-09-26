@@ -542,9 +542,11 @@ def _integration_health_answer(task: Any, evidence: Sequence[Dict[str, Any]]) ->
             return ", ".join(names[:limit])
 
         lines = [str(data.get("message") or "").strip()]
+
+        # Spoken health checks should identify problems, not recite every
+        # healthy integration. The structured evidence still contains all
+        # component states for UI/debugging.
         for status, label in (
-            ("READY", "Ready"),
-            ("RUNNING", "Running"),
             ("DEGRADED", "Degraded"),
             ("OFFLINE", "Offline"),
             ("DISABLED", "Disabled"),
@@ -557,7 +559,7 @@ def _integration_health_answer(task: Any, evidence: Sequence[Dict[str, Any]]) ->
             if names:
                 lines.append(f"{label}: {names}.")
 
-        return "\n".join(line for line in lines if line)[:1400]
+        return "\n".join(line for line in lines if line)[:900]
 
     return "I completed the JARVIS integration health check, but there was not enough structured evidence to summarize it."
 

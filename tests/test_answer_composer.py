@@ -254,3 +254,40 @@ def test_integration_health_answer_precedes_active_roblox_context():
 
     assert "Integration health is degraded." in answer
     assert "Roblox inspection" not in answer
+
+
+def test_integration_health_answer_keeps_spoken_health_compact():
+    class HealthTask:
+        request = "what tools are working right now"
+        planner_result = {
+            "steps": [{"tool": "integration_health", "argument": ""}]
+        }
+        evidence = [
+            {
+                "tool": "integration_health",
+                "success": True,
+                "verified": True,
+                "data": {
+                    "message": "Integration health is degraded. 8 ready/running, 1 degraded, 2 unavailable.",
+                    "components": [
+                        {"name": "Ollama", "status": "READY"},
+                        {"name": "Browser", "status": "RUNNING"},
+                        {"name": "Roblox MCP", "status": "DEGRADED"},
+                        {"name": "Screenpipe Memory", "status": "OFFLINE"},
+                        {"name": "God's Eye View", "status": "OFFLINE"},
+                    ],
+                },
+            }
+        ]
+
+    answer = compose_task_answer(
+        "what tools are working right now",
+        HealthTask(),
+        active_context={},
+    )
+
+    assert "8 ready/running" in answer
+    assert "Degraded: Roblox MCP." in answer
+    assert "Offline: Screenpipe Memory, God's Eye View." in answer
+    assert "Ready: Ollama" not in answer
+    assert "Running: Browser" not in answer

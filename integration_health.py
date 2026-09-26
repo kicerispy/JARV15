@@ -312,24 +312,63 @@ def _memory_component() -> Dict[str, Any]:
 
 
 def _unreal_component() -> Dict[str, Any]:
+    """Probe the native Unreal MCP bridge, not just whether its port is open."""
     url = str(getattr(config, "UNREAL_MCP_URL", "") or "").strip()
-    project = str(getattr(config, "UNREAL_MCP_PROJECT_PATH", "") or "").strip()
-    token = str(getattr(config, "UNREAL_MCP_TOKEN", "") or "").strip()
-    token_file = str(getattr(config, "UNREAL_MCP_TOKEN_FILE", "") or "").strip()
     if not url:
-        return _component("Unreal MCP", "NOT_CONFIGURED", "Unreal MCP endpoint is not configured.", tool_count=len(UNREAL_MCP_TOOLS))
-    reachable, detail = _probe_socket(url)
-    credentials = bool(token or token_file or project)
-    if reachable and credentials:
-        status = "READY"
-        message = f"Unreal MCP endpoint is reachable ({detail})."
-    elif reachable:
-        status = "DEGRADED"
-        message = f"Unreal MCP endpoint is reachable ({detail}), but project/token configuration is incomplete."
-    else:
-        status = "OFFLINE"
-        message = f"Unreal MCP endpoint is not reachable: {detail}"
-    return _component("Unreal MCP", status, message, tool_count=len(UNREAL_MCP_TOOLS), live=True)
+        return _component(
+            "Unreal MCP",
+            "NOT_CONFIGURED",
+            "Unreal MCP endpoint is not configured.",
+            tool_count=len(UNREAL_MCP_TOOLS),
+        )
+
+    try:
+        from unreal_mcp import unreal_mcp_status
+
+        result = unreal_mcp_status()
+        if result.get("success") is True:
+            connected = bool(result.get("connected"))
+            token_configured = bool(result.get("token_configured"))
+            if connected:
+                return _component(
+                    "Unreal MCP",
+                    "READY",
+                    "Unreal MCP native server and Unreal gateway are connected.",
+                    tool_count=len(UNREAL_MCP_TOOLS),
+                    live=True,
+                )
+            if token_configured:
+                return _component(
+                    "Unreal MCP",
+                    "DEGRADED",
+                    "Unreal MCP is reachable, but the Unreal gateway is not ready.",
+                    tool_count=len(UNREAL_MCP_TOOLS),
+                    live=True,
+                )
+            return _component(
+                "Unreal MCP",
+                "NOT_CONFIGURED",
+                "Unreal MCP is reachable, but its capability token is not configured.",
+                tool_count=len(UNREAL_MCP_TOOLS),
+                live=True,
+            )
+
+        error = str(result.get("error") or result.get("message") or "native bridge unavailable")
+        return _component(
+            "Unreal MCP",
+            "OFFLINE",
+            f"Unreal MCP native bridge is not reachable: {error}",
+            tool_count=len(UNREAL_MCP_TOOLS),
+            live=True,
+        )
+    except Exception as exc:
+        return _component(
+            "Unreal MCP",
+            "ERROR",
+            f"Unreal MCP diagnostic failed: {exc}",
+            tool_count=len(UNREAL_MCP_TOOLS),
+            live=True,
+        )
 
 
 def _roblox_component() -> Dict[str, Any]:

@@ -157,3 +157,34 @@ def test_roblox_health_reads_top_level_plugin_state(monkeypatch):
 
     assert result["status"] == "READY"
     assert "plugin is connected" in result["message"]
+
+
+def test_unreal_health_uses_live_bridge_status(monkeypatch):
+    import integration_health as health
+
+    monkeypatch.setattr(
+        health,
+        "_component",
+        lambda name, status, message, **extra: {
+            "name": name,
+            "status": status,
+            "message": message,
+            **extra,
+        },
+    )
+
+    class FakeResult:
+        def get(self, key, default=None):
+            return {
+                "success": True,
+                "connected": False,
+                "token_configured": True,
+            }.get(key, default)
+
+    import unreal_mcp
+    monkeypatch.setattr(unreal_mcp, "unreal_mcp_status", lambda: FakeResult())
+
+    result = health._unreal_component()
+
+    assert result["status"] == "DEGRADED"
+    assert "not ready" in result["message"].lower()
